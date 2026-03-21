@@ -1,0 +1,27 @@
+# PyTorch — CUDA 12.4 build (required for Python 3.13 wheels)
+# Install: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
+torch>=2.3.0
+torchaudio>=2.3.0
+
+# Audio processing
+librosa==0.10.2
+soundfile==0.12.1
+
+# ML utilities
+numpy>=2.0.0            # 2.x required for Python 3.13 prebuilt wheels
+scikit-learn>=1.5.0
+faiss-cpu>=1.8.0        # faiss-gpu has no Python 3.13 wheel; cpu is fast enough for <100k tracks
+onnxruntime>=1.18.0     # ONNX model verification after export
+
+# Data
+pandas>=2.2.0
+tqdm>=4.66.0
+
+# Visualisation
+matplotlib>=3.9.0
+
+# Experiment tracking
+tensorboard==2.17.0
+
+# Utilities
+python-dotenv==1.0.1

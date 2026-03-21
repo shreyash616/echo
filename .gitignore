@@ -1,0 +1,31 @@
+# App
+/app/node_modules
+
+# Python virtual envs
+/backend/venv
+/ml/venv
+
+# Environment files
+.env
+*.env
+
+# ML data & artifacts (large files)
+/ml/data/fma_small
+/ml/data/fma_medium
+/ml/data/fma_large
+/ml/data/spectrograms
+/ml/data/embeddings.npy
+/ml/checkpoints
+/ml/inference/music_index.faiss
+/ml/inference/music_encoder.onnx
+/ml/inference/track_metadata.json
+/ml/inference/embeddings.npy
+
+# Python cache
+__pycache__
+*.pyc
+*.pyo
+
+# Expo
+/app/.expo
+/app/dist
