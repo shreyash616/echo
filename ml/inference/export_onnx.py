@@ -40,11 +40,20 @@ def main() -> None:
     device = torch.device("cpu")
     ckpt   = torch.load(args.checkpoint, map_location=device)
 
-    model = CnnMusicEncoder(embedding_dim=args.embedding_dim)
+    # Prefer architecture dims stored inside the checkpoint over CLI defaults
+    saved = ckpt.get("args", {})
+    embedding_dim = saved.get("embedding_dim", args.embedding_dim)
+    emotion_dim   = saved.get("emotion_dim", 64)
+
+    model = CnnMusicEncoder(embedding_dim=embedding_dim, emotion_dim=emotion_dim)
     model.load_state_dict(ckpt["model"])
     model.eval()
 
     logger.info("Loaded checkpoint from %s", args.checkpoint)
+    logger.info(
+        "Architecture: embedding_dim=%d  emotion_dim=%d",
+        embedding_dim, emotion_dim,
+    )
     logger.info("Parameters: %s", f"{sum(p.numel() for p in model.parameters()):,}")
 
     # Dummy input: (batch=1, channels=1, mels=128, time=crop_frames)
