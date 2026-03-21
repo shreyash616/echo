@@ -1,17 +1,21 @@
 """
-Echo — CnnMusicEncoder Training Script
+Echo — CnnMusicEncoder Self-Supervised Training Script
 GPU: RTX 3080 (CUDA 12.x, 10 GB VRAM)
 
-Trains a CNN on 128-bin mel spectrograms from FMA audio files using online
-hard-mining TripletLoss with FMA genre labels as class supervision.
+Trains a CNN on 128-bin mel spectrograms from FMA audio files using SimCLR-style
+contrastive learning (NT-Xent loss). No genre labels required — the model
+discovers acoustic similarity on its own.
+
+Each batch sample produces two randomly augmented views of the same track.
+The loss pulls the two views of the same track together and pushes all other
+tracks apart in embedding space.
 
 Usage:
     python ml/training/train.py \
         --spec-dir   ml/data/spectrograms \
-        --tracks-csv ml/data/fma_metadata/tracks.csv \
         --output     ml/checkpoints \
         --epochs     60 \
-        --batch      64
+        --batch      128
 
 After training, export with ml/inference/export_onnx.py, then build the FAISS
 index with ml/inference/build_index.py.
@@ -26,37 +30,37 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, Subset, random_split
+from torch.utils.data import DataLoader, Subset
+
 from torch.utils.tensorboard import SummaryWriter
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from ml.models.music_encoder import CnnMusicEncoder
-from ml.training.dataset import FMASpectrogramDataset
-from ml.training.losses import TripletLoss
+from ml.training.dataset import ContrastiveSpectrogramDataset
+from ml.training.losses import NTXentLoss
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Train CnnMusicEncoder on FMA mel spectrograms")
-    p.add_argument("--spec-dir",   required=True, help="Directory of .npy spectrogram files")
-    p.add_argument("--tracks-csv", required=True, help="FMA tracks.csv (multi-level header)")
-    p.add_argument("--output",     default="ml/checkpoints", help="Checkpoint output directory")
-    p.add_argument("--epochs",     type=int,   default=60)
-    p.add_argument("--batch",      type=int,   default=64,
-                   help="Batch size (RTX 3080: 64-128 for spectrograms)")
-    p.add_argument("--lr",         type=float, default=3e-4)
-    p.add_argument("--margin",     type=float, default=0.2, help="Triplet loss margin")
-    p.add_argument("--embedding-dim", type=int, default=512)
-    p.add_argument("--crop-frames",   type=int, default=256,
-                   help="Spectrogram time-axis crop width (~3 s)")
-    p.add_argument("--warmup-epochs", type=int, default=5)
+    p = argparse.ArgumentParser(description="Self-supervised training of CnnMusicEncoder")
+    p.add_argument("--spec-dir",      required=True, help="Directory of .npy spectrogram files")
+    p.add_argument("--output",        default="ml/checkpoints", help="Checkpoint output directory")
+    p.add_argument("--epochs",        type=int,   default=60)
+    p.add_argument("--batch",         type=int,   default=128,
+                   help="Batch size — larger = more negatives per step (RTX 3080: 128–256)")
+    p.add_argument("--lr",            type=float, default=3e-4)
+    p.add_argument("--temperature",   type=float, default=0.1,
+                   help="NT-Xent temperature (lower = harder negatives, try 0.07–0.2)")
+    p.add_argument("--embedding-dim", type=int,   default=512)
+    p.add_argument("--crop-frames",   type=int,   default=256)
+    p.add_argument("--warmup-epochs", type=int,   default=5)
     p.add_argument("--val-split",     type=float, default=0.1)
-    p.add_argument("--workers",       type=int, default=4)
-    p.add_argument("--resume",        type=str, default=None,
+    p.add_argument("--workers",       type=int,   default=4)
+    p.add_argument("--resume",        type=str,   default=None,
                    help="Resume training from checkpoint path")
     return p.parse_args()
 
@@ -81,26 +85,26 @@ def get_lr_scheduler(
 def train_epoch(
     model: CnnMusicEncoder,
     loader: DataLoader,
-    criterion: TripletLoss,
+    criterion: NTXentLoss,
     optimizer: torch.optim.Optimizer,
     scheduler: torch.optim.lr_scheduler.LambdaLR,
     scaler: torch.amp.GradScaler,
     device: torch.device,
     step: int,
-) -> tuple[float, float, int]:
+) -> tuple[float, int]:
     model.train()
     total_loss = 0.0
-    total_frac = 0.0
 
-    for specs, labels in loader:
-        specs  = specs.to(device, non_blocking=True)   # (B, 1, 128, T)
-        labels = labels.to(device, non_blocking=True)  # (B,)
+    for view_a, view_b in loader:
+        view_a = view_a.to(device, non_blocking=True)   # (B, 1, 128, T)
+        view_b = view_b.to(device, non_blocking=True)
 
         optimizer.zero_grad(set_to_none=True)
 
-        with torch.amp.autocast(device_type=device.type):  # fp16 — halves VRAM, 2× on RTX 3080
-            embeddings = model(specs)                  # (B, embedding_dim)
-            loss, frac_pos = criterion(embeddings, labels)
+        with torch.amp.autocast(device_type=device.type):
+            z_a = model(view_a)   # (B, embedding_dim) — L2-normalised inside model
+            z_b = model(view_b)
+            loss = criterion(z_a, z_b)
 
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
@@ -110,34 +114,30 @@ def train_epoch(
         scheduler.step()
 
         total_loss += loss.item()
-        total_frac += frac_pos.item()
         step += 1
 
-    n = len(loader)
-    return total_loss / n, total_frac / n, step
+    return total_loss / len(loader), step
 
 
 @torch.no_grad()
 def val_epoch(
     model: CnnMusicEncoder,
     loader: DataLoader,
-    criterion: TripletLoss,
+    criterion: NTXentLoss,
     device: torch.device,
-) -> tuple[float, float]:
+) -> float:
     model.eval()
     total_loss = 0.0
-    total_frac = 0.0
 
-    for specs, labels in loader:
-        specs  = specs.to(device, non_blocking=True)
-        labels = labels.to(device, non_blocking=True)
-        embeddings = model(specs)
-        loss, frac_pos = criterion(embeddings, labels)
+    for view_a, view_b in loader:
+        view_a = view_a.to(device, non_blocking=True)
+        view_b = view_b.to(device, non_blocking=True)
+        z_a = model(view_a)
+        z_b = model(view_b)
+        loss = criterion(z_a, z_b)
         total_loss += loss.item()
-        total_frac += frac_pos.item()
 
-    n = len(loader)
-    return total_loss / n, total_frac / n
+    return total_loss / len(loader)
 
 
 def main() -> None:
@@ -155,32 +155,22 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     writer = SummaryWriter(log_dir=str(output_dir / "tb_logs"))
 
-    # Dataset — two instances so train/val have independent augment flags
-    logger.info("Loading dataset — spec_dir=%s  tracks_csv=%s", args.spec_dir, args.tracks_csv)
-    train_dataset = FMASpectrogramDataset(
+    logger.info("Loading dataset — spec_dir=%s", args.spec_dir)
+    full_dataset = ContrastiveSpectrogramDataset(
         spec_dir=args.spec_dir,
-        tracks_csv=args.tracks_csv,
         crop_frames=args.crop_frames,
-        augment=True,
     )
-    val_dataset = FMASpectrogramDataset(
-        spec_dir=args.spec_dir,
-        tracks_csv=args.tracks_csv,
-        crop_frames=args.crop_frames,
-        augment=False,
-    )
-    logger.info("Dataset: %d samples, %d classes", len(train_dataset), train_dataset.num_classes)
 
-    val_size   = int(len(train_dataset) * args.val_split)
-    train_size = len(train_dataset) - val_size
+    val_size   = int(len(full_dataset) * args.val_split)
+    train_size = len(full_dataset) - val_size
 
-    # Shuffle indices with a fixed seed, then slice into train/val Subsets
     generator = torch.Generator().manual_seed(42)
-    perm      = torch.randperm(len(train_dataset), generator=generator).tolist()
-    train_ds  = Subset(train_dataset, perm[:train_size])
-    val_ds    = Subset(val_dataset,   perm[train_size:])
+    perm      = torch.randperm(len(full_dataset), generator=generator).tolist()
+    train_ds  = Subset(full_dataset, perm[:train_size])
+    val_ds    = Subset(full_dataset, perm[train_size:])
 
-    # Save crop_frames so inference knows the expected input width
+    logger.info("Train: %d  Val: %d", len(train_ds), len(val_ds))
+
     meta = {"crop_frames": args.crop_frames, "embedding_dim": args.embedding_dim}
     with open(output_dir / "train_meta.json", "w") as f:
         json.dump(meta, f)
@@ -191,26 +181,26 @@ def main() -> None:
         shuffle=True,
         num_workers=args.workers,
         pin_memory=True,
-        drop_last=True,
+        drop_last=True,   # NT-Xent needs full batches for stable negatives
     )
     val_loader = DataLoader(
         val_ds,
-        batch_size=args.batch * 2,
+        batch_size=args.batch,
         shuffle=False,
         num_workers=args.workers,
         pin_memory=True,
+        drop_last=True,
     )
 
-    # Model
-    model = CnnMusicEncoder(embedding_dim=args.embedding_dim).to(device)
+    model     = CnnMusicEncoder(embedding_dim=args.embedding_dim).to(device)
+    criterion = NTXentLoss(temperature=args.temperature)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    scaler    = torch.amp.GradScaler(device.type)
+
     logger.info(
         "CnnMusicEncoder — %s parameters",
         f"{sum(p.numel() for p in model.parameters()):,}",
     )
-
-    criterion = TripletLoss(margin=args.margin)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
-    scaler    = torch.amp.GradScaler(device.type)
 
     total_steps  = len(train_loader) * args.epochs
     warmup_steps = len(train_loader) * args.warmup_epochs
@@ -233,22 +223,18 @@ def main() -> None:
 
     for epoch in range(start_epoch, args.epochs):
         t0 = time.time()
-        train_loss, train_frac, global_step = train_epoch(
+        train_loss, global_step = train_epoch(
             model, train_loader, criterion, optimizer, scheduler, scaler, device, global_step
         )
-        val_loss, val_frac = val_epoch(model, val_loader, criterion, device)
-        elapsed = time.time() - t0
+        val_loss = val_epoch(model, val_loader, criterion, device)
+        elapsed  = time.time() - t0
 
         logger.info(
-            "Epoch %d/%d | train_loss=%.4f frac=%.2f | val_loss=%.4f frac=%.2f | %.1fs",
-            epoch + 1, args.epochs,
-            train_loss, train_frac,
-            val_loss,   val_frac,
-            elapsed,
+            "Epoch %d/%d | train_loss=%.4f | val_loss=%.4f | %.1fs",
+            epoch + 1, args.epochs, train_loss, val_loss, elapsed,
         )
 
-        writer.add_scalars("loss",          {"train": train_loss, "val": val_loss},   epoch)
-        writer.add_scalars("frac_positive", {"train": train_frac, "val": val_frac},   epoch)
+        writer.add_scalars("loss", {"train": train_loss, "val": val_loss}, epoch)
         writer.add_scalar("lr", scheduler.get_last_lr()[0], epoch)
 
         if val_loss < best_val_loss:
@@ -275,8 +261,8 @@ def main() -> None:
     logger.info(
         "Next steps:\n"
         "  1. python ml/inference/export_onnx.py --checkpoint %s/best_model.pt\n"
-        "  2. python ml/inference/build_index.py --spec-dir %s --tracks-csv %s",
-        args.output, args.spec_dir, args.tracks_csv,
+        "  2. python ml/inference/build_index.py --spec-dir %s",
+        args.output, args.spec_dir,
     )
 
 

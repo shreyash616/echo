@@ -4,18 +4,24 @@ CnnMusicEncoder exported to ONNX.
 
 Pipeline:
   1. Load all .npy spectrogram files from spec_dir (output of preprocess.py).
-  2. Match each file's track_id to FMA tracks.csv for metadata.
+  2. Optionally enrich each track with FMA tracks.csv metadata (title, artist, genre).
+     If --tracks-csv is omitted, minimal stub metadata is used (track_id only).
   3. Batch-encode spectrograms with the ONNX model → 512-d embeddings.
   4. L2-normalise and insert into a FAISS IndexFlatIP (cosine similarity).
   5. Write music_index.faiss + track_metadata.json.
 
-Usage:
+Usage (with FMA metadata):
     python ml/inference/build_index.py \
         --spec-dir    ml/data/spectrograms \
         --tracks-csv  ml/data/fma_metadata/tracks.csv \
         --onnx-model  ml/inference/music_encoder.onnx \
-        --output-dir  ml/inference \
-        --batch        64
+        --output-dir  ml/inference
+
+Usage (self-supervised, no labels):
+    python ml/inference/build_index.py \
+        --spec-dir    ml/data/spectrograms \
+        --onnx-model  ml/inference/music_encoder.onnx \
+        --output-dir  ml/inference
 """
 from __future__ import annotations
 
@@ -60,8 +66,8 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--spec-dir",    required=True,
                    help="Directory of .npy spectrogram files (from preprocess.py)")
-    p.add_argument("--tracks-csv",  required=True,
-                   help="FMA tracks.csv (multi-level header)")
+    p.add_argument("--tracks-csv",  default=None,
+                   help="FMA tracks.csv (multi-level header) — optional, enriches metadata")
     p.add_argument("--onnx-model",  default="ml/inference/music_encoder.onnx",
                    help="Exported ONNX model path")
     p.add_argument("--output-dir",  default="ml/inference")
@@ -73,17 +79,21 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------ #
-    # Load track metadata
+    # Load track metadata (optional)
     # ------------------------------------------------------------------ #
-    logger.info("Loading track metadata from %s", args.tracks_csv)
-    tracks_df = load_tracks(args.tracks_csv)
-    tracks_by_id: dict[int, dict] = {
-        int(row["track_id"]): row.to_dict()
-        for _, row in tracks_df.iterrows()
-    }
+    tracks_by_id: dict[int, dict] = {}
+    if args.tracks_csv:
+        logger.info("Loading track metadata from %s", args.tracks_csv)
+        tracks_df = load_tracks(args.tracks_csv)
+        tracks_by_id = {
+            int(row["track_id"]): row.to_dict()
+            for _, row in tracks_df.iterrows()
+        }
+    else:
+        logger.info("No --tracks-csv provided — using stub metadata")
 
     # ------------------------------------------------------------------ #
-    # Collect spectrogram files that have metadata
+    # Collect spectrogram files
     # ------------------------------------------------------------------ #
     spec_dir = Path(args.spec_dir)
     npy_files: list[tuple[int, Path]] = []
@@ -92,7 +102,8 @@ def main() -> None:
             tid = int(npy_path.stem)
         except ValueError:
             continue
-        if tid in tracks_by_id:
+        # Include all files when no CSV; otherwise only those with metadata
+        if not tracks_by_id or tid in tracks_by_id:
             npy_files.append((tid, npy_path))
 
     logger.info(
@@ -137,13 +148,13 @@ def main() -> None:
     for tid, npy_path in tqdm(npy_files, desc="Encoding"):
         mel   = np.load(npy_path)                          # (128, T)
         patch = centre_crop(mel, args.crop_frames)         # (128, crop_frames)
-        row   = tracks_by_id[tid]
+        row   = tracks_by_id.get(tid, {})
         genre = str(row.get("track_genre_top", ""))
 
         batch_specs.append(patch)
         batch_metas.append({
             "id":          f"fma_{tid}",
-            "title":       str(row.get("track_title", "")),
+            "title":       str(row.get("track_title", f"Track {tid}")),
             "artist":      str(row.get("artist_name", "")),
             "album":       str(row.get("album_title", "")),
             "albumArtUrl": "",
