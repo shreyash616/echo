@@ -60,10 +60,14 @@ No pretrained models. No Spotify features.
 ### Step 1: Download FMA audio + metadata
 
 Download from https://github.com/mdeff/fma:
-- Audio:    `fma_small.zip`  (~8 GB, 8k tracks) or `fma_medium.zip` (~22 GB)
+- Audio:    `fma_large.zip`  (~93 GB, 106k tracks)
 - Metadata: `fma_metadata.zip`
 
-Extract audio to `ml/data/fma_small/` and metadata to `ml/data/fma_metadata/`.
+Extract audio to `ml/data/fma_large/` and metadata to `ml/data/fma_metadata/`.
+
+> **Note:** Both zips extract into a nested subfolder. Final paths will be:
+> - `ml/data/fma_large/fma_large/<folder>/<track>.mp3`
+> - `ml/data/fma_metadata/fma_metadata/tracks.csv`
 
 ### Step 2: Install ML dependencies
 
@@ -81,9 +85,8 @@ pip install -r ml/requirements.txt
 
 ```bash
 python ml/data/preprocess.py \
-    --audio-dir  ml/data/fma_small \
+    --audio-dir  ml/data/fma_large/fma_large \
     --output-dir ml/data/spectrograms \
-    --duration   10.0 \
     --sr         22050
 ```
 
@@ -94,7 +97,7 @@ Output: `ml/data/spectrograms/<track_id>.npy` — one (128, T) float32 array per
 ```bash
 python ml/training/train.py \
     --spec-dir   ml/data/spectrograms \
-    --tracks-csv ml/data/fma_metadata/tracks.csv \
+    --tracks-csv ml/data/fma_metadata/fma_metadata/tracks.csv \
     --output     ml/checkpoints \
     --epochs     60 \
     --batch      64
@@ -121,7 +124,7 @@ The ONNX model accepts a dynamic T axis so any clip length can be passed at infe
 ```bash
 python ml/inference/build_index.py \
     --spec-dir   ml/data/spectrograms \
-    --tracks-csv ml/data/fma_metadata/tracks.csv \
+    --tracks-csv ml/data/fma_metadata/fma_metadata/tracks.csv \
     --onnx-model ml/inference/music_encoder.onnx \
     --output-dir ml/inference \
     --batch      64

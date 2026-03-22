@@ -10,10 +10,9 @@ Runs in parallel across all CPU cores by default.
 
 Usage:
     python ml/data/preprocess.py \
-        --audio-dir  ml/data/fma_large \
+        --audio-dir  ml/data/fma_large/fma_large \
         --output-dir ml/data/spectrograms \
         --workers    8 \
-        --duration   60.0 \
         --sr         22050
 """
 from __future__ import annotations
@@ -22,7 +21,6 @@ import argparse
 import logging
 import multiprocessing as mp
 import os
-import random
 from pathlib import Path
 
 import librosa
@@ -37,30 +35,18 @@ HOP_LENGTH = 512
 N_FFT      = 2048
 
 
-CLIP_DURATION = 60.0   # seconds of audio to extract
-SKIP_START    = 30.0   # skip the first 30s (usually silence/intros)
-MIN_DURATION  = SKIP_START + CLIP_DURATION  # song must be at least 90s
-
-
 def audio_to_mel(
     path: str,
     sr: int = 22_050,
     n_mels: int = N_MELS,
 ) -> np.ndarray | None:
     """
-    Load a random 60-second clip (skipping the first 30s), compute mel spectrogram,
+    Load the full audio track, compute mel spectrogram,
     return (n_mels, T) float32 in [0, 1].
-    Returns None if the file is unreadable or shorter than 90 seconds.
+    Returns None if the file is unreadable or silent.
     """
     try:
-        total_duration = librosa.get_duration(path=path)
-        if total_duration < MIN_DURATION:
-            return None
-
-        max_offset = total_duration - CLIP_DURATION
-        offset = random.uniform(SKIP_START, max_offset)
-
-        y, _ = librosa.load(path, sr=sr, offset=offset, duration=CLIP_DURATION, mono=True)
+        y, _ = librosa.load(path, sr=sr, mono=True)
         mel    = librosa.feature.melspectrogram(
             y=y, sr=sr, n_mels=n_mels, n_fft=N_FFT, hop_length=HOP_LENGTH
         )
@@ -76,12 +62,12 @@ def audio_to_mel(
 # picklable on Windows (spawn start method).
 # ---------------------------------------------------------------------------
 
-def _worker(args: tuple[str, str, int, float, bool]) -> tuple[str, bool]:
+def _worker(args: tuple[str, str, int, bool]) -> tuple[str, bool]:
     """
     Process one audio file.
     Returns (stem, success).
     """
-    src_path, out_path, sr, duration, fp16 = args
+    src_path, out_path, sr, fp16 = args
     if os.path.exists(out_path):
         return src_path, True          # already done — count as success
 
@@ -99,8 +85,6 @@ def main() -> None:
     )
     p.add_argument("--audio-dir",  required=True, help="Directory with .mp3/.wav files")
     p.add_argument("--output-dir", required=True, help="Directory to write .npy files")
-    p.add_argument("--duration",   type=float, default=60.0,
-                   help="Seconds of audio to read per file (default: 60)")
     p.add_argument("--sr",         type=int,   default=22_050)
     p.add_argument("--workers",    type=int,   default=min(8, mp.cpu_count()),
                    help="Parallel worker processes (default: min(8, cpu_count))")
@@ -126,7 +110,7 @@ def main() -> None:
 
     # Build work list — skip files already processed
     work = [
-        (str(path), str(output_dir / (path.stem + ".npy")), args.sr, args.duration, args.fp16)
+        (str(path), str(output_dir / (path.stem + ".npy")), args.sr, args.fp16)
         for path in audio_files
     ]
     already_done = sum(1 for _, out, _, _, _ in work if os.path.exists(out))
