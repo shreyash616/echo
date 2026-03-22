@@ -129,7 +129,7 @@ def main() -> None:
         (str(path), str(output_dir / (path.stem + ".npy")), args.sr, args.duration, args.fp16)
         for path in audio_files
     ]
-    already_done = sum(1 for _, out, _, _ in work if os.path.exists(out))
+    already_done = sum(1 for _, out, _, _, _ in work if os.path.exists(out))
     if already_done:
         logger.info("Skipping %d already-processed files.", already_done)
 
