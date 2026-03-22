@@ -76,12 +76,12 @@ def audio_to_mel(
 # picklable on Windows (spawn start method).
 # ---------------------------------------------------------------------------
 
-def _worker(args: tuple[str, str, int, float]) -> tuple[str, bool]:
+def _worker(args: tuple[str, str, int, float, bool]) -> tuple[str, bool]:
     """
     Process one audio file.
     Returns (stem, success).
     """
-    src_path, out_path, sr, duration = args
+    src_path, out_path, sr, duration, fp16 = args
     if os.path.exists(out_path):
         return src_path, True          # already done — count as success
 
@@ -89,7 +89,7 @@ def _worker(args: tuple[str, str, int, float]) -> tuple[str, bool]:
     if mel is None:
         return src_path, False
 
-    np.save(out_path, mel)
+    np.save(out_path, mel.astype(np.float16) if fp16 else mel)
     return src_path, True
 
 
@@ -104,6 +104,8 @@ def main() -> None:
     p.add_argument("--sr",         type=int,   default=22_050)
     p.add_argument("--workers",    type=int,   default=min(8, mp.cpu_count()),
                    help="Parallel worker processes (default: min(8, cpu_count))")
+    p.add_argument("--fp16",      action="store_true",
+                   help="Save spectrograms as float16 (halves disk usage, ~0.63 MB/track)")
     args = p.parse_args()
 
     audio_dir  = Path(args.audio_dir)
@@ -119,9 +121,12 @@ def main() -> None:
         logger.error("No audio files found. Check --audio-dir.")
         return
 
+    if args.fp16:
+        logger.info("Saving as float16 (~0.63 MB/track)")
+
     # Build work list — skip files already processed
     work = [
-        (str(path), str(output_dir / (path.stem + ".npy")), args.sr, args.duration)
+        (str(path), str(output_dir / (path.stem + ".npy")), args.sr, args.duration, args.fp16)
         for path in audio_files
     ]
     already_done = sum(1 for _, out, _, _ in work if os.path.exists(out))
