@@ -13,6 +13,7 @@
 /ml/data/fma_small
 /ml/data/fma_medium
 /ml/data/fma_large
+/ml/data/fma_metadata
 /ml/data/spectrograms
 /ml/data/embeddings.npy
 /ml/checkpoints
