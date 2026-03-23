@@ -139,14 +139,12 @@ async def get_recommendations(track_id: str) -> list[TrackResult]:
     preview_url = enriched.get("previewUrl")
     if not preview_url:
         logger.warning("recommendations | no preview URL  track_id=%s  title=%r", track_id, enriched.get("title"))
-        raise HTTPException(
-            404,
-            f"No 30s preview available for track {track_id} — cannot encode audio",
-        )
+        return []
 
     preview_bytes = await fetch_preview_audio(preview_url)
     if not preview_bytes:
-        raise HTTPException(503, "Failed to download Spotify preview audio")
+        logger.warning("recommendations | preview download failed  track_id=%s", track_id)
+        return []
 
     embedding = await asyncio.to_thread(recommender.encode_audio, preview_bytes)
     raw_recs  = recommender.recommend(
