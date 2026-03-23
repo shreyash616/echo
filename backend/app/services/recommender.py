@@ -13,6 +13,7 @@ import io
 import json
 import logging
 import random
+import time
 from pathlib import Path
 
 import faiss
@@ -146,8 +147,11 @@ class MusicRecommender:
         Decode raw audio bytes and produce a (1, 512) L2-normalised embedding.
         """
         assert self._sess is not None, "Call load() first"
+        t0 = time.perf_counter()
         mel = _audio_bytes_to_mel(audio_bytes)              # (1, 1, 128, T)
+        t1 = time.perf_counter()
         out = self._sess.run(None, {self._input_name: mel})
+        logger.info("encode | mel=%.3fs  onnx=%.3fs", t1 - t0, time.perf_counter() - t1)
         return out[0].astype(np.float32)                    # (1, 512)
 
     # ------------------------------------------------------------------
@@ -165,7 +169,9 @@ class MusicRecommender:
             logger.warning("Recommender not loaded; returning empty list")
             return []
 
+        t0 = time.perf_counter()
         distances, indices = self._index.search(embedding, k + 5)
+        logger.info("faiss | search=%.3fs  candidates=%d", time.perf_counter() - t0, k + 5)
 
         results: list[dict] = []
         for dist, idx in zip(distances[0], indices[0]):

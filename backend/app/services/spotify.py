@@ -4,11 +4,14 @@ Used to fill in album art, audio features (BPM, key, energy, valence), etc.
 """
 from __future__ import annotations
 
+import logging
 import time
 import httpx
 from cachetools import TTLCache
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 TOKEN_URL = "https://accounts.spotify.com/api/token"
 API_BASE = "https://api.spotify.com/v1"
@@ -53,11 +56,13 @@ async def enrich_track(spotify_id: str) -> dict | None:
     """Fetch track display metadata from Spotify (title, artist, album art, etc.)."""
     cache_key = f"enrich:{spotify_id}"
     if cache_key in _search_cache:
+        logger.info("spotify | enrich cache hit  id=%s", spotify_id)
         return _search_cache[cache_key]  # type: ignore[return-value]
 
     try:
         track_data = await _get(f"/tracks/{spotify_id}")
-    except Exception:
+    except Exception as exc:
+        logger.warning("spotify | enrich failed  id=%s  error=%s", spotify_id, exc)
         return None
 
     images = track_data.get("album", {}).get("images", [])
@@ -96,8 +101,10 @@ async def search_track(query: str, limit: int = 5) -> list[dict]:
     """Search Spotify for tracks matching the query string."""
     cache_key = f"search:{query}:{limit}"
     if cache_key in _search_cache:
+        logger.info("spotify | search cache hit  query=%r", query)
         return _search_cache[cache_key]  # type: ignore[return-value]
 
+    logger.info("spotify | search  query=%r  limit=%d", query, limit)
     data = await _get("/search", params={"q": query, "type": "track", "limit": limit})
     items = data.get("tracks", {}).get("items", [])
 
