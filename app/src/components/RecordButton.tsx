@@ -29,26 +29,23 @@ export const RecordButton: React.FC<Props> = ({ recording, onPress, size = 88 })
       scale.value = withRepeat(
         withSequence(
           withTiming(0.94, { duration: 600, easing: Easing.inOut(Easing.ease) }),
-          withTiming(1, { duration: 600, easing: Easing.inOut(Easing.ease) })
+          withTiming(1, { duration: 600, easing: Easing.inOut(Easing.ease) }),
         ),
         -1,
-        false
+        false,
       );
       ringOpacity.value = withRepeat(
-        withSequence(
-          withTiming(0.6, { duration: 600 }),
-          withTiming(0, { duration: 800 })
-        ),
+        withSequence(withTiming(0.6, { duration: 600 }), withTiming(0, { duration: 800 })),
         -1,
-        false
+        false,
       );
       ringScale.value = withRepeat(
         withSequence(
           withTiming(1, { duration: 0 }),
-          withTiming(1.7, { duration: 1400, easing: Easing.out(Easing.ease) })
+          withTiming(1.7, { duration: 1400, easing: Easing.out(Easing.ease) }),
         ),
         -1,
-        false
+        false,
       );
     } else {
       cancelAnimation(scale);
@@ -58,6 +55,7 @@ export const RecordButton: React.FC<Props> = ({ recording, onPress, size = 88 })
       ringOpacity.value = withTiming(0, { duration: 200 });
       ringScale.value = withTiming(1, { duration: 200 });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recording]);
 
   const buttonStyle = useAnimatedStyle(() => ({
@@ -76,14 +74,10 @@ export const RecordButton: React.FC<Props> = ({ recording, onPress, size = 88 })
 
   return (
     <TouchableOpacity onPress={handlePress} activeOpacity={0.9}>
-      <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={[styles.container, { width: size, height: size }]}>
         {/* Pulse ring */}
         <Animated.View
-          style={[
-            styles.ring,
-            ringStyle,
-            { width: size, height: size, borderRadius: size / 2 },
-          ]}
+          style={[styles.ring, ringStyle, { width: size, height: size, borderRadius: size / 2 }]}
         />
         {/* Button */}
         <Animated.View style={[buttonStyle, { width: size, height: size }]}>
@@ -95,11 +89,7 @@ export const RecordButton: React.FC<Props> = ({ recording, onPress, size = 88 })
           >
             {/* Inner icon: mic bars or stop square */}
             <View style={styles.iconContainer}>
-              {recording ? (
-                <View style={styles.stopIcon} />
-              ) : (
-                <MicIcon size={size * 0.36} />
-              )}
+              {recording ? <View style={styles.stopIcon} /> : <MicIcon size={size * 0.36} />}
             </View>
           </LinearGradient>
         </Animated.View>
@@ -109,15 +99,24 @@ export const RecordButton: React.FC<Props> = ({ recording, onPress, size = 88 })
 };
 
 const MicIcon: React.FC<{ size: number }> = ({ size }) => (
-  <View style={{ alignItems: 'center', gap: 2 }}>
+  <View style={styles.micWrapper}>
     {/* Simple mic shape using views */}
-    <View style={[styles.micBody, { width: size * 0.5, height: size * 0.65, borderRadius: size * 0.25 }]} />
-    <View style={[styles.micBase, { width: size * 0.8, height: size * 0.1, borderRadius: 2 }]} />
+    <View
+      style={[
+        styles.micBody,
+        { width: size * 0.5, height: size * 0.65, borderRadius: size * 0.25 },
+      ]}
+    />
+    <View style={[styles.micBase, { width: size * 0.8, height: size * 0.1 }]} />
     <View style={[styles.micStand, { width: size * 0.12, height: size * 0.15 }]} />
   </View>
 );
 
 const styles = StyleSheet.create({
+  container: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   button: {
     shadowColor: colors.accent,
     shadowOffset: { width: 0, height: 8 },
@@ -144,8 +143,13 @@ const styles = StyleSheet.create({
   micBody: {
     backgroundColor: '#fff',
   },
+  micWrapper: {
+    alignItems: 'center',
+    gap: 2,
+  },
   micBase: {
     backgroundColor: '#fff',
+    borderRadius: 2,
     opacity: 0.9,
   },
   micStand: {

@@ -1,4 +1,4 @@
-import React, { useRef, useState, useImperativeHandle, forwardRef } from 'react';
+import React, { useRef, useState, useImperativeHandle, forwardRef, useMemo } from 'react';
 import {
   View,
   TextInput,
@@ -21,8 +21,10 @@ interface Props {
 
 export type SearchBarHandle = { reset: () => void };
 
-export const SearchBar = forwardRef<SearchBarHandle, Props>(
-function SearchBar({ onSearch, onOpen, onClose, loading }, ref) {
+export const SearchBar = forwardRef<SearchBarHandle, Props>(function SearchBar(
+  { onSearch, onOpen, onClose, loading },
+  ref,
+) {
   const [value, setValue] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const inputRef = useRef<TextInput>(null);
@@ -67,14 +69,18 @@ function SearchBar({ onSearch, onOpen, onClose, loading }, ref) {
     if (value.trim()) onSearch(value.trim());
   };
 
-  const backBtnWidth = openAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 24],
-  });
-  const borderColor = openAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['rgba(255,255,255,0.14)', 'rgba(139,92,246,0.65)'],
-  });
+  const backBtnWidth = useMemo(
+    () => openAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 24] }),
+    [openAnim],
+  );
+  const borderColor = useMemo(
+    () =>
+      openAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: ['rgba(255,255,255,0.14)', 'rgba(139,92,246,0.65)'],
+      }),
+    [openAnim],
+  );
 
   return (
     <Animated.View style={[styles.container, { borderColor }]}>
@@ -87,7 +93,7 @@ function SearchBar({ onSearch, onOpen, onClose, loading }, ref) {
       <View style={[StyleSheet.absoluteFill, styles.glassOverlay]} pointerEvents="none" />
       <View style={styles.topHighlight} pointerEvents="none" />
       {/* Back button — slides in by expanding width */}
-      <Animated.View style={{ width: backBtnWidth, overflow: 'hidden' }}>
+      <Animated.View style={[styles.backBtnSlide, { width: backBtnWidth }]}>
         <TouchableOpacity onPress={close} style={styles.cancelBtn} activeOpacity={0.7}>
           <Text style={styles.cancelArrow}>←</Text>
         </TouchableOpacity>
@@ -112,11 +118,7 @@ function SearchBar({ onSearch, onOpen, onClose, loading }, ref) {
 
       {/* Invisible tap target over the whole pill when closed */}
       {!isOpen && (
-        <TouchableOpacity
-          style={StyleSheet.absoluteFill}
-          onPress={open}
-          activeOpacity={0.7}
-        />
+        <TouchableOpacity style={StyleSheet.absoluteFill} onPress={open} activeOpacity={0.7} />
       )}
 
       {isOpen && value.length > 0 && (
@@ -159,6 +161,9 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: 'rgba(255, 255, 255, 0.18)',
     borderRadius: radius.full,
+  },
+  backBtnSlide: {
+    overflow: 'hidden',
   },
   cancelBtn: {
     width: 22,

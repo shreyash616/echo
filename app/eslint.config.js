@@ -5,6 +5,7 @@ const reactHooksPlugin = require('eslint-plugin-react-hooks');
 const reactNativePlugin = require('eslint-plugin-react-native');
 const prettierPlugin = require('eslint-plugin-prettier');
 const prettierConfig = require('eslint-config-prettier');
+const noInvalidSpacing = require('./eslint-rules/no-invalid-spacing');
 
 /** @type {import('eslint').Linter.FlatConfig[]} */
 module.exports = [
@@ -30,6 +31,7 @@ module.exports = [
       'react-hooks': reactHooksPlugin,
       'react-native': reactNativePlugin,
       prettier: prettierPlugin,
+      local: { rules: { 'no-invalid-spacing': noInvalidSpacing } },
     },
     rules: {
       // Prettier
@@ -45,10 +47,15 @@ module.exports = [
       ...reactPlugin.configs.recommended.rules,
       ...reactPlugin.configs['jsx-runtime'].rules,
       ...reactHooksPlugin.configs.recommended.rules,
+      // RN Animated.Value uses refs during render — this is the standard pattern
+      'react-hooks/refs': 'off',
 
       // React Native
       'react-native/no-unused-styles': 'warn',
       'react-native/no-inline-styles': 'warn',
+
+      // Spacing scale enforcement
+      'local/no-invalid-spacing': 'warn',
 
       // General
       'no-console': ['warn', { allow: ['warn', 'error'] }],

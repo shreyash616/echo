@@ -8,8 +8,10 @@ import type { IdentifyResponse, SearchResponse } from '../services/api';
 export type RootStackParamList = {
   Home: undefined;
   Results: {
-    data: (IdentifyResponse | SearchResponse) & { recommendations: IdentifyResponse['recommendations'] };
-    mode: 'identify' | 'search';
+    data: (IdentifyResponse | SearchResponse) & {
+      recommendations: IdentifyResponse['recommendations'];
+    };
+    mode: 'identify' | 'search' | 'select';
     query?: string;
   };
 };

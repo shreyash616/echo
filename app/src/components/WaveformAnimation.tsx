@@ -33,16 +33,13 @@ const Bar: React.FC<{ index: number; active: boolean; color: string }> = ({
       const duration = 300 + Math.random() * 400;
       height.value = withDelay(
         index * 18,
-        withRepeat(
-          withTiming(targetH, { duration, easing: Easing.inOut(Easing.sin) }),
-          -1,
-          true
-        )
+        withRepeat(withTiming(targetH, { duration, easing: Easing.inOut(Easing.sin) }), -1, true),
       );
     } else {
       cancelAnimation(height);
       height.value = withTiming(BAR_MIN_HEIGHT, { duration: 300 });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
   const style = useAnimatedStyle(() => ({
@@ -52,10 +49,7 @@ const Bar: React.FC<{ index: number; active: boolean; color: string }> = ({
   return <Animated.View style={[styles.bar, style, { backgroundColor: color }]} />;
 };
 
-export const WaveformAnimation: React.FC<Props> = ({
-  active,
-  color = colors.accent,
-}) => {
+export const WaveformAnimation: React.FC<Props> = ({ active, color = colors.accent }) => {
   return (
     <View style={styles.container}>
       {Array.from({ length: BAR_COUNT }).map((_, i) => (
@@ -69,7 +63,7 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    gap: 4,
     height: BAR_MAX_HEIGHT + 8,
   },
   bar: {

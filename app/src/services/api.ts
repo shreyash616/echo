@@ -9,11 +9,11 @@ export interface TrackResult {
   previewUrl?: string;
   durationMs: number;
   matchScore?: number; // 0-1 similarity score from ML model
-  vibes: string[];    // e.g. ["dark", "energetic", "melodic"]
+  vibes: string[]; // e.g. ["dark", "energetic", "melodic"]
   bpm: number;
   key: string;
-  energy: number;   // 0-1
-  valence: number;  // 0-1 (happiness)
+  energy: number; // 0-1
+  valence: number; // 0-1 (happiness)
 }
 
 export interface IdentifyResponse {

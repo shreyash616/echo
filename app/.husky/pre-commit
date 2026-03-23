@@ -1,0 +1,10 @@
+# Ensure node/npx are on PATH (Windows Git Bash)
+export PATH="/c/Program Files/nodejs:$APPDATA/npm:$PATH"
+
+cd app
+
+echo "\n  tsc --noEmit"
+npx tsc --noEmit || exit 1
+
+echo "\n  eslint"
+npx eslint . --max-warnings=0 || exit 1

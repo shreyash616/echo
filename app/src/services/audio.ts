@@ -14,7 +14,7 @@ export async function startRecording(): Promise<void> {
   });
 
   const { recording: rec } = await Audio.Recording.createAsync(
-    Audio.RecordingOptionsPresets.HIGH_QUALITY
+    Audio.RecordingOptionsPresets.HIGH_QUALITY,
   );
   recording = rec;
 }

@@ -22,7 +22,7 @@ import { RecordButton } from '../components/RecordButton';
 import { WaveformAnimation } from '../components/WaveformAnimation';
 import { SearchBar } from '../components/SearchBar';
 import type { SearchBarHandle } from '../components/SearchBar';
-import { colors, spacing, typography } from '../theme';
+import { colors, radius, spacing, typography } from '../theme';
 import { requestPermissions, startRecording, stopRecording } from '../services/audio';
 import { identifyFromAudio, searchByName } from '../services/api';
 import type { RootStackParamList } from '../navigation/AppNavigator';
@@ -34,7 +34,10 @@ export const HomeScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const [phase, setPhase] = useState<Phase>('idle');
   const phaseRef = useRef<Phase>('idle');
-  const setPhaseSync = (p: Phase) => { phaseRef.current = p; setPhase(p); };
+  const setPhaseSync = (p: Phase) => {
+    phaseRef.current = p;
+    setPhase(p);
+  };
   const searchAnim = useRef(new Animated.Value(0)).current;
   const recordModeAnim = useRef(new Animated.Value(0)).current;
   const searchBarRef = useRef<SearchBarHandle>(null);
@@ -45,7 +48,7 @@ export const HomeScreen: React.FC = () => {
       searchAnim.setValue(0);
       recordModeAnim.setValue(0);
       searchBarRef.current?.reset();
-    }, [searchAnim, recordModeAnim])
+    }, [searchAnim, recordModeAnim]),
   );
 
   // Measured distance from top of header to top of search pill (header height + gap)
@@ -131,7 +134,10 @@ export const HomeScreen: React.FC = () => {
           closeRecord();
           setPhaseSync('identifying');
           const uri = await stopRecording();
-          if (!uri) { setPhaseSync('idle'); return; }
+          if (!uri) {
+            setPhaseSync('idle');
+            return;
+          }
           try {
             const result = await identifyFromAudio(uri);
             navigation.navigate('Results', { data: result, mode: 'identify' });
@@ -148,46 +154,61 @@ export const HomeScreen: React.FC = () => {
     }
   }, [phase, navigation, openRecord, closeRecord]);
 
-  const handleSearch = useCallback(async (query: string) => {
-    setPhaseSync('searching');
-    try {
-      const result = await searchByName(query);
-      closeSearch();
-      navigation.navigate('Results', { data: result, mode: 'search', query });
-    } catch (e: unknown) {
-      Alert.alert('Search failed', (e as Error).message);
-    } finally {
-      setPhaseSync('idle');
-    }
-  }, [navigation, closeSearch]);
+  const handleSearch = useCallback(
+    async (query: string) => {
+      setPhaseSync('searching');
+      try {
+        const result = await searchByName(query);
+        closeSearch();
+        navigation.navigate('Results', { data: result, mode: 'search', query });
+      } catch (e: unknown) {
+        Alert.alert('Search failed', (e as Error).message);
+      } finally {
+        setPhaseSync('idle');
+      }
+    },
+    [navigation, closeSearch],
+  );
 
   const isActive = phase === 'recording';
   const isBusy = phase === 'identifying' || phase === 'searching';
 
   const headerAnim = {
     opacity: searchAnim.interpolate({ inputRange: [0, 0.5], outputRange: [1, 0] }),
-    transform: [{ translateY: searchAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -12] }) }],
+    transform: [
+      { translateY: searchAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -12] }) },
+    ],
   };
   // Search pill flows up by the measured offset to anchor at the top
   const searchSlideAnim = {
-    transform: [{ translateY: searchAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -searchOffset] }) }],
+    transform: [
+      {
+        translateY: searchAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -searchOffset] }),
+      },
+    ],
   };
   const dividerSearchAnim = {
     opacity: searchAnim.interpolate({ inputRange: [0, 0.3], outputRange: [1, 0] }),
   };
   const recordAnim = {
     opacity: searchAnim.interpolate({ inputRange: [0, 0.6], outputRange: [1, 0] }),
-    transform: [{ translateY: searchAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 56] }) }],
+    transform: [
+      { translateY: searchAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 56] }) },
+    ],
   };
 
   // Record-mode animations (JS driver — needed for layout props)
   const recordModeHeaderAnim = {
     opacity: recordModeAnim.interpolate({ inputRange: [0, 0.5], outputRange: [1, 0] }),
-    transform: [{ translateY: recordModeAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -12] }) }],
+    transform: [
+      { translateY: recordModeAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -12] }) },
+    ],
   };
   const recordModePillAnim = {
     opacity: recordModeAnim.interpolate({ inputRange: [0, 0.6], outputRange: [1, 0] }),
-    transform: [{ translateY: recordModeAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -48] }) }],
+    transform: [
+      { translateY: recordModeAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -48] }) },
+    ],
   };
   const recordModeDividerAnim = {
     opacity: recordModeAnim.interpolate({ inputRange: [0, 0.4], outputRange: [1, 0] }),
@@ -214,7 +235,7 @@ export const HomeScreen: React.FC = () => {
 
       <SafeAreaView style={styles.safe}>
         <KeyboardAvoidingView
-          style={{ flex: 1 }}
+          style={styles.kav}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
           <ScrollView
@@ -226,7 +247,7 @@ export const HomeScreen: React.FC = () => {
             <Animated.View style={recordModeHeaderAnim}>
               <Animated.View
                 style={[styles.header, headerAnim]}
-                onLayout={(e) => setSearchOffset(e.nativeEvent.layout.height + spacing.xl)}
+                onLayout={e => setSearchOffset(e.nativeEvent.layout.height + spacing.xl)}
               >
                 <Text style={styles.wordmark}>echo</Text>
                 <Text style={styles.tagline}>Discover your sound</Text>
@@ -264,11 +285,13 @@ export const HomeScreen: React.FC = () => {
             </Animated.View>
 
             {/* Record section — fades on search open; slides to top + expands on record mode */}
-            <Animated.View
-              style={recordAnim}
-              onLayout={(e) => setRecordY(e.nativeEvent.layout.y)}
-            >
-              <Animated.View style={[styles.recordSection, { gap: recordSectionGap, transform: [{ translateY: recordSectionTranslate }] }]}>
+            <Animated.View style={recordAnim} onLayout={e => setRecordY(e.nativeEvent.layout.y)}>
+              <Animated.View
+                style={[
+                  styles.recordSection,
+                  { gap: recordSectionGap, transform: [{ translateY: recordSectionTranslate }] },
+                ]}
+              >
                 <WaveformAnimation active={isActive} />
                 <View style={styles.buttonRow}>
                   {isBusy ? (
@@ -284,9 +307,7 @@ export const HomeScreen: React.FC = () => {
                   <View style={[StyleSheet.absoluteFill, styles.phasePillOverlay]} />
                   <Text style={styles.phaseLabel}>{phaseLabel[phase]}</Text>
                 </View>
-                {isActive && (
-                  <Text style={styles.tapToStop}>Tap again to stop</Text>
-                )}
+                {isActive && <Text style={styles.tapToStop}>Tap again to stop</Text>}
               </Animated.View>
             </Animated.View>
           </ScrollView>
@@ -302,6 +323,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
   },
   safe: {
+    flex: 1,
+  },
+  kav: {
     flex: 1,
   },
   ambientGlow: {

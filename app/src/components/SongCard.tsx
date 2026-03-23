@@ -25,15 +25,17 @@ interface Props {
   loading?: boolean;
 }
 
-export const SongCard: React.FC<Props> = ({ track, variant = 'compact', onPress, rank, loading }) => {
+export const SongCard: React.FC<Props> = ({
+  track,
+  variant = 'compact',
+  onPress,
+  rank,
+  loading,
+}) => {
   if (variant === 'hero') {
     return (
       <TouchableOpacity activeOpacity={0.85} onPress={onPress} style={styles.heroWrapper}>
-        <Image
-          source={{ uri: track.albumArtUrl }}
-          style={styles.heroImage}
-          resizeMode="cover"
-        />
+        <Image source={{ uri: track.albumArtUrl }} style={styles.heroImage} resizeMode="cover" />
         <LinearGradient
           colors={['transparent', 'rgba(8,8,8,0.55)', 'rgba(8,8,8,0.9)']}
           style={styles.heroGradient}
@@ -41,7 +43,11 @@ export const SongCard: React.FC<Props> = ({ track, variant = 'compact', onPress,
         <View style={styles.heroContent}>
           {/* Glass panel behind hero content */}
           {Platform.OS === 'ios' ? (
-            <BlurView intensity={12} tint="dark" style={[StyleSheet.absoluteFill, styles.heroGlassPanel]} />
+            <BlurView
+              intensity={12}
+              tint="dark"
+              style={[StyleSheet.absoluteFill, styles.heroGlassPanel]}
+            />
           ) : (
             <View style={[StyleSheet.absoluteFill, styles.heroGlassPanelAndroid]} />
           )}
@@ -52,11 +58,15 @@ export const SongCard: React.FC<Props> = ({ track, variant = 'compact', onPress,
               <Text style={styles.matchText}>{Math.round(track.matchScore * 100)}% match</Text>
             </View>
           )}
-          <Text style={styles.heroTitle} numberOfLines={1}>{track.title}</Text>
-          <Text style={styles.heroArtist} numberOfLines={1}>{track.artist}</Text>
+          <Text style={styles.heroTitle} numberOfLines={1}>
+            {track.title}
+          </Text>
+          <Text style={styles.heroArtist} numberOfLines={1}>
+            {track.artist}
+          </Text>
           {track.vibes.length > 0 && (
             <View style={styles.tagRow}>
-              {track.vibes.slice(0, 3).map((v) => (
+              {track.vibes.slice(0, 3).map(v => (
                 <VibeTag key={v} label={v} />
               ))}
             </View>
@@ -91,17 +101,17 @@ export const SongCard: React.FC<Props> = ({ track, variant = 'compact', onPress,
             <Text style={styles.rankText}>{rank}</Text>
           </View>
         )}
-        <Image
-          source={{ uri: track.albumArtUrl }}
-          style={styles.art}
-          resizeMode="cover"
-        />
+        <Image source={{ uri: track.albumArtUrl }} style={styles.art} resizeMode="cover" />
       </View>
       <View style={styles.info}>
-        <Text style={styles.title} numberOfLines={1}>{track.title}</Text>
-        <Text style={styles.artist} numberOfLines={1}>{track.artist}</Text>
+        <Text style={styles.title} numberOfLines={1}>
+          {track.title}
+        </Text>
+        <Text style={styles.artist} numberOfLines={1}>
+          {track.artist}
+        </Text>
         <View style={styles.tagRow}>
-          {track.vibes.slice(0, 2).map((v) => (
+          {track.vibes.slice(0, 2).map(v => (
             <VibeTag key={v} label={v} />
           ))}
         </View>
@@ -109,11 +119,13 @@ export const SongCard: React.FC<Props> = ({ track, variant = 'compact', onPress,
       <View style={styles.scoreContainer}>
         {loading ? (
           <ActivityIndicator size="small" color={colors.accent} />
-        ) : track.matchScore != null && (
-          <>
-            <Text style={styles.scoreValue}>{Math.round(track.matchScore * 100)}</Text>
-            <Text style={styles.scoreLabel}>%</Text>
-          </>
+        ) : (
+          track.matchScore != null && (
+            <>
+              <Text style={styles.scoreValue}>{Math.round(track.matchScore * 100)}</Text>
+              <Text style={styles.scoreLabel}>%</Text>
+            </>
+          )
         )}
       </View>
     </TouchableOpacity>
@@ -183,8 +195,8 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     backgroundColor: colors.accentSoft,
     borderRadius: radius.full,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
     borderWidth: 1,
     borderColor: colors.accentGlow,
   },
@@ -204,7 +216,7 @@ const styles = StyleSheet.create({
   tagRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
+    gap: spacing.sm - 2,
   },
   statsRow: {
     flexDirection: 'row',
@@ -293,7 +305,7 @@ const styles = StyleSheet.create({
   scoreContainer: {
     alignItems: 'flex-end',
     flexDirection: 'row',
-    gap: 1,
+    gap: 1, // eslint-disable-line local/no-invalid-spacing
   },
   scoreValue: {
     ...typography.headingMd,
