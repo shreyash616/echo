@@ -64,9 +64,9 @@ export const ResultsScreen: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const openInSpotify = useCallback(async (track: TrackResult) => {
-    const appUri = `spotify:track:${track.id}`;
-    const webUrl = `https://open.spotify.com/track/${track.id}`;
+  const openInDeezer = useCallback(async (track: TrackResult) => {
+    const appUri = `deezer://www.deezer.com/track/${track.id}`;
+    const webUrl = `https://www.deezer.com/track/${track.id}`;
     const canOpen = await Linking.canOpenURL(appUri);
     Linking.openURL(canOpen ? appUri : webUrl);
   }, []);
@@ -195,7 +195,7 @@ export const ResultsScreen: React.FC = () => {
                     track={rec}
                     variant="compact"
                     rank={i + 1}
-                    onPress={() => openInSpotify(rec)}
+                    onPress={() => openInDeezer(rec)}
                   />
                 ))}
               </View>
