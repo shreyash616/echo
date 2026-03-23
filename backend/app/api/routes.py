@@ -11,6 +11,7 @@ from app.models.schemas import IdentifyResponse, SearchResponse, TrackResult
 from app.services.audio_recognition import recognizer
 from app.services.spotify import enrich_track, fetch_preview_audio, search_track
 from app.services.recommender import recommender
+from app.services.deezer import fetch_deezer_preview
 
 
 logger = logging.getLogger(__name__)
@@ -138,7 +139,12 @@ async def get_recommendations(track_id: str) -> list[TrackResult]:
 
     preview_url = enriched.get("previewUrl")
     if not preview_url:
-        logger.warning("recommendations | no preview URL  track_id=%s  title=%r", track_id, enriched.get("title"))
+        logger.info("recommendations | no Spotify preview, trying Deezer  track_id=%s", track_id)
+        preview_url = await fetch_deezer_preview(
+            enriched.get("title", ""), enriched.get("artist", "")
+        )
+    if not preview_url:
+        logger.warning("recommendations | no preview on Spotify or Deezer  track_id=%s", track_id)
         return []
 
     preview_bytes = await fetch_preview_audio(preview_url)
