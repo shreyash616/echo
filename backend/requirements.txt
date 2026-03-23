@@ -21,3 +21,4 @@ python-dotenv==1.0.1
 pydantic>=2.10.0             # 2.10+ has Python 3.13 prebuilt wheels
 pydantic-settings>=2.6.0
 cachetools>=5.3.3
+huggingface_hub>=0.23.0      # artifact download from HF Hub at startup

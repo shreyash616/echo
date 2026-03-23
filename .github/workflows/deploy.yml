@@ -1,0 +1,78 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+      - "ml/inference/music_encoder.onnx"
+      - "ml/inference/music_index.faiss"
+      - "ml/inference/track_metadata.json"
+
+jobs:
+  deploy-backend:
+    name: Deploy backend to HF Space
+    runs-on: ubuntu-latest
+    if: |
+      contains(toJson(github.event.commits.*.modified), 'backend/') ||
+      contains(toJson(github.event.commits.*.added), 'backend/')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push backend to HF Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git config --global user.email "ci@echo-app"
+          git config --global user.name "Echo CI"
+
+          git clone "https://shreyash616:${HF_TOKEN}@huggingface.co/spaces/shreyash616/echo-backend" hf_space
+
+          rsync -av --delete \
+            --exclude='.git' \
+            --exclude='venv' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            backend/ hf_space/
+
+          cd hf_space
+          git add -A
+
+          if git diff --staged --quiet; then
+            echo "No backend changes to deploy."
+          else
+            git commit -m "Deploy ${GITHUB_SHA::7} from GitHub Actions"
+            git push
+            echo "Deployed to https://huggingface.co/spaces/shreyash616/echo-backend"
+          fi
+
+  upload-artifacts:
+    name: Upload ML artifacts to HF Hub
+    runs-on: ubuntu-latest
+    if: |
+      contains(toJson(github.event.commits.*.modified), 'ml/inference/') ||
+      contains(toJson(github.event.commits.*.added), 'ml/inference/')
+
+    steps:
+      - name: Checkout (with LFS)
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install huggingface_hub
+        run: pip install huggingface_hub
+
+      - name: Upload artifacts to HF Hub
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python ml/upload_artifacts.py
