@@ -1,4 +1,4 @@
-const BASE_URL = 'http://localhost:8000'; // Change to your backend IP when testing on device
+const BASE_URL = 'https://shreyash616-echo-backend.hf.space';
 
 export interface TrackResult {
   id: string;
