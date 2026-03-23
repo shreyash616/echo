@@ -5,7 +5,7 @@ python-multipart==0.0.9
 
 # Audio recognition (AcoustID — free & open source; requires fpcalc on PATH)
 pyacoustid==1.3.0            # AcoustID API client
-httpx==0.27.0                # Spotify + AcoustID HTTP calls
+httpx==0.27.0                # Deezer + Last.fm + AcoustID HTTP calls
 
 # Audio processing (mel spectrogram for CnnMusicEncoder)
 librosa==0.10.2
