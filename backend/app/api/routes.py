@@ -19,7 +19,7 @@ from app.config import settings
 from app.models.schemas import IdentifyResponse, SearchResponse, TrackResult
 from app.services.audio_recognition import recognizer
 from app.services.deezer import search_track, get_track, fetch_preview_audio
-from app.services.lastfm import get_artist_tags
+from app.services.lastfm import get_artist_tags, get_similar_tracks
 from app.services.recommender import recommender
 
 
@@ -191,6 +191,45 @@ async def _resolve_tracks(raw_recs: list[dict], limit: int, source_lang: str | N
     return found[:limit]
 
 
+async def _lastfm_recommendations(artist: str, title: str, source_lang: str, limit: int) -> list[TrackResult]:
+    """
+    For non-English/Western sources, FMA/FAISS won't have matching tracks.
+    Instead use Last.fm cultural similarity → resolve each result to Deezer.
+    """
+    similar = await get_similar_tracks(artist, title, limit=limit * 3)
+    if not similar:
+        return []
+
+    seen: set[str] = set()
+
+    async def lookup(meta: dict) -> TrackResult | None:
+        key = f"{meta['artist'].lower()}:{meta['title'].lower()}"
+        if key in seen:
+            return None
+        seen.add(key)
+        try:
+            results = await search_track(f"{meta['title']} {meta['artist']}", limit=1)
+            if not results:
+                return None
+            track_meta = results[0]
+            # Verify same language
+            tags = await get_artist_tags(track_meta.get("artist", ""))
+            result_lang = _detect_language_from_genres(tags) or _detect_language(
+                track_meta.get("title", ""), track_meta.get("artist", "")
+            )
+            if result_lang != source_lang:
+                return None
+            return _to_track(track_meta)
+        except Exception as exc:
+            logger.debug("lastfm_recs | lookup failed  meta=%r  err=%s", meta, exc)
+            return None
+
+    results = await asyncio.gather(*[lookup(m) for m in similar])
+    found = [r for r in results if r is not None]
+    logger.info("lastfm_recs | %d/%d resolved  lang=%s", len(found), len(similar), source_lang)
+    return found[:limit]
+
+
 @router.get("/health")
 async def health() -> dict:
     return {"status": "ok", "recommender_loaded": recommender._loaded}
@@ -253,7 +292,17 @@ async def identify(audio: UploadFile = File(...)) -> IdentifyResponse:
     )
     source_track_info = tracks[0] if (parsed and tracks) else {}
     source_lang = await _get_source_lang(source_track_info) if source_track_info else None
-    recommendations = await _resolve_tracks(raw_recs, limit=settings.max_recommendations, source_lang=source_lang)
+
+    if source_lang:
+        # Non-English source: FMA index is Western music, use Last.fm cultural similarity instead
+        recommendations = await _lastfm_recommendations(
+            source_track_info.get("artist", ""),
+            source_track_info.get("title", ""),
+            source_lang,
+            limit=settings.max_recommendations,
+        )
+    else:
+        recommendations = await _resolve_tracks(raw_recs, limit=settings.max_recommendations)
 
     logger.info(
         "identify | done  identified=%s  recs=%d  total=%.3fs",
@@ -311,7 +360,17 @@ async def get_recommendations(track_id: str) -> list[TrackResult]:
         k=settings.max_recommendations * 2,
     )
     source_lang = await _get_source_lang(track)
-    recommendations = await _resolve_tracks(raw_recs, limit=settings.max_recommendations, source_lang=source_lang)
+
+    if source_lang:
+        # Non-English source: use Last.fm cultural similarity instead of FAISS
+        recommendations = await _lastfm_recommendations(
+            track.get("artist", ""),
+            track.get("title", ""),
+            source_lang,
+            limit=settings.max_recommendations,
+        )
+    else:
+        recommendations = await _resolve_tracks(raw_recs, limit=settings.max_recommendations)
 
     logger.info(
         "recommendations | done  title=%r  recs=%d  total=%.3fs",
