@@ -6,6 +6,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { colors, radius, spacing, typography } from '../theme';
@@ -19,9 +20,10 @@ interface Props {
   variant?: 'hero' | 'compact';
   onPress?: () => void;
   rank?: number;
+  loading?: boolean;
 }
 
-export const SongCard: React.FC<Props> = ({ track, variant = 'compact', onPress, rank }) => {
+export const SongCard: React.FC<Props> = ({ track, variant = 'compact', onPress, rank, loading }) => {
   if (variant === 'hero') {
     return (
       <TouchableOpacity activeOpacity={0.85} onPress={onPress} style={styles.heroWrapper}>
@@ -35,24 +37,28 @@ export const SongCard: React.FC<Props> = ({ track, variant = 'compact', onPress,
           style={styles.heroGradient}
         />
         <View style={styles.heroContent}>
-          {track.matchScore !== undefined && (
+          {track.matchScore != null && track.matchScore > 0 && (
             <View style={styles.matchBadge}>
               <Text style={styles.matchText}>{Math.round(track.matchScore * 100)}% match</Text>
             </View>
           )}
           <Text style={styles.heroTitle} numberOfLines={1}>{track.title}</Text>
           <Text style={styles.heroArtist} numberOfLines={1}>{track.artist}</Text>
-          <View style={styles.tagRow}>
-            {track.vibes.slice(0, 3).map((v) => (
-              <VibeTag key={v} label={v} />
-            ))}
-          </View>
-          <View style={styles.statsRow}>
-            <Stat label="BPM" value={String(track.bpm)} />
-            <Stat label="KEY" value={track.key} />
-            <Stat label="ENERGY" value={`${Math.round(track.energy * 100)}%`} />
-            <Stat label="MOOD" value={track.valence > 0.5 ? 'Happy' : 'Dark'} />
-          </View>
+          {track.vibes.length > 0 && (
+            <View style={styles.tagRow}>
+              {track.vibes.slice(0, 3).map((v) => (
+                <VibeTag key={v} label={v} />
+              ))}
+            </View>
+          )}
+          {track.bpm > 0 && (
+            <View style={styles.statsRow}>
+              <Stat label="BPM" value={String(track.bpm)} />
+              {track.key && track.key !== '—' && <Stat label="KEY" value={track.key} />}
+              <Stat label="ENERGY" value={`${Math.round(track.energy * 100)}%`} />
+              <Stat label="MOOD" value={track.valence > 0.5 ? 'Happy' : 'Dark'} />
+            </View>
+          )}
         </View>
       </TouchableOpacity>
     );
@@ -82,7 +88,9 @@ export const SongCard: React.FC<Props> = ({ track, variant = 'compact', onPress,
         </View>
       </View>
       <View style={styles.scoreContainer}>
-        {track.matchScore !== undefined && (
+        {loading ? (
+          <ActivityIndicator size="small" color={colors.accent} />
+        ) : track.matchScore != null && (
           <>
             <Text style={styles.scoreValue}>{Math.round(track.matchScore * 100)}</Text>
             <Text style={styles.scoreLabel}>%</Text>

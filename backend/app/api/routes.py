@@ -18,7 +18,7 @@ except ImportError:
 from app.config import settings
 from app.models.schemas import IdentifyResponse, SearchResponse, TrackResult
 from app.services.audio_recognition import recognizer
-from app.services.spotify import enrich_track, fetch_preview_audio, search_track
+from app.services.spotify import enrich_track, fetch_preview_audio, search_track, get_artist_genres
 from app.services.recommender import recommender
 from app.services.deezer import fetch_deezer_preview
 
@@ -53,6 +53,39 @@ _LANG_SEARCH_HINT: dict[str, str] = {
     "es": "spanish", "fr": "french", "pt": "portuguese", "de": "german",
     "it": "italian", "tr": "turkish", "nl": "dutch", "pl": "polish",
 }
+
+# Maps Spotify genre keyword fragments (lowercase) to language codes.
+# Ordered from most-specific to least-specific so first match wins.
+_GENRE_LANG_RULES: list[tuple[str, str]] = [
+    # South Asian
+    ("punjabi", "pa"), ("bhangra", "pa"),
+    ("hindi", "hi"), ("bollywood", "hi"), ("filmi", "hi"), ("desi pop", "hi"),
+    ("tamil", "ta"), ("telugu", "te"), ("bengali", "bn"), ("kannada", "kn"),
+    ("malayalam", "ml"), ("marathi", "mr"),
+    # East Asian
+    ("k-pop", "ko"), ("k-indie", "ko"), ("k-r&b", "ko"), ("k-rap", "ko"), ("korean", "ko"),
+    ("j-pop", "ja"), ("j-rock", "ja"), ("j-rap", "ja"), ("japanese", "ja"),
+    ("mandopop", "zh-cn"), ("cantopop", "zh-cn"), ("c-pop", "zh-cn"), ("chinese", "zh-cn"),
+    # Middle East / North Africa
+    ("arabic", "ar"), ("khaleeji", "ar"), ("turkish", "tr"),
+    # Other regions
+    ("thai", "th"), ("russian", "ru"),
+    # Latin (broad — check last so "latin trap" etc. don't override more specific)
+    ("reggaeton", "es"), ("latin pop", "es"), ("latin", "es"),
+]
+
+
+def _detect_language_from_genres(genres: list[str]) -> str | None:
+    """
+    Map Spotify artist genre tags to a BCP-47-style language code.
+    Returns None if no genre matches (i.e. treat as English/unknown).
+    """
+    joined = " ".join(genres).lower()
+    for keyword, lang in _GENRE_LANG_RULES:
+        if keyword in joined:
+            logger.debug("detect_genre_lang | keyword=%r  lang=%s  genres=%s", keyword, lang, genres)
+            return lang
+    return None
 
 
 def _detect_language(title: str, artist: str) -> str | None:
@@ -92,12 +125,39 @@ def _detect_language(title: str, artist: str) -> str | None:
     return None  # English or undetectable → no filtering
 
 
+async def _get_source_lang(track_info: dict) -> str | None:
+    """
+    Determine the cultural/language origin of a source track.
+    Tries Spotify artist genres first (most reliable), falls back to
+    Unicode script / langdetect heuristics on the title + artist text.
+    """
+    artist_id = track_info.get("artistId", "")
+    if artist_id:
+        genres = await get_artist_genres(artist_id)
+        lang = _detect_language_from_genres(genres)
+        if lang:
+            logger.info(
+                "source_lang | genres  artist_id=%s  genres=%s  lang=%s",
+                artist_id, genres, lang,
+            )
+            return lang
+
+    # Fallback: text-based detection (works for non-Latin scripts)
+    lang = _detect_language(track_info.get("title", ""), track_info.get("artist", ""))
+    if lang:
+        logger.info("source_lang | text  lang=%s", lang)
+    return lang
+
+
 async def _resolve_to_spotify(raw_recs: list[dict], limit: int, source_lang: str | None = None) -> list[TrackResult]:
     """
     FAISS results come from the FMA dataset — most tracks aren't on Spotify.
     For each result, search Spotify by title + artist and return the real
     Spotify track (with proper ID, album art, and preview URL), preserving
     the ML match score. Runs all lookups concurrently.
+
+    When source_lang is set, a language hint is appended to each search query
+    so Spotify surfaces culturally-matching tracks.
     """
     lang_hint = _LANG_SEARCH_HINT.get(source_lang, source_lang) if source_lang else None
 
@@ -117,21 +177,6 @@ async def _resolve_to_spotify(raw_recs: list[dict], limit: int, source_lang: str
 
     results = await asyncio.gather(*[lookup(r) for r in raw_recs])
     found = [r for r in results if r is not None]
-
-    # Post-filter: keep only tracks that match the source language
-    if source_lang and found:
-        matching = [
-            r for r in found
-            if _detect_language(r.title, r.artist) == source_lang
-        ]
-        # Use language-filtered results if we have enough, otherwise fall back
-        if len(matching) >= min(3, limit):
-            logger.info(
-                "resolve_to_spotify | language filter  lang=%s  before=%d  after=%d",
-                source_lang, len(found), len(matching),
-            )
-            found = matching
-
     logger.info("resolve_to_spotify | %d/%d resolved to Spotify", len(found), len(raw_recs))
     return found[:limit]
 
@@ -196,10 +241,8 @@ async def identify(audio: UploadFile = File(...)) -> IdentifyResponse:
         exclude_id=exclude_id,
         k=settings.max_recommendations * 2,  # oversample — some won't be on Spotify
     )
-    source_lang = _detect_language(
-        identified_track.title if identified_track else "",
-        identified_track.artist if identified_track else "",
-    )
+    source_track_info = tracks[0] if (parsed and tracks) else {}
+    source_lang = await _get_source_lang(source_track_info) if source_track_info else None
     recommendations = await _resolve_to_spotify(raw_recs, limit=settings.max_recommendations, source_lang=source_lang)
 
     logger.info(
@@ -262,7 +305,7 @@ async def get_recommendations(track_id: str) -> list[TrackResult]:
         exclude_id=track_id,
         k=settings.max_recommendations * 2,  # oversample — some won't be on Spotify
     )
-    source_lang = _detect_language(enriched.get("title", ""), enriched.get("artist", ""))
+    source_lang = await _get_source_lang(enriched)
     recommendations = await _resolve_to_spotify(raw_recs, limit=settings.max_recommendations, source_lang=source_lang)
 
     logger.info(

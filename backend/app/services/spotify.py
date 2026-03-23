@@ -68,10 +68,12 @@ async def enrich_track(spotify_id: str) -> dict | None:
     images = track_data.get("album", {}).get("images", [])
     album_art = images[0]["url"] if images else ""
 
+    artists = track_data.get("artists", [])
     result = {
         "id":          spotify_id,
         "title":       track_data.get("name", ""),
-        "artist":      ", ".join(a["name"] for a in track_data.get("artists", [])),
+        "artist":      ", ".join(a["name"] for a in artists),
+        "artistId":    artists[0]["id"] if artists else "",
         "album":       track_data.get("album", {}).get("name", ""),
         "albumArtUrl": album_art,
         "previewUrl":  track_data.get("preview_url"),
@@ -84,6 +86,24 @@ async def enrich_track(spotify_id: str) -> dict | None:
     }
     _search_cache[cache_key] = result
     return result
+
+
+async def get_artist_genres(artist_id: str) -> list[str]:
+    """Fetch genre tags for a Spotify artist. Returns empty list on failure."""
+    if not artist_id:
+        return []
+    cache_key = f"artist_genres:{artist_id}"
+    if cache_key in _search_cache:
+        return _search_cache[cache_key]  # type: ignore[return-value]
+    try:
+        data = await _get(f"/artists/{artist_id}")
+        genres: list[str] = data.get("genres", [])
+        _search_cache[cache_key] = genres
+        logger.debug("spotify | artist genres  id=%s  genres=%s", artist_id, genres)
+        return genres
+    except Exception as exc:
+        logger.debug("spotify | artist genres failed  id=%s  err=%s", artist_id, exc)
+        return []
 
 
 async def fetch_preview_audio(preview_url: str) -> bytes | None:
