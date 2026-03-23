@@ -7,9 +7,7 @@ import {
   Text,
   Animated,
   ActivityIndicator,
-  Platform,
 } from 'react-native';
-import { BlurView } from 'expo-blur';
 import { colors, radius, spacing, typography } from '../theme';
 
 interface Props {
@@ -77,21 +75,13 @@ export const SearchBar = forwardRef<SearchBarHandle, Props>(function SearchBar(
     () =>
       openAnim.interpolate({
         inputRange: [0, 1],
-        outputRange: ['rgba(255,255,255,0.14)', 'rgba(139,92,246,0.65)'],
+        outputRange: [colors.border, colors.borderFocused],
       }),
     [openAnim],
   );
 
   return (
     <Animated.View style={[styles.container, { borderColor }]}>
-      {/* Frosted glass background */}
-      {Platform.OS === 'ios' ? (
-        <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFill} />
-      ) : (
-        <View style={[StyleSheet.absoluteFill, styles.androidGlassBg]} />
-      )}
-      <View style={[StyleSheet.absoluteFill, styles.glassOverlay]} pointerEvents="none" />
-      <View style={styles.topHighlight} pointerEvents="none" />
       {/* Back button — slides in by expanding width */}
       <Animated.View style={[styles.backBtnSlide, { width: backBtnWidth }]}>
         <TouchableOpacity onPress={close} style={styles.cancelBtn} activeOpacity={0.7}>
@@ -138,29 +128,12 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: colors.bgInput,
     borderRadius: radius.full,
     borderWidth: 1,
     paddingHorizontal: spacing.md,
     height: 52,
     gap: spacing.sm,
-    overflow: 'hidden',
-  },
-  androidGlassBg: {
-    backgroundColor: 'rgba(22, 22, 28, 0.92)',
-    borderRadius: radius.full,
-  },
-  glassOverlay: {
-    backgroundColor: 'rgba(255, 255, 255, 0.055)',
-    borderRadius: radius.full,
-  },
-  topHighlight: {
-    position: 'absolute',
-    top: 0,
-    left: 20,
-    right: 20,
-    height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.18)',
-    borderRadius: radius.full,
   },
   backBtnSlide: {
     overflow: 'hidden',
