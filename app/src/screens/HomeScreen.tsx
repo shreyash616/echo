@@ -16,6 +16,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 
 import { RecordButton } from '../components/RecordButton';
 import { WaveformAnimation } from '../components/WaveformAnimation';
@@ -250,7 +251,13 @@ export const HomeScreen: React.FC = () => {
               <Animated.View style={recordModeDividerAnim}>
                 <View style={styles.dividerRow}>
                   <View style={styles.dividerLine} />
-                  <Text style={styles.dividerText}>or</Text>
+                  <View style={styles.dividerPill}>
+                    {Platform.OS === 'ios' && (
+                      <BlurView intensity={22} tint="dark" style={StyleSheet.absoluteFill} />
+                    )}
+                    <View style={[StyleSheet.absoluteFill, styles.dividerPillOverlay]} />
+                    <Text style={styles.dividerText}>or</Text>
+                  </View>
                   <View style={styles.dividerLine} />
                 </View>
               </Animated.View>
@@ -270,7 +277,13 @@ export const HomeScreen: React.FC = () => {
                     <RecordButton recording={isActive} onPress={handleRecord} />
                   )}
                 </View>
-                <Text style={styles.phaseLabel}>{phaseLabel[phase]}</Text>
+                <View style={styles.phasePill}>
+                  {Platform.OS === 'ios' && (
+                    <BlurView intensity={18} tint="dark" style={StyleSheet.absoluteFill} />
+                  )}
+                  <View style={[StyleSheet.absoluteFill, styles.phasePillOverlay]} />
+                  <Text style={styles.phaseLabel}>{phaseLabel[phase]}</Text>
+                </View>
                 {isActive && (
                   <Text style={styles.tapToStop}>Tap again to stop</Text>
                 )}
@@ -326,7 +339,20 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: colors.border,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+  },
+  dividerPill: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
+    backgroundColor: Platform.OS === 'android' ? 'rgba(20,20,26,0.9)' : 'transparent',
+  },
+  dividerPillOverlay: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: radius.full,
   },
   dividerText: {
     ...typography.bodySm,
@@ -341,6 +367,20 @@ const styles = StyleSheet.create({
     height: 88,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  phasePill: {
+    alignSelf: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.09)',
+    overflow: 'hidden',
+    backgroundColor: Platform.OS === 'android' ? 'rgba(20,20,26,0.88)' : 'transparent',
+  },
+  phasePillOverlay: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: radius.full,
   },
   phaseLabel: {
     ...typography.bodyLg,

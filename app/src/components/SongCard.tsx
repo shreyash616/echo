@@ -7,8 +7,10 @@ import {
   TouchableOpacity,
   Dimensions,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { colors, radius, spacing, typography } from '../theme';
 import { VibeTag } from './VibeTag';
 import type { TrackResult } from '../services/api';
@@ -33,10 +35,18 @@ export const SongCard: React.FC<Props> = ({ track, variant = 'compact', onPress,
           resizeMode="cover"
         />
         <LinearGradient
-          colors={['transparent', 'rgba(8,8,8,0.7)', '#080808']}
+          colors={['transparent', 'rgba(8,8,8,0.55)', 'rgba(8,8,8,0.9)']}
           style={styles.heroGradient}
         />
         <View style={styles.heroContent}>
+          {/* Glass panel behind hero content */}
+          {Platform.OS === 'ios' ? (
+            <BlurView intensity={12} tint="dark" style={[StyleSheet.absoluteFill, styles.heroGlassPanel]} />
+          ) : (
+            <View style={[StyleSheet.absoluteFill, styles.heroGlassPanelAndroid]} />
+          )}
+          <View style={[StyleSheet.absoluteFill, styles.heroGlassOverlay]} pointerEvents="none" />
+          <View style={styles.heroGlassTopBorder} pointerEvents="none" />
           {track.matchScore != null && track.matchScore > 0 && (
             <View style={styles.matchBadge}>
               <Text style={styles.matchText}>{Math.round(track.matchScore * 100)}% match</Text>
@@ -66,6 +76,15 @@ export const SongCard: React.FC<Props> = ({ track, variant = 'compact', onPress,
 
   return (
     <TouchableOpacity activeOpacity={0.75} onPress={onPress} style={styles.card}>
+      {/* Glass background */}
+      {Platform.OS === 'ios' ? (
+        <BlurView intensity={18} tint="dark" style={StyleSheet.absoluteFill} />
+      ) : (
+        <View style={[StyleSheet.absoluteFill, styles.androidCardBg]} />
+      )}
+      <View style={[StyleSheet.absoluteFill, styles.cardGlassOverlay]} pointerEvents="none" />
+      <View style={styles.cardTopHighlight} pointerEvents="none" />
+
       <View style={styles.artContainer}>
         {rank !== undefined && (
           <View style={styles.rankBadge}>
@@ -134,6 +153,31 @@ const styles = StyleSheet.create({
     right: 0,
     padding: spacing.lg,
     gap: spacing.sm,
+    overflow: 'hidden',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  heroGlassPanel: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  heroGlassPanelAndroid: {
+    backgroundColor: 'rgba(8,8,8,0.75)',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  heroGlassOverlay: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  heroGlassTopBorder: {
+    position: 'absolute',
+    top: 0,
+    left: 24,
+    right: 24,
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.15)',
   },
   matchBadge: {
     alignSelf: 'flex-start',
@@ -184,12 +228,28 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.bgCard,
     borderRadius: radius.lg,
     padding: spacing.md,
     gap: spacing.md,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
+  },
+  androidCardBg: {
+    backgroundColor: 'rgba(18, 18, 22, 0.94)',
+    borderRadius: radius.lg,
+  },
+  cardGlassOverlay: {
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderRadius: radius.lg,
+  },
+  cardTopHighlight: {
+    position: 'absolute',
+    top: 0,
+    left: 12,
+    right: 12,
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.14)',
   },
   artContainer: {
     position: 'relative',
