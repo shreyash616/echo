@@ -1,3 +1,5 @@
+# Claude Code local settings
+.claude/settings.local.json
 
 # App
 /app/node_modules
