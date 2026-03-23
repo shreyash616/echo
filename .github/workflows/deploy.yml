@@ -52,9 +52,6 @@ jobs:
   upload-artifacts:
     name: Upload ML artifacts to HF Hub
     runs-on: ubuntu-latest
-    if: |
-      contains(toJson(github.event.commits.*.modified), 'ml/inference/') ||
-      contains(toJson(github.event.commits.*.added), 'ml/inference/')
 
     steps:
       - name: Checkout (with LFS)
