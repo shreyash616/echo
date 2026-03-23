@@ -169,6 +169,20 @@ async def _resolve_to_spotify(raw_recs: list[dict], limit: int, source_lang: str
             results = await search_track(query, limit=1)
             if results:
                 spotify_meta = results[0]
+                # Language gate: if source has a known language, verify the
+                # resolved track is also in that language — drop it otherwise.
+                if source_lang:
+                    artist_id = spotify_meta.get("artistId", "")
+                    genres = await get_artist_genres(artist_id) if artist_id else []
+                    result_lang = _detect_language_from_genres(genres) or _detect_language(
+                        spotify_meta.get("title", ""), spotify_meta.get("artist", "")
+                    )
+                    if result_lang != source_lang:
+                        logger.debug(
+                            "resolve_to_spotify | lang mismatch  want=%s  got=%s  track=%r",
+                            source_lang, result_lang, base,
+                        )
+                        return None
                 spotify_meta["matchScore"] = meta.get("matchScore")
                 return _to_track(spotify_meta)
         except Exception as exc:
