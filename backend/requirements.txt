@@ -16,6 +16,9 @@ numpy>=2.0.0                 # 2.x required for Python 3.13 prebuilt wheels
 faiss-cpu>=1.8.0             # swap for faiss-gpu if running on the same GPU host
 onnxruntime>=1.18.0          # runs the exported CnnMusicEncoder ONNX model
 
+# Language detection
+langdetect==1.0.9            # Latin-script language detection (es/fr/pt/etc.)
+
 # Utilities
 python-dotenv==1.0.1
 pydantic>=2.10.0             # 2.10+ has Python 3.13 prebuilt wheels

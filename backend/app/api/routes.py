@@ -3,8 +3,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import unicodedata
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+
+try:
+    from langdetect import detect as _langdetect
+    from langdetect import DetectorFactory
+    DetectorFactory.seed = 0  # make langdetect deterministic
+    _LANGDETECT_AVAILABLE = True
+except ImportError:
+    _LANGDETECT_AVAILABLE = False
 
 from app.config import settings
 from app.models.schemas import IdentifyResponse, SearchResponse, TrackResult
@@ -36,15 +45,66 @@ def _to_track(meta: dict) -> TrackResult:
     )
 
 
-async def _resolve_to_spotify(raw_recs: list[dict], limit: int) -> list[TrackResult]:
+# Maps language codes to human-readable search hints for Spotify queries
+_LANG_SEARCH_HINT: dict[str, str] = {
+    "hi": "hindi", "ar": "arabic", "ko": "korean", "ja": "japanese",
+    "zh-cn": "chinese", "zh-tw": "chinese", "ru": "russian", "th": "thai",
+    "ta": "tamil", "te": "telugu", "bn": "bengali", "pa": "punjabi",
+    "es": "spanish", "fr": "french", "pt": "portuguese", "de": "german",
+    "it": "italian", "tr": "turkish", "nl": "dutch", "pl": "polish",
+}
+
+
+def _detect_language(title: str, artist: str) -> str | None:
+    """
+    Returns a BCP-47-style language code for the track, or None for English.
+    Uses Unicode script detection for non-Latin scripts (reliable) and
+    langdetect for Latin-script languages (Spanish, French, etc.).
+    """
+    text = f"{title} {artist}".strip()
+    if not text:
+        return None
+
+    # Non-Latin scripts — check character by character (highly reliable)
+    _SCRIPT_LANGS = {
+        "DEVANAGARI": "hi", "ARABIC": "ar", "HANGUL": "ko",
+        "HIRAGANA": "ja", "KATAKANA": "ja", "CJK UNIFIED": "zh-cn",
+        "CYRILLIC": "ru", "THAI": "th", "TAMIL": "ta",
+        "TELUGU": "te", "BENGALI": "bn", "GURMUKHI": "pa",
+    }
+    for char in text:
+        if not char.isalpha():
+            continue
+        name = unicodedata.name(char, "")
+        for script, lang in _SCRIPT_LANGS.items():
+            if script in name:
+                logger.debug("detect_language | script=%s  lang=%s", script, lang)
+                return lang
+
+    # Latin script — use langdetect
+    if _LANGDETECT_AVAILABLE:
+        try:
+            lang = _langdetect(text)
+            return lang if lang != "en" else None
+        except Exception:
+            pass
+
+    return None  # English or undetectable → no filtering
+
+
+async def _resolve_to_spotify(raw_recs: list[dict], limit: int, source_lang: str | None = None) -> list[TrackResult]:
     """
     FAISS results come from the FMA dataset — most tracks aren't on Spotify.
     For each result, search Spotify by title + artist and return the real
     Spotify track (with proper ID, album art, and preview URL), preserving
     the ML match score. Runs all lookups concurrently.
     """
+    lang_hint = _LANG_SEARCH_HINT.get(source_lang, source_lang) if source_lang else None
+
     async def lookup(meta: dict) -> TrackResult | None:
-        query = f"{meta.get('title', '')} {meta.get('artist', '')}"
+        base = f"{meta.get('title', '')} {meta.get('artist', '')}"
+        # Add language hint so Spotify surfaces culturally-matching tracks
+        query = f"{base} {lang_hint}" if lang_hint else base
         try:
             results = await search_track(query, limit=1)
             if results:
@@ -57,6 +117,21 @@ async def _resolve_to_spotify(raw_recs: list[dict], limit: int) -> list[TrackRes
 
     results = await asyncio.gather(*[lookup(r) for r in raw_recs])
     found = [r for r in results if r is not None]
+
+    # Post-filter: keep only tracks that match the source language
+    if source_lang and found:
+        matching = [
+            r for r in found
+            if _detect_language(r.title, r.artist) == source_lang
+        ]
+        # Use language-filtered results if we have enough, otherwise fall back
+        if len(matching) >= min(3, limit):
+            logger.info(
+                "resolve_to_spotify | language filter  lang=%s  before=%d  after=%d",
+                source_lang, len(found), len(matching),
+            )
+            found = matching
+
     logger.info("resolve_to_spotify | %d/%d resolved to Spotify", len(found), len(raw_recs))
     return found[:limit]
 
@@ -121,7 +196,11 @@ async def identify(audio: UploadFile = File(...)) -> IdentifyResponse:
         exclude_id=exclude_id,
         k=settings.max_recommendations * 2,  # oversample — some won't be on Spotify
     )
-    recommendations = await _resolve_to_spotify(raw_recs, limit=settings.max_recommendations)
+    source_lang = _detect_language(
+        identified_track.title if identified_track else "",
+        identified_track.artist if identified_track else "",
+    )
+    recommendations = await _resolve_to_spotify(raw_recs, limit=settings.max_recommendations, source_lang=source_lang)
 
     logger.info(
         "identify | done  identified=%s  recs=%d  total=%.3fs",
@@ -183,7 +262,8 @@ async def get_recommendations(track_id: str) -> list[TrackResult]:
         exclude_id=track_id,
         k=settings.max_recommendations * 2,  # oversample — some won't be on Spotify
     )
-    recommendations = await _resolve_to_spotify(raw_recs, limit=settings.max_recommendations)
+    source_lang = _detect_language(enriched.get("title", ""), enriched.get("artist", ""))
+    recommendations = await _resolve_to_spotify(raw_recs, limit=settings.max_recommendations, source_lang=source_lang)
 
     logger.info(
         "recommendations | done  title=%r  recs=%d  total=%.3fs",
