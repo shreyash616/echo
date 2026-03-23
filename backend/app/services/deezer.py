@@ -88,11 +88,22 @@ async def get_track(deezer_id: str) -> dict | None:
     return result
 
 
+_PREVIEW_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Referer": "https://www.deezer.com/",
+    "Origin": "https://www.deezer.com",
+}
+
+
 async def fetch_preview_audio(url: str) -> bytes | None:
     """Download a 30s preview MP3 from any URL. Returns None on failure."""
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(url)
+            resp = await client.get(url, headers=_PREVIEW_HEADERS)
             resp.raise_for_status()
             return resp.content
     except Exception as exc:
