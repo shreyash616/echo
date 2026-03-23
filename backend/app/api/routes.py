@@ -18,9 +18,9 @@ except ImportError:
 from app.config import settings
 from app.models.schemas import IdentifyResponse, SearchResponse, TrackResult
 from app.services.audio_recognition import recognizer
-from app.services.spotify import enrich_track, fetch_preview_audio, search_track, get_artist_genres
+from app.services.deezer import search_track, get_track, fetch_preview_audio
+from app.services.lastfm import get_artist_tags
 from app.services.recommender import recommender
-from app.services.deezer import fetch_deezer_preview
 
 
 logger = logging.getLogger(__name__)
@@ -131,14 +131,14 @@ async def _get_source_lang(track_info: dict) -> str | None:
     Tries Spotify artist genres first (most reliable), falls back to
     Unicode script / langdetect heuristics on the title + artist text.
     """
-    artist_id = track_info.get("artistId", "")
-    if artist_id:
-        genres = await get_artist_genres(artist_id)
-        lang = _detect_language_from_genres(genres)
+    artist_name = track_info.get("artist", "")
+    if artist_name:
+        tags = await get_artist_tags(artist_name)
+        lang = _detect_language_from_genres(tags)
         if lang:
             logger.info(
-                "source_lang | genres  artist_id=%s  genres=%s  lang=%s",
-                artist_id, genres, lang,
+                "source_lang | lastfm  artist=%r  tags=%s  lang=%s",
+                artist_name, tags, lang,
             )
             return lang
 
@@ -149,49 +149,45 @@ async def _get_source_lang(track_info: dict) -> str | None:
     return lang
 
 
-async def _resolve_to_spotify(raw_recs: list[dict], limit: int, source_lang: str | None = None) -> list[TrackResult]:
+async def _resolve_tracks(raw_recs: list[dict], limit: int, source_lang: str | None = None) -> list[TrackResult]:
     """
-    FAISS results come from the FMA dataset — most tracks aren't on Spotify.
-    For each result, search Spotify by title + artist and return the real
-    Spotify track (with proper ID, album art, and preview URL), preserving
-    the ML match score. Runs all lookups concurrently.
+    FAISS results come from the FMA dataset — resolve each one to a real
+    Deezer track (proper ID, album art, preview URL), preserving the ML
+    match score. Runs all lookups concurrently.
 
     When source_lang is set, a language hint is appended to each search query
-    so Spotify surfaces culturally-matching tracks.
+    and each resolved track is verified to be in the same language.
     """
     lang_hint = _LANG_SEARCH_HINT.get(source_lang, source_lang) if source_lang else None
 
     async def lookup(meta: dict) -> TrackResult | None:
         base = f"{meta.get('title', '')} {meta.get('artist', '')}"
-        # Add language hint so Spotify surfaces culturally-matching tracks
         query = f"{base} {lang_hint}" if lang_hint else base
         try:
             results = await search_track(query, limit=1)
             if results:
-                spotify_meta = results[0]
-                # Language gate: if source has a known language, verify the
-                # resolved track is also in that language — drop it otherwise.
+                track_meta = results[0]
+                # Language gate: verify the resolved track matches source language.
                 if source_lang:
-                    artist_id = spotify_meta.get("artistId", "")
-                    genres = await get_artist_genres(artist_id) if artist_id else []
-                    result_lang = _detect_language_from_genres(genres) or _detect_language(
-                        spotify_meta.get("title", ""), spotify_meta.get("artist", "")
+                    tags = await get_artist_tags(track_meta.get("artist", ""))
+                    result_lang = _detect_language_from_genres(tags) or _detect_language(
+                        track_meta.get("title", ""), track_meta.get("artist", "")
                     )
                     if result_lang != source_lang:
                         logger.debug(
-                            "resolve_to_spotify | lang mismatch  want=%s  got=%s  track=%r",
+                            "resolve_tracks | lang mismatch  want=%s  got=%s  track=%r",
                             source_lang, result_lang, base,
                         )
                         return None
-                spotify_meta["matchScore"] = meta.get("matchScore")
-                return _to_track(spotify_meta)
+                track_meta["matchScore"] = meta.get("matchScore")
+                return _to_track(track_meta)
         except Exception as exc:
-            logger.debug("resolve_to_spotify | lookup failed  query=%r  err=%s", query, exc)
+            logger.debug("resolve_tracks | lookup failed  query=%r  err=%s", query, exc)
         return None
 
     results = await asyncio.gather(*[lookup(r) for r in raw_recs])
     found = [r for r in results if r is not None]
-    logger.info("resolve_to_spotify | %d/%d resolved to Spotify", len(found), len(raw_recs))
+    logger.info("resolve_tracks | %d/%d resolved", len(found), len(raw_recs))
     return found[:limit]
 
 
@@ -257,7 +253,7 @@ async def identify(audio: UploadFile = File(...)) -> IdentifyResponse:
     )
     source_track_info = tracks[0] if (parsed and tracks) else {}
     source_lang = await _get_source_lang(source_track_info) if source_track_info else None
-    recommendations = await _resolve_to_spotify(raw_recs, limit=settings.max_recommendations, source_lang=source_lang)
+    recommendations = await _resolve_tracks(raw_recs, limit=settings.max_recommendations, source_lang=source_lang)
 
     logger.info(
         "identify | done  identified=%s  recs=%d  total=%.3fs",
@@ -274,7 +270,7 @@ async def identify(audio: UploadFile = File(...)) -> IdentifyResponse:
 @router.get("/search", response_model=SearchResponse)
 async def search(q: str = Query(..., min_length=1)) -> SearchResponse:
     """
-    Search by song / artist name. Returns Spotify results for the user to pick from.
+    Search by song / artist name. Returns Deezer results for the user to pick from.
     No recommendations yet — user selects a track, then /recommendations is called.
     """
     t0 = time.perf_counter()
@@ -288,24 +284,19 @@ async def search(q: str = Query(..., min_length=1)) -> SearchResponse:
 @router.get("/recommendations/{track_id}", response_model=list[TrackResult])
 async def get_recommendations(track_id: str) -> list[TrackResult]:
     """
-    User selected a track from search — download its Spotify 30s preview,
+    User selected a track from search — download its Deezer 30s preview,
     encode with CnnMusicEncoder, and return similar songs from the FAISS index.
     """
     t0 = time.perf_counter()
     logger.info("recommendations | track_id=%s", track_id)
 
-    enriched = await enrich_track(track_id)
-    if not enriched:
-        raise HTTPException(404, f"Track {track_id} not found on Spotify")
+    track = await get_track(track_id)
+    if not track:
+        raise HTTPException(404, f"Track {track_id} not found on Deezer")
 
-    preview_url = enriched.get("previewUrl")
+    preview_url = track.get("previewUrl")
     if not preview_url:
-        logger.info("recommendations | no Spotify preview, trying Deezer  track_id=%s", track_id)
-        preview_url = await fetch_deezer_preview(
-            enriched.get("title", ""), enriched.get("artist", "")
-        )
-    if not preview_url:
-        logger.warning("recommendations | no preview on Spotify or Deezer  track_id=%s", track_id)
+        logger.warning("recommendations | no preview available  track_id=%s", track_id)
         return []
 
     preview_bytes = await fetch_preview_audio(preview_url)
@@ -317,13 +308,13 @@ async def get_recommendations(track_id: str) -> list[TrackResult]:
     raw_recs = recommender.recommend(
         embedding,
         exclude_id=track_id,
-        k=settings.max_recommendations * 2,  # oversample — some won't be on Spotify
+        k=settings.max_recommendations * 2,
     )
-    source_lang = await _get_source_lang(enriched)
-    recommendations = await _resolve_to_spotify(raw_recs, limit=settings.max_recommendations, source_lang=source_lang)
+    source_lang = await _get_source_lang(track)
+    recommendations = await _resolve_tracks(raw_recs, limit=settings.max_recommendations, source_lang=source_lang)
 
     logger.info(
         "recommendations | done  title=%r  recs=%d  total=%.3fs",
-        enriched.get("title"), len(recommendations), time.perf_counter() - t0,
+        track.get("title"), len(recommendations), time.perf_counter() - t0,
     )
     return recommendations

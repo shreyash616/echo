@@ -7,9 +7,8 @@ class Settings(BaseSettings):
     # AcoustID (audio fingerprinting) — https://acoustid.org/login
     acoustid_api_key: str = ""
 
-    # Spotify API
-    spotify_client_id: str = ""
-    spotify_client_secret: str = ""
+    # Last.fm API — https://www.last.fm/api/account/create (free)
+    lastfm_api_key: str = ""
 
     # ML model paths
     onnx_model_path: str = "../ml/inference/music_encoder.onnx"
