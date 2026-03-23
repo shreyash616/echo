@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 import unicodedata
+import numpy as np
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query
 
@@ -191,18 +192,28 @@ async def _resolve_tracks(raw_recs: list[dict], limit: int, source_lang: str | N
     return found[:limit]
 
 
-async def _lastfm_recommendations(artist: str, title: str, source_lang: str, limit: int) -> list[TrackResult]:
+async def _lastfm_recommendations(
+    artist: str,
+    title: str,
+    source_lang: str,
+    source_embedding: np.ndarray,
+    limit: int,
+) -> list[TrackResult]:
     """
-    For non-English/Western sources, FMA/FAISS won't have matching tracks.
-    Instead use Last.fm cultural similarity → resolve each result to Deezer.
+    For non-English sources, FMA/FAISS has no matching tracks.
+    Strategy:
+      1. Last.fm provides culturally-relevant candidates (same language/culture).
+      2. Our model re-ranks them by acoustic similarity to the source embedding.
+    The ML model stays central — Last.fm just replaces FMA as the candidate pool.
     """
-    similar = await get_similar_tracks(artist, title, limit=limit * 3)
+    similar = await get_similar_tracks(artist, title, limit=limit * 4)
     if not similar:
         return []
 
     seen: set[str] = set()
 
-    async def lookup(meta: dict) -> TrackResult | None:
+    async def resolve(meta: dict) -> dict | None:
+        """Resolve a Last.fm candidate to a Deezer track with its audio embedding."""
         key = f"{meta['artist'].lower()}:{meta['title'].lower()}"
         if key in seen:
             return None
@@ -212,22 +223,53 @@ async def _lastfm_recommendations(artist: str, title: str, source_lang: str, lim
             if not results:
                 return None
             track_meta = results[0]
-            # Verify same language
+            # Language gate
             tags = await get_artist_tags(track_meta.get("artist", ""))
             result_lang = _detect_language_from_genres(tags) or _detect_language(
                 track_meta.get("title", ""), track_meta.get("artist", "")
             )
             if result_lang != source_lang:
                 return None
-            return _to_track(track_meta)
+            # Download preview and encode with our model
+            preview_url = track_meta.get("previewUrl")
+            if not preview_url:
+                return None
+            preview_bytes = await fetch_preview_audio(preview_url)
+            if not preview_bytes:
+                return None
+            embedding = await asyncio.to_thread(recommender.encode_audio, preview_bytes)
+            return {"meta": track_meta, "embedding": embedding}
         except Exception as exc:
-            logger.debug("lastfm_recs | lookup failed  meta=%r  err=%s", meta, exc)
+            logger.debug("lastfm_recs | resolve failed  meta=%r  err=%s", meta, exc)
             return None
 
-    results = await asyncio.gather(*[lookup(m) for m in similar])
-    found = [r for r in results if r is not None]
-    logger.info("lastfm_recs | %d/%d resolved  lang=%s", len(found), len(similar), source_lang)
-    return found[:limit]
+    resolved = await asyncio.gather(*[resolve(m) for m in similar])
+    candidates = [r for r in resolved if r is not None]
+
+    if not candidates:
+        logger.info("lastfm_recs | no candidates after language gate  lang=%s", source_lang)
+        return []
+
+    # Re-rank by cosine similarity to source embedding
+    src = source_embedding / (np.linalg.norm(source_embedding) + 1e-9)
+    for c in candidates:
+        emb = c["embedding"]
+        emb_norm = emb / (np.linalg.norm(emb) + 1e-9)
+        c["score"] = float(np.dot(src, emb_norm))
+
+    candidates.sort(key=lambda c: c["score"], reverse=True)
+
+    results = []
+    for c in candidates[:limit]:
+        track = _to_track(c["meta"])
+        track = track.model_copy(update={"matchScore": round(c["score"], 4)})
+        results.append(track)
+
+    logger.info(
+        "lastfm_recs | %d/%d candidates  top_score=%.3f  lang=%s",
+        len(candidates), len(similar), candidates[0]["score"] if candidates else 0, source_lang,
+    )
+    return results
 
 
 @router.get("/health")
@@ -294,11 +336,13 @@ async def identify(audio: UploadFile = File(...)) -> IdentifyResponse:
     source_lang = await _get_source_lang(source_track_info) if source_track_info else None
 
     if source_lang:
-        # Non-English source: FMA index is Western music, use Last.fm cultural similarity instead
+        # Non-English: Last.fm provides culturally-relevant candidates;
+        # our model re-ranks them by acoustic similarity to the source embedding.
         recommendations = await _lastfm_recommendations(
             source_track_info.get("artist", ""),
             source_track_info.get("title", ""),
             source_lang,
+            source_embedding=embedding,
             limit=settings.max_recommendations,
         )
     else:
@@ -362,11 +406,11 @@ async def get_recommendations(track_id: str) -> list[TrackResult]:
     source_lang = await _get_source_lang(track)
 
     if source_lang:
-        # Non-English source: use Last.fm cultural similarity instead of FAISS
         recommendations = await _lastfm_recommendations(
             track.get("artist", ""),
             track.get("title", ""),
             source_lang,
+            source_embedding=embedding,
             limit=settings.max_recommendations,
         )
     else:
