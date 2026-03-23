@@ -13,6 +13,7 @@ import io
 import json
 import logging
 import random
+import subprocess
 import time
 from pathlib import Path
 
@@ -36,19 +37,49 @@ HOP_LENGTH  = 512
 CROP_FRAMES = 256
 
 
-def _audio_bytes_to_mel(audio_bytes: bytes) -> np.ndarray:
+def _decode_audio(audio_bytes: bytes) -> np.ndarray:
     """
-    Decode audio bytes (any format soundfile/librosa supports) to a
-    (1, 128, CROP_FRAMES) float32 array ready for the ONNX encoder.
+    Decode audio bytes of any format ffmpeg supports → mono float32 at SR.
+
+    soundfile/libsndfile only handles WAV/FLAC/OGG — it cannot decode MP3 or
+    M4A. Rather than writing temp files, we pipe the bytes through ffmpeg and
+    read the resulting WAV back with soundfile.
     """
-    # Try soundfile first (fastest), fall back to librosa for mp3/m4a
+    # Fast path: WAV/FLAC/OGG — soundfile handles these natively
     try:
-        audio_buf = io.BytesIO(audio_bytes)
-        y, sr = sf.read(audio_buf, dtype="float32", always_2d=False)
+        y, sr = sf.read(io.BytesIO(audio_bytes), dtype="float32", always_2d=False)
+        if y.ndim > 1:
+            y = y.mean(axis=1)
         if sr != SR:
             y = librosa.resample(y, orig_sr=sr, target_sr=SR)
+        return y.astype(np.float32)
     except Exception:
-        y, _ = librosa.load(io.BytesIO(audio_bytes), sr=SR, mono=True)
+        pass
+
+    # Slow path: MP3 / M4A / anything else — pipe through ffmpeg → WAV
+    proc = subprocess.run(
+        [
+            "ffmpeg", "-i", "pipe:0",
+            "-f", "wav", "-ar", str(SR), "-ac", "1",
+            "-loglevel", "error",
+            "pipe:1",
+        ],
+        input=audio_bytes,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"ffmpeg decode failed: {proc.stderr.decode()[:300]}")
+
+    y, _ = sf.read(io.BytesIO(proc.stdout), dtype="float32", always_2d=False)
+    return y.astype(np.float32)
+
+
+def _audio_bytes_to_mel(audio_bytes: bytes) -> np.ndarray:
+    """
+    Decode audio bytes to a (1, 1, 128, CROP_FRAMES) float32 mel spectrogram
+    ready for the ONNX encoder.
+    """
+    y = _decode_audio(audio_bytes)
 
     # Skip the first SKIP_START seconds, then take a random DURATION-second clip
     skip_samples = int(SR * SKIP_START)
