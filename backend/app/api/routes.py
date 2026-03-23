@@ -259,8 +259,15 @@ async def _lastfm_recommendations(
 
     candidates.sort(key=lambda c: c["score"], reverse=True)
 
+    seen_ids: set[str] = set()
     results = []
-    for c in candidates[:limit]:
+    for c in candidates:
+        if len(results) >= limit:
+            break
+        tid = c["meta"].get("id", "")
+        if tid in seen_ids:
+            continue
+        seen_ids.add(tid)
         track = _to_track(c["meta"])
         track = track.model_copy(update={"matchScore": round(c["score"], 4)})
         results.append(track)

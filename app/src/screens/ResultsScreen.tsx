@@ -192,7 +192,7 @@ export const ResultsScreen: React.FC = () => {
               <View style={styles.cardList}>
                 {displayRecs.map((rec, i) => (
                   <SongCard
-                    key={rec.id}
+                    key={`${rec.id}-${i}`}
                     track={rec}
                     variant="compact"
                     rank={i + 1}
@@ -209,9 +209,9 @@ export const ResultsScreen: React.FC = () => {
             <View style={styles.section}>
               <Text style={styles.sectionLabel}>OTHER SONGS THAT MATCHED YOUR SEARCH</Text>
               <View style={styles.cardList}>
-                {searchResults.slice(1).map(t => (
+                {searchResults.slice(1).map((t, i) => (
                   <SongCard
-                    key={t.id}
+                    key={`${t.id}-${i}`}
                     track={t}
                     variant="compact"
                     loading={loadingTrackId === t.id}
