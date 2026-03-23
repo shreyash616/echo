@@ -36,6 +36,31 @@ def _to_track(meta: dict) -> TrackResult:
     )
 
 
+async def _resolve_to_spotify(raw_recs: list[dict], limit: int) -> list[TrackResult]:
+    """
+    FAISS results come from the FMA dataset — most tracks aren't on Spotify.
+    For each result, search Spotify by title + artist and return the real
+    Spotify track (with proper ID, album art, and preview URL), preserving
+    the ML match score. Runs all lookups concurrently.
+    """
+    async def lookup(meta: dict) -> TrackResult | None:
+        query = f"{meta.get('title', '')} {meta.get('artist', '')}"
+        try:
+            results = await search_track(query, limit=1)
+            if results:
+                spotify_meta = results[0]
+                spotify_meta["matchScore"] = meta.get("matchScore")
+                return _to_track(spotify_meta)
+        except Exception as exc:
+            logger.debug("resolve_to_spotify | lookup failed  query=%r  err=%s", query, exc)
+        return None
+
+    results = await asyncio.gather(*[lookup(r) for r in raw_recs])
+    found = [r for r in results if r is not None]
+    logger.info("resolve_to_spotify | %d/%d resolved to Spotify", len(found), len(raw_recs))
+    return found[:limit]
+
+
 @router.get("/health")
 async def health() -> dict:
     return {"status": "ok", "recommender_loaded": recommender._loaded}
@@ -88,15 +113,15 @@ async def identify(audio: UploadFile = File(...)) -> IdentifyResponse:
     else:
         logger.info("identify | AcoustID no match, using raw mic audio for embedding")
 
-    # 3. Encode → FAISS → recommendations
+    # 3. Encode → FAISS → resolve FMA results to Spotify tracks
     embedding = await asyncio.to_thread(recommender.encode_audio, audio_for_embedding)
     exclude_id = identified_track.id if identified_track else None
     raw_recs = recommender.recommend(
         embedding,
         exclude_id=exclude_id,
-        k=settings.max_recommendations,
+        k=settings.max_recommendations * 2,  # oversample — some won't be on Spotify
     )
-    recommendations = [_to_track(r) for r in raw_recs]
+    recommendations = await _resolve_to_spotify(raw_recs, limit=settings.max_recommendations)
 
     logger.info(
         "identify | done  identified=%s  recs=%d  total=%.3fs",
@@ -153,13 +178,15 @@ async def get_recommendations(track_id: str) -> list[TrackResult]:
         return []
 
     embedding = await asyncio.to_thread(recommender.encode_audio, preview_bytes)
-    raw_recs  = recommender.recommend(
+    raw_recs = recommender.recommend(
         embedding,
         exclude_id=track_id,
-        k=settings.max_recommendations,
+        k=settings.max_recommendations * 2,  # oversample — some won't be on Spotify
     )
+    recommendations = await _resolve_to_spotify(raw_recs, limit=settings.max_recommendations)
+
     logger.info(
         "recommendations | done  title=%r  recs=%d  total=%.3fs",
-        enriched.get("title"), len(raw_recs), time.perf_counter() - t0,
+        enriched.get("title"), len(recommendations), time.perf_counter() - t0,
     )
-    return [_to_track(r) for r in raw_recs]
+    return recommendations
