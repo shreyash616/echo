@@ -63,12 +63,82 @@ async def search_track(query: str, limit: int = 5) -> list[dict]:
         return []
 
     results = [_normalize(t) for t in data.get("data", [])]
+    if not results:
+        # Fall back to iTunes search if Deezer returned empty results in this region
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                it_resp = await client.get(
+                    "https://itunes.apple.com/search",
+                    params={"term": query, "entity": "song", "limit": limit},
+                )
+                if it_resp.status_code == 200:
+                    for item in it_resp.json().get("results", []):
+                        art = (item.get("artworkUrl100") or "").replace("100x100bb", "600x600bb")
+                        results.append({
+                            "id":          f"it_{item['trackId']}",
+                            "title":       item.get("trackName", ""),
+                            "artist":      item.get("artistName", ""),
+                            "artistId":    str(item.get("artistId", "")),
+                            "album":       item.get("collectionName", ""),
+                            "albumId":     str(item.get("collectionId", "")),
+                            "albumArtUrl": art,
+                            "previewUrl":  item.get("previewUrl"),
+                            "durationMs":  int(item.get("trackTimeMillis", 30000)),
+                            "genre":       item.get("primaryGenreName", ""),
+                            "bpm":         0,
+                            "key":         "—",
+                            "energy":      0.5,
+                            "valence":     0.5,
+                            "vibes":       [item.get("primaryGenreName", "").lower()] if item.get("primaryGenreName") else [],
+                        })
+        except Exception as exc:
+            logger.debug("itunes search fallback failed: %s", exc)
+
     _cache[cache_key] = results
     return results
 
 
 async def get_track(deezer_id: str) -> dict | None:
-    """Fetch a single track by Deezer ID, including album genre if available."""
+    """Fetch a single track by Deezer ID or iTunes ID, including album genre if available."""
+    cache_key = f"track:{deezer_id}"
+    if cache_key in _cache:
+        return _cache[cache_key]  # type: ignore[return-value]
+
+    if str(deezer_id).startswith("it_"):
+        it_id = str(deezer_id)[3:]
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                it_resp = await client.get(
+                    "https://itunes.apple.com/lookup",
+                    params={"id": it_id, "entity": "song"},
+                )
+                if it_resp.status_code == 200:
+                    results = it_resp.json().get("results", [])
+                    if results:
+                        item = results[0]
+                        art = (item.get("artworkUrl100") or "").replace("100x100bb", "600x600bb")
+                        res = {
+                            "id":          deezer_id,
+                            "title":       item.get("trackName", ""),
+                            "artist":      item.get("artistName", ""),
+                            "artistId":    str(item.get("artistId", "")),
+                            "album":       item.get("collectionName", ""),
+                            "albumId":     str(item.get("collectionId", "")),
+                            "albumArtUrl": art,
+                            "previewUrl":  item.get("previewUrl"),
+                            "durationMs":  int(item.get("trackTimeMillis", 30000)),
+                            "genre":       item.get("primaryGenreName", ""),
+                            "bpm":         0,
+                            "key":         "—",
+                            "energy":      0.5,
+                            "valence":     0.5,
+                            "vibes":       [item.get("primaryGenreName", "").lower()] if item.get("primaryGenreName") else [],
+                        }
+                        _cache[cache_key] = res
+                        return res
+        except Exception as exc:
+            logger.debug("itunes lookup failed: %s", exc)
+        return None
     cache_key = f"track:{deezer_id}"
     if cache_key in _cache:
         return _cache[cache_key]  # type: ignore[return-value]
