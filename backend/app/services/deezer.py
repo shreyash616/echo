@@ -60,42 +60,123 @@ def _normalize(item: dict, genre_override: str = "") -> dict:
         "vibes":       [genre_override.lower()] if genre_override else [],
         "year":        year,
         "decade":      decade,
+        "rank":        int(item.get("rank", 0)),
     }
 
 
+REMIX_PENALTY_TERMS = [
+    "remix", "rmx", "re-mix", "club mix", "extended mix", "dub mix", "vip mix",
+    "cover", "tribute", "karaoke", "instrumental version", "acoustic cover",
+    "originally performed by", "made famous by", "in the style of", "performs",
+    "slowed", "reverb", "sped up", "speed up", "nightcore", "chopped",
+    "live at", "live from", "bootleg", "parody", "lullaby", "music box", "backing track"
+]
+
+COVER_FARM_ARTISTS = [
+    "music box mania", "the karaoke channel", "tribute band", "tribute players",
+    "workout music", "lullaby players", "piano dreamers", "rockabye baby",
+    "midnite string quartet", "smooth jazz all stars", "cover pop", "karaoke tracks",
+    "the hit makers", "acoustic chillout sessions", "tribute allstars"
+]
+
+BRACKET_TAG_TERMS = [
+    "remix", "rmx", "live", "edit", "version", "deluxe", "bonus", "karaoke",
+    "tribute", "cover", "slowed", "reverb", "sped up", "acoustic", "instrumental"
+]
+
+
+def score_track_originality(query: str, item: dict) -> float:
+    """Score track originality to prioritize original canonical tracks over remixes, covers, and karaoke."""
+    score = 100.0
+    title = str(item.get("title", "")).lower()
+    artist = str(item.get("artist", "")).lower()
+    album = str(item.get("album", "")).lower()
+    q_lower = query.lower().strip()
+    clean_q = re.sub(r"[^a-z0-9 ]", "", q_lower).strip()
+    clean_t = re.sub(r"[^a-z0-9 ]", "", title).strip()
+
+    # 1. Exact / Prefix / Substring Title Match
+    if clean_t == clean_q:
+        score += 80.0
+    elif clean_t.startswith(clean_q):
+        score += 35.0
+    elif clean_q in clean_t:
+        score += 15.0
+    else:
+        q_tokens = set(clean_q.split())
+        t_tokens = set(clean_t.split())
+        overlap = len(q_tokens & t_tokens)
+        score += overlap * 5.0
+        score -= 20.0
+
+    # 2. Derivative / Remix / Cover terms
+    for term in REMIX_PENALTY_TERMS:
+        if term in title or term in album:
+            if term in q_lower:
+                score += 40.0  # Explicit user intent to search for remix/live
+            else:
+                score -= 120.0
+            break
+
+    # 3. Cover Farm Artists
+    for farm in COVER_FARM_ARTISTS:
+        if farm in artist or farm in album:
+            score -= 160.0
+            break
+
+    # 4. Context-aware brackets check
+    bracket_matches = re.findall(r"[\(\[](.*?)[\)\]]", title)
+    for bracket_content in bracket_matches:
+        b_lower = bracket_content.lower().strip()
+        if any(tag in b_lower for tag in BRACKET_TAG_TERMS):
+            if not any(tag in q_lower for tag in BRACKET_TAG_TERMS):
+                score -= 30.0
+
+    # 5. Popularity / Rank bonus
+    rank = item.get("rank", 0)
+    if rank and rank > 0:
+        score += min(25.0, float(rank) / 35000.0)
+
+    return score
+
+
 async def search_track(query: str, limit: int = 5) -> list[dict]:
-    """Search Deezer for tracks. Returns normalized track dicts."""
+    """Search Deezer and iTunes for tracks, prioritizing canonical originals over remixes and covers."""
     cache_key = f"search:{query}:{limit}"
     if cache_key in _cache:
         return _cache[cache_key]  # type: ignore[return-value]
 
     logger.info("deezer | search  query=%r  limit=%d", query, limit)
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                f"{DEEZER_BASE}/search",
-                params={"q": query, "limit": limit},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-    except Exception as exc:
-        logger.warning("deezer | search failed  query=%r  err=%s", query, exc)
-        return []
+    raw_candidates: list[dict] = []
+    pool_limit = max(limit * 5, 25)
 
-    results = [_normalize(t) for t in data.get("data", [])]
-    if not results:
-        # Fall back to iTunes search if Deezer returned empty results in this region
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    async with httpx.AsyncClient(headers=headers, timeout=10.0) as client:
+        # Search Deezer and iTunes concurrently
+        async def _fetch_deezer() -> list[dict]:
+            try:
+                resp = await client.get(
+                    f"{DEEZER_BASE}/search",
+                    params={"q": query, "limit": pool_limit},
+                )
+                if resp.status_code == 200:
+                    return [_normalize(t) for t in resp.json().get("data", [])]
+            except Exception as exc:
+                logger.debug("deezer search failed: %s", exc)
+            return []
+
+        async def _fetch_itunes() -> list[dict]:
+            try:
                 it_resp = await client.get(
                     "https://itunes.apple.com/search",
-                    params={"term": query, "entity": "song", "limit": limit},
+                    params={"term": query, "entity": "song", "limit": pool_limit},
                 )
                 if it_resp.status_code == 200:
+                    items = []
                     for item in it_resp.json().get("results", []):
                         art = (item.get("artworkUrl100") or "").replace("100x100bb", "600x600bb")
                         y, dec = _extract_year_decade(item.get("releaseDate"))
-                        results.append({
+                        items.append({
                             "id":          f"it_{item['trackId']}",
                             "title":       item.get("trackName", ""),
                             "artist":      item.get("artistName", ""),
@@ -113,9 +194,31 @@ async def search_track(query: str, limit: int = 5) -> list[dict]:
                             "vibes":       [item.get("primaryGenreName", "").lower()] if item.get("primaryGenreName") else [],
                             "year":        y,
                             "decade":      dec,
+                            "rank":        0,
                         })
-        except Exception as exc:
-            logger.debug("itunes search fallback failed: %s", exc)
+                    return items
+            except Exception as exc:
+                logger.debug("itunes search failed: %s", exc)
+            return []
+
+        deezer_results, itunes_results = await asyncio.gather(_fetch_deezer(), _fetch_itunes())
+        raw_candidates.extend(deezer_results)
+        raw_candidates.extend(itunes_results)
+
+    # Deduplicate by clean (title, artist)
+    seen = set()
+    deduped = []
+    for item in raw_candidates:
+        c_title = re.sub(r"[^a-z0-9]", "", str(item.get("title", "")).lower())
+        c_artist = re.sub(r"[^a-z0-9]", "", str(item.get("artist", "")).lower())
+        key = (c_title, c_artist)
+        if key not in seen and item.get("previewUrl"):
+            seen.add(key)
+            deduped.append(item)
+
+    # Sort descending by originality score
+    deduped.sort(key=lambda x: score_track_originality(query, x), reverse=True)
+    results = deduped[:limit]
 
     _cache[cache_key] = results
     return results

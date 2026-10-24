@@ -834,17 +834,19 @@ def compute_composite_match_score(
     cand_metrics: dict,
 ) -> float:
     """
-    10-Dimensional Structural & Lyrical Human Intent Composite Matching Score:
-      - 512-d neural embedding similarity (timbral & acoustic manifold) [20%]
+    10-Dimensional Structural & Lyrical Human Intent Composite Matching Score
+    (Recalibrated with Principal ML & Stereophonic Experts):
+      - 512-d neural embedding similarity (timbral & acoustic manifold) [22%]
       - Lyrical Human Intent & Emotional Theme [20%]
-      - Instruments used overlap [10%]
-      - Stereophonic spatial staging & mastering dynamics [9%]
-      - Vocal presence, formant & complementation groove [8%]
-      - Mood & Energy dynamic range alignment [8%]
-      - Harmonic Key (with Modal Interchange) & BPM compatibility [8%]
-      - Instrumental pace & subdivision [7%]
-      - Arrangement progression & order of entry [6%]
-      - Era & release decade compatibility [4%]
+      - Mood & Energy dynamic range alignment [12%]
+      - Vocal presence, formant & complementation groove [11%]
+      - Harmonic Key (with Modal Interchange) & BPM compatibility [10%]
+      - Instruments used overlap [9%]
+      - Instrumental pace & subdivision [6%]
+      - Stereophonic spatial staging & mastering dynamics [4%]
+      - Arrangement progression & order of entry [3%]
+      - Era & release decade compatibility [3%]
+      - Dynamic Affine Re-normalization for missing lyrics / instrumentals
       - Multiplied by Antagonistic Emotional Veto Gate Multiplier
     """
     a = src_emb.flatten()
@@ -883,17 +885,25 @@ def compute_composite_match_score(
     s_era = _era_similarity(src_metrics.get("year"), cand_metrics.get("year"))
     s_mood = _mood_dynamics_similarity(src_metrics, cand_metrics)
 
+    has_lyrics = bool(theme_a and theme_b and theme_a != "Instrumental" and theme_b != "Instrumental")
+    if has_lyrics:
+        w_neural, w_lyric, w_mood, w_vocal, w_harmonic = 0.22, 0.20, 0.12, 0.11, 0.10
+        w_inst, w_pace, w_spatial, w_order, w_era = 0.09, 0.06, 0.04, 0.03, 0.03
+    else:
+        w_neural, w_lyric, w_mood, w_vocal, w_harmonic = 0.275, 0.0, 0.15, 0.1375, 0.125
+        w_inst, w_pace, w_spatial, w_order, w_era = 0.1125, 0.075, 0.05, 0.0375, 0.0375
+
     total = (
-        0.20 * s_neural
-        + 0.20 * s_lyric
-        + 0.10 * s_inst
-        + 0.09 * s_spatial
-        + 0.08 * s_vocal
-        + 0.08 * s_mood
-        + 0.08 * s_harmonic
-        + 0.07 * s_pace
-        + 0.06 * s_order
-        + 0.04 * s_era
+        w_neural * s_neural
+        + w_lyric * s_lyric
+        + w_mood * s_mood
+        + w_vocal * s_vocal
+        + w_harmonic * s_harmonic
+        + w_inst * s_inst
+        + w_pace * s_pace
+        + w_spatial * s_spatial
+        + w_order * s_order
+        + w_era * s_era
     ) * clash_mult
     return round(float(np.clip(total, 0.05, 0.99)), 4)
 
@@ -1285,17 +1295,25 @@ class MusicRecommender:
                 s_era = _era_similarity(source_metrics.get("year"), meta.get("year"))
                 s_mood = _mood_dynamics_similarity(source_metrics, meta)
 
+                has_lyrics = bool(theme_a and theme_b and theme_a != "Instrumental" and theme_b != "Instrumental")
+                if has_lyrics:
+                    w_neural, w_lyric, w_mood, w_vocal, w_harmonic = 0.22, 0.20, 0.12, 0.11, 0.10
+                    w_inst, w_pace, w_spatial, w_order, w_era = 0.09, 0.06, 0.04, 0.03, 0.03
+                else:
+                    w_neural, w_lyric, w_mood, w_vocal, w_harmonic = 0.275, 0.0, 0.15, 0.1375, 0.125
+                    w_inst, w_pace, w_spatial, w_order, w_era = 0.1125, 0.075, 0.05, 0.0375, 0.0375
+
                 comp_score = (
-                    0.20 * cand_emb_score
-                    + 0.20 * s_lyric
-                    + 0.10 * s_inst
-                    + 0.09 * s_spatial
-                    + 0.08 * s_vocal
-                    + 0.08 * s_mood
-                    + 0.08 * s_harmonic
-                    + 0.07 * s_pace
-                    + 0.06 * s_order
-                    + 0.04 * s_era
+                    w_neural * cand_emb_score
+                    + w_lyric * s_lyric
+                    + w_mood * s_mood
+                    + w_vocal * s_vocal
+                    + w_harmonic * s_harmonic
+                    + w_inst * s_inst
+                    + w_pace * s_pace
+                    + w_spatial * s_spatial
+                    + w_order * s_order
+                    + w_era * s_era
                 ) * clash_mult
                 meta["matchScore"] = round(float(np.clip(comp_score, 0.05, 0.99)), 4)
                 meta["matchReasons"] = compute_match_reasons(source_metrics, meta)
@@ -1313,6 +1331,10 @@ class MusicRecommender:
 
             if len(matched_genre_results) >= k:
                 break
+
+        if source_metrics:
+            matched_genre_results.sort(key=lambda m: float(m.get("matchScore", 0.0)), reverse=True)
+            fallback_results.sort(key=lambda m: float(m.get("matchScore", 0.0)), reverse=True)
 
         combined = matched_genre_results + fallback_results
         return combined[:k]

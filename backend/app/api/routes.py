@@ -438,7 +438,21 @@ def _apply_mmr(
         sel_art = _primary_artist_name(best_cand[0].artist).lower()
         artist_counts[sel_art] = artist_counts.get(sel_art, 0) + 1
 
-    return [item[0] for item in selected]
+    # Sort the final diverse MMR slate in descending order of matchScore for monotonic presentation
+    sorted_tracks = sorted([item[0] for item in selected], key=lambda t: t.matchScore or 0.0, reverse=True)
+
+    # Anti-Adjacency Window Check: prevent consecutive duplicate artists in top ranks
+    for i in range(len(sorted_tracks) - 1):
+        curr_art = _primary_artist_name(sorted_tracks[i].artist).lower()
+        next_art = _primary_artist_name(sorted_tracks[i + 1].artist).lower()
+        if curr_art and curr_art == next_art:
+            for j in range(i + 2, len(sorted_tracks)):
+                cand_art = _primary_artist_name(sorted_tracks[j].artist).lower()
+                if cand_art != curr_art:
+                    sorted_tracks[i + 1], sorted_tracks[j] = sorted_tracks[j], sorted_tracks[i + 1]
+                    break
+
+    return sorted_tracks
 
 
 async def _find_and_rank_similar_tracks(
