@@ -18,6 +18,7 @@ from app.services.deezer import (
     get_album_genres,
     get_genre_and_language_candidates,
     fetch_preview_audio,
+    _extract_year_decade,
 )
 from app.services.lastfm import get_artist_tags, get_similar_tracks
 from app.services.recommender import recommender, compute_composite_match_score, _era_similarity
@@ -27,6 +28,32 @@ router = APIRouter(prefix="/api")
 
 # Concurrency limiter for preview downloads + ONNX encoding
 _ENCODE_SEM = asyncio.Semaphore(8)
+
+_CULTURAL_ARTIST_RULES: list[tuple[set[str], str, str, list[str]]] = [
+    (
+        {"kishore kumar", "lata mangeshkar", "asha bhosle", "mohammed rafi", "mohd rafi",
+         "r.d. burman", "rd burman", "mukesh", "manna dey", "alka yagnik", "kumar sanu",
+         "udit narayan", "sonu nigam", "arijit singh", "shreya ghoshal", "sunidhi chauhan",
+         "bappi lahiri", "hemant kumar", "anuradha paudwal", "jagjit singh", "pankaj udhas",
+         "lucky ali", "kk", "pritam", "amit trivedi", "vishal-shekhar", "neha kakkar",
+         "kalyanji-anandji", "laxmikant-pyarelal", "s.d. burman", "sd burman"},
+        "hi", "bollywood", ["bollywood", "hindi", "filmi"],
+    ),
+    (
+        {"sidhu moose wala", "diljit dosanjh", "ap dhillon", "karan aujla", "shubh",
+         "amrinder gill", "gurdas maan", "bohemia", "imran khan", "jazzy b", "mankirt aulakh"},
+        "pa", "punjabi", ["punjabi", "bhangra", "desi"],
+    ),
+    (
+        {"s. p. balasubrahmanyam", "spb", "ilayaraja", "anirudh ravichander", "sid sriram",
+         "yuvan shankar raja", "d. imman", "hariharan", "k. s. chithra", "sujatha"},
+        "ta", "tamil", ["tamil", "kollywood"],
+    ),
+    (
+        {"bts", "blackpink", "twice", "stray kids", "exo", "newjeans", "seventeen", "iu", "red velvet"},
+        "ko", "k-pop", ["k-pop", "kpop", "korean"],
+    ),
+]
 
 
 def _to_track(meta: dict) -> TrackResult:
@@ -190,13 +217,59 @@ async def _detect_track_context(track_info: dict) -> tuple[str | None, str, list
 
     # 2. Genre family detection
     genre_family, genre_keywords = _detect_genre_family(raw_tags)
+
+    # 3. Cultural artist heuristics for well-known artists
+    if not lang or genre_family in ["classical", "general", "films/games", "soundtrack", ""]:
+        artist_lower = artist_name.lower()
+        for artists, rule_lang, rule_genre, rule_kw in _CULTURAL_ARTIST_RULES:
+            if any(a in artist_lower for a in artists):
+                lang = rule_lang
+                genre_family = rule_genre
+                genre_keywords = list(rule_kw)
+                break
+
+    # 4. iTunes lookup fallback to disambiguate generic Deezer tags (e.g. 'Films/Games') and resolve true release era
+    needs_itunes_genre = not lang or genre_family in ["classical", "general", "films/games", "soundtrack", ""]
+    is_classic_artist_post2000 = (track_info.get("year", 0) > 2000) and any(
+        a in artist_name.lower() for a in ["kishore", "rafi", "mukesh", "mangeshkar", "burman", "bhosle", "manna"]
+    )
+    if needs_itunes_genre or not track_info.get("year") or is_classic_artist_post2000:
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                query = f"{artist_name} {track_info.get('title', '')}".strip()
+                it_resp = await client.get(
+                    "https://itunes.apple.com/search",
+                    params={"term": query, "entity": "song", "limit": 1},
+                )
+                if it_resp.status_code == 200:
+                    it_items = it_resp.json().get("results", [])
+                    if it_items:
+                        it_genre = str(it_items[0].get("primaryGenreName", "")).lower()
+                        it_lang = _detect_language_from_tags([it_genre])
+                        if it_lang and not lang:
+                            lang = it_lang
+                        if not genre_family or genre_family in ["classical", "general"]:
+                            it_fam, it_kw = _detect_genre_family([it_genre])
+                            if it_fam:
+                                genre_family, genre_keywords = it_fam, it_kw
+                        # Resolve original release year if missing or digital re-release date
+                        it_date = it_items[0].get("releaseDate")
+                        if it_date:
+                            y, dec = _extract_year_decade(it_date)
+                            if y and (not track_info.get("year") or y < track_info.get("year", 9999)):
+                                track_info["year"] = y
+                                track_info["decade"] = dec
+        except Exception as exc:
+            logger.debug("itunes context resolution failed: %s", exc)
+
     if not genre_family and lang and lang in _LANG_SEARCH_HINT:
         genre_family = _LANG_SEARCH_HINT[lang]
         genre_keywords = [genre_family]
 
     logger.info(
-        "track_context | title=%r  artist=%r  lang=%s  genre=%r",
-        track_info.get("title"), track_info.get("artist"), lang or "en", genre_family or "general",
+        "track_context | title=%r  artist=%r  lang=%s  genre=%r  year=%s",
+        track_info.get("title"), track_info.get("artist"), lang or "en", genre_family or "general", track_info.get("year"),
     )
     return lang, genre_family, genre_keywords
 
