@@ -19,6 +19,7 @@ class TrackResult(BaseModel):
     phaseCorrelation: float = 0.95
     crestFactor: float = 10.0
     spatialStaging: str = "Balanced Stereo"
+    lyricalIntent: str = "Chill & Atmospheric"
     energy: float = 0.5   # 0-1
     valence: float = 0.5  # 0-1
     instruments: list[str] = []

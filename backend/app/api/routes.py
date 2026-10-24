@@ -28,6 +28,7 @@ from app.services.recommender import (
     to_camelot_key,
     compute_match_reasons,
 )
+from app.services.lyrics import fetch_lyrics, classify_lyrical_intent
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
@@ -80,6 +81,7 @@ def _to_track(meta: dict) -> TrackResult:
         phaseCorrelation=float(meta.get("phaseCorrelation", 0.95)),
         crestFactor=float(meta.get("crestFactor", 10.0)),
         spatialStaging=str(meta.get("spatialStaging", "Balanced Stereo")),
+        lyricalIntent=str(meta.get("lyricalIntent") or meta.get("emotionalTheme", "Chill & Atmospheric")),
         energy=float(meta.get("energy", 0.5)),
         valence=float(meta.get("valence", 0.5)),
         instruments=list(meta.get("instruments", [])),
@@ -313,6 +315,15 @@ async def _enrich_single_track_with_own_metrics(
     if track_meta.get("decade"):
         metrics["decade"] = track_meta["decade"]
 
+    lyrics = await fetch_lyrics(str(track_meta.get("artist", "")), str(track_meta.get("title", "")))
+    intent = classify_lyrical_intent(
+        str(track_meta.get("title", "")),
+        str(track_meta.get("artist", "")),
+        lyrics=lyrics,
+        genre=genre_hint or str(track_meta.get("genre", "")),
+    )
+    metrics["lyricalIntent"] = intent
+
     enriched = {
         **track_meta,
         "bpm":                  metrics["bpm"],
@@ -329,6 +340,7 @@ async def _enrich_single_track_with_own_metrics(
         "vocalComplementation": metrics.get("vocalComplementation", "In-The-Pocket Groove"),
         "year":                 track_meta.get("year"),
         "decade":               track_meta.get("decade"),
+        "lyricalIntent":        intent,
     }
     return _to_track(enriched), emb, metrics
 
@@ -606,6 +618,12 @@ async def _find_and_rank_similar_tracks(
                 if cand.get("decade"):
                     cand_metrics["decade"] = cand["decade"]
 
+                cand_lyrics = await fetch_lyrics(cand_artist, cand_title)
+                cand_intent = classify_lyrical_intent(
+                    cand_title, cand_artist, lyrics=cand_lyrics, genre=cand.get("genre", "")
+                )
+                cand_metrics["lyricalIntent"] = cand_intent
+
                 score = compute_composite_match_score(
                     source_embedding,
                     source_metrics,
@@ -626,6 +644,7 @@ async def _find_and_rank_similar_tracks(
                     "energy":               cand_metrics["energy"],
                     "valence":              cand_metrics["valence"],
                     "vibes":                cand_metrics["vibes"],
+                    "lyricalIntent":        cand_intent,
                     "instruments":          cand_metrics.get("instruments", []),
                     "instrumentOrder":      cand_metrics.get("instrumentOrder", []),
                     "instrumentPace":       cand_metrics.get("instrumentPace", "Steady Mid-Tempo"),
@@ -720,13 +739,23 @@ async def identify(audio: UploadFile = File(...)) -> IdentifyResponse:
     )
 
     if source_track_info:
+        lyrics = await fetch_lyrics(str(source_track_info.get("artist", "")), str(source_track_info.get("title", "")))
+        intent = classify_lyrical_intent(
+            str(source_track_info.get("title", "")),
+            str(source_track_info.get("artist", "")),
+            lyrics=lyrics,
+            genre=genre_family,
+        )
+        source_metrics["lyricalIntent"] = intent
+
         identified_track = _to_track({
             **source_track_info,
-            "bpm":     source_metrics["bpm"],
-            "key":     source_metrics["key"],
-            "energy":  source_metrics["energy"],
-            "valence": source_metrics["valence"],
-            "vibes":   source_metrics["vibes"],
+            "bpm":           source_metrics["bpm"],
+            "key":           source_metrics["key"],
+            "energy":        source_metrics["energy"],
+            "valence":       source_metrics["valence"],
+            "vibes":         source_metrics["vibes"],
+            "lyricalIntent": intent,
         })
 
     if source_track_info:
@@ -827,6 +856,15 @@ async def get_recommendations(
         preview_bytes,
         genre_family,
     )
+
+    lyrics = await fetch_lyrics(str(track.get("artist", "")), str(track.get("title", "")))
+    intent = classify_lyrical_intent(
+        str(track.get("title", "")),
+        str(track.get("artist", "")),
+        lyrics=lyrics,
+        genre=genre_family,
+    )
+    source_metrics["lyricalIntent"] = intent
 
     recommendations = await _find_and_rank_similar_tracks(
         source_track_info=track,

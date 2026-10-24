@@ -27,6 +27,7 @@ import soundfile as sf
 from cachetools import TTLCache
 
 from app.config import settings
+from app.services.lyrics import classify_lyrical_intent, lyrical_intent_similarity
 
 logger = logging.getLogger(__name__)
 
@@ -474,6 +475,9 @@ def _synthesize_structural_meta_if_missing(meta: dict) -> dict:
         "Expansive / Wide 3D Spatial" if meta.get("stereoWidth", 0.50) >= 0.52
         else ("Intimate / Focused Mono" if meta.get("stereoWidth", 0.50) < 0.15 else "Balanced Stereo Soundstage")
     )
+    meta["lyricalIntent"] = meta.get("lyricalIntent") or meta.get("emotionalTheme") or classify_lyrical_intent(
+        meta.get("title", ""), meta.get("artist", ""), genre=meta.get("genre", "")
+    )
 
     if meta.get("instruments") and meta.get("instrumentOrder") and meta.get("instrumentPace"):
         return meta
@@ -532,6 +536,9 @@ def _synthesize_structural_meta_if_missing(meta: dict) -> dict:
     meta["spatialStaging"] = meta.get("spatialStaging") or (
         "Expansive / Wide 3D Spatial" if meta.get("stereoWidth", 0.50) >= 0.52
         else ("Intimate / Focused Mono" if meta.get("stereoWidth", 0.50) < 0.15 else "Balanced Stereo Soundstage")
+    )
+    meta["lyricalIntent"] = meta.get("lyricalIntent") or meta.get("emotionalTheme") or classify_lyrical_intent(
+        meta.get("title", ""), meta.get("artist", ""), genre=meta.get("genre", "")
     )
     return meta
 
@@ -786,6 +793,12 @@ def compute_match_reasons(
     elif abs(w_src - w_cand) <= 0.12 and abs(rho_src - rho_cand) <= 0.10:
         reasons.append("Phase-Aligned Spatial Mixing")
 
+    # 8. Lyrical Human Emotional Intent
+    theme_s = str(src_metrics.get("lyricalIntent") or src_metrics.get("emotionalTheme") or "")
+    theme_c = str(cand_metrics.get("lyricalIntent") or cand_metrics.get("emotionalTheme") or "")
+    if theme_s and theme_c and theme_s == theme_c and theme_s != "Chill & Atmospheric":
+        reasons.append(f"Shared Emotion ({theme_s})")
+
     return reasons[:3]
 
 
@@ -821,21 +834,27 @@ def compute_composite_match_score(
     cand_metrics: dict,
 ) -> float:
     """
-    Structural Composite Matching Score in [0, 1]:
-      - 512-d neural embedding similarity (timbral & acoustic manifold) [30%]
-      - Stereophonic spatial staging & mastering dynamics [10%]
-      - Instruments used overlap [15%]
-      - Arrangement progression & order of entry [8%]
-      - Instrumental pace & subdivision [8%]
-      - Vocal presence, formant & complementation groove [9%]
-      - Harmonic Key (with Modal Interchange) & BPM compatibility [7%]
+    10-Dimensional Structural & Lyrical Human Intent Composite Matching Score:
+      - 512-d neural embedding similarity (timbral & acoustic manifold) [20%]
+      - Lyrical Human Intent & Emotional Theme [20%]
+      - Instruments used overlap [10%]
+      - Stereophonic spatial staging & mastering dynamics [9%]
+      - Vocal presence, formant & complementation groove [8%]
       - Mood & Energy dynamic range alignment [8%]
-      - Era & release decade compatibility [5%]
+      - Harmonic Key (with Modal Interchange) & BPM compatibility [8%]
+      - Instrumental pace & subdivision [7%]
+      - Arrangement progression & order of entry [6%]
+      - Era & release decade compatibility [4%]
+      - Multiplied by Antagonistic Emotional Veto Gate Multiplier
     """
     a = src_emb.flatten()
     b = cand_emb.flatten()
     cos_sim = float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-8))
     s_neural = float(np.clip((cos_sim + 0.1) / 1.1, 0.05, 1.0))
+
+    theme_a = str(src_metrics.get("lyricalIntent") or src_metrics.get("emotionalTheme") or classify_lyrical_intent(src_metrics.get("title", ""), src_metrics.get("artist", "")))
+    theme_b = str(cand_metrics.get("lyricalIntent") or cand_metrics.get("emotionalTheme") or classify_lyrical_intent(cand_metrics.get("title", ""), cand_metrics.get("artist", "")))
+    s_lyric, clash_mult = lyrical_intent_similarity(theme_a, theme_b)
 
     s_spatial = _stereo_dynamics_similarity(src_metrics, cand_metrics)
     s_inst = _instrument_similarity(
@@ -865,16 +884,17 @@ def compute_composite_match_score(
     s_mood = _mood_dynamics_similarity(src_metrics, cand_metrics)
 
     total = (
-        0.30 * s_neural
-        + 0.10 * s_spatial
-        + 0.15 * s_inst
-        + 0.08 * s_order
-        + 0.08 * s_pace
-        + 0.09 * s_vocal
-        + 0.07 * s_harmonic
+        0.20 * s_neural
+        + 0.20 * s_lyric
+        + 0.10 * s_inst
+        + 0.09 * s_spatial
+        + 0.08 * s_vocal
         + 0.08 * s_mood
-        + 0.05 * s_era
-    )
+        + 0.08 * s_harmonic
+        + 0.07 * s_pace
+        + 0.06 * s_order
+        + 0.04 * s_era
+    ) * clash_mult
     return round(float(np.clip(total, 0.05, 0.99)), 4)
 
 
@@ -909,32 +929,36 @@ def _decode_audio_stereo(audio_bytes: bytes) -> tuple[np.ndarray, dict]:
 
     # Step B: ffmpeg stereo fallback
     if L is None or R is None:
-        proc = subprocess.run(
-            [
-                "ffmpeg", "-i", "pipe:0",
-                "-f", "wav", "-ar", str(SR), "-ac", "2",
-                "-loglevel", "error",
-                "pipe:1",
-            ],
-            input=audio_bytes,
-            capture_output=True,
-        )
-        if proc.returncode == 0:
-            y, _ = sf.read(io.BytesIO(proc.stdout), dtype="float32", always_2d=True)
-            if y.shape[1] >= 2:
-                L, R = y[:, 0], y[:, 1]
-            else:
-                L, R = y[:, 0], y[:, 0]
-        else:
-            # Last resort mono
-            mono_proc = subprocess.run(
-                ["ffmpeg", "-i", "pipe:0", "-f", "wav", "-ar", str(SR), "-ac", "1", "-loglevel", "error", "pipe:1"],
-                input=audio_bytes, capture_output=True,
+        try:
+            proc = subprocess.run(
+                [
+                    "ffmpeg", "-i", "pipe:0",
+                    "-f", "wav", "-ar", str(SR), "-ac", "2",
+                    "-loglevel", "error",
+                    "pipe:1",
+                ],
+                input=audio_bytes,
+                capture_output=True,
             )
-            if mono_proc.returncode != 0:
-                raise RuntimeError("ffmpeg audio decode failed")
-            m_sig, _ = sf.read(io.BytesIO(mono_proc.stdout), dtype="float32", always_2d=False)
-            L, R = m_sig, m_sig
+            if proc.returncode == 0:
+                y, _ = sf.read(io.BytesIO(proc.stdout), dtype="float32", always_2d=True)
+                if y.shape[1] >= 2:
+                    L, R = y[:, 0], y[:, 1]
+                else:
+                    L, R = y[:, 0], y[:, 0]
+            else:
+                mono_proc = subprocess.run(
+                    ["ffmpeg", "-i", "pipe:0", "-f", "wav", "-ar", str(SR), "-ac", "1", "-loglevel", "error", "pipe:1"],
+                    input=audio_bytes, capture_output=True,
+                )
+                if mono_proc.returncode != 0:
+                    raise RuntimeError("ffmpeg audio decode failed")
+                m_sig, _ = sf.read(io.BytesIO(mono_proc.stdout), dtype="float32", always_2d=False)
+                L, R = m_sig, m_sig
+        except Exception as exc:
+            logger.warning("Audio stereo decode fallback failed: %s", exc)
+            L = np.zeros(SR * 5, dtype=np.float32)
+            R = np.zeros(SR * 5, dtype=np.float32)
 
     L = np.ascontiguousarray(L, dtype=np.float32)
     R = np.ascontiguousarray(R, dtype=np.float32)
@@ -1237,14 +1261,19 @@ class MusicRecommender:
                 if cand_lang is not None:
                     continue
 
-            # Compute structural composite score incorporating neural, instruments, order, pace, vocals, era & mood
+            # Compute structural composite score incorporating neural, lyrics, instruments, order, pace, vocals, era & mood
             meta["camelotKey"] = to_camelot_key(str(meta.get("key", "—")))
             meta["stereoWidth"] = float(meta.get("stereoWidth", 0.50))
             meta["phaseCorrelation"] = float(meta.get("phaseCorrelation", 0.95))
             meta["crestFactor"] = float(meta.get("crestFactor", 10.0))
             meta["spatialStaging"] = str(meta.get("spatialStaging", "Balanced Stereo Soundstage"))
+            meta["lyricalIntent"] = meta.get("lyricalIntent") or meta.get("emotionalTheme") or classify_lyrical_intent(meta.get("title", ""), meta.get("artist", ""), genre=meta.get("genre", ""))
             if source_metrics:
                 cand_emb_score = float(np.clip((float(dist) + 0.1) / 1.1, 0.05, 1.0))
+                theme_a = str(source_metrics.get("lyricalIntent") or source_metrics.get("emotionalTheme") or classify_lyrical_intent(source_metrics.get("title", ""), source_metrics.get("artist", "")))
+                theme_b = meta["lyricalIntent"]
+                s_lyric, clash_mult = lyrical_intent_similarity(theme_a, theme_b)
+
                 s_spatial = _stereo_dynamics_similarity(source_metrics, meta)
                 s_inst = _instrument_similarity(source_metrics.get("instruments", []), meta.get("instruments", []))
                 s_order = _order_similarity(source_metrics.get("instrumentOrder", []), meta.get("instrumentOrder", []))
@@ -1257,16 +1286,17 @@ class MusicRecommender:
                 s_mood = _mood_dynamics_similarity(source_metrics, meta)
 
                 comp_score = (
-                    0.30 * cand_emb_score
-                    + 0.10 * s_spatial
-                    + 0.15 * s_inst
-                    + 0.08 * s_order
-                    + 0.08 * s_pace
-                    + 0.09 * s_vocal
-                    + 0.07 * s_harmonic
+                    0.20 * cand_emb_score
+                    + 0.20 * s_lyric
+                    + 0.10 * s_inst
+                    + 0.09 * s_spatial
+                    + 0.08 * s_vocal
                     + 0.08 * s_mood
-                    + 0.05 * s_era
-                )
+                    + 0.08 * s_harmonic
+                    + 0.07 * s_pace
+                    + 0.06 * s_order
+                    + 0.04 * s_era
+                ) * clash_mult
                 meta["matchScore"] = round(float(np.clip(comp_score, 0.05, 0.99)), 4)
                 meta["matchReasons"] = compute_match_reasons(source_metrics, meta)
             else:

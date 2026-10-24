@@ -827,6 +827,10 @@
               <span class="struct-label">🎧 Soundstage</span>
               <span id="heroSoundstage" class="struct-val">--</span>
             </div>
+            <div class="struct-row" id="heroIntentRow" style="display:none;">
+              <span class="struct-label">❤️ Emotion</span>
+              <span id="heroIntent" class="struct-val">--</span>
+            </div>
           </div>
 
           <div class="hero-stats">
@@ -1230,6 +1234,15 @@
         stageRow.style.display = 'flex';
       } else if (stageRow) {
         stageRow.style.display = 'none';
+      }
+
+      const intentRow = document.getElementById('heroIntentRow');
+      const intentEl = document.getElementById('heroIntent');
+      if (hero.lyricalIntent && intentRow && intentEl) {
+        intentEl.textContent = hero.lyricalIntent;
+        intentRow.style.display = 'flex';
+      } else if (intentRow) {
+        intentRow.style.display = 'none';
       }
 
       // Recs Section
