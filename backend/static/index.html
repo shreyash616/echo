@@ -390,6 +390,100 @@
       border: 1px solid var(--border);
     }
 
+    /* Structural Acoustic Breakdown */
+    .structural-breakdown {
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      padding: 16px 18px;
+      margin-bottom: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .struct-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      flex-wrap: wrap;
+    }
+
+    .struct-label {
+      font-weight: 700;
+      color: #c4b5fd;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      min-width: 110px;
+      flex-shrink: 0;
+    }
+
+    .struct-val {
+      color: #f3f4f6;
+      font-weight: 500;
+      font-size: 13px;
+    }
+
+    .struct-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .struct-badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 9px;
+      border-radius: 6px;
+      background: rgba(139, 92, 246, 0.2);
+      border: 1px solid rgba(139, 92, 246, 0.4);
+      color: #ddd6fe;
+    }
+
+    .struct-timeline {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .struct-step {
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: rgba(45, 212, 191, 0.15);
+      border: 1px solid rgba(45, 212, 191, 0.35);
+      color: #99f6e4;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .struct-arrow {
+      color: var(--text-dim);
+      font-size: 12px;
+    }
+
+    .rec-structural-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 6px;
+    }
+
+    .rec-tag {
+      font-size: 10px;
+      font-weight: 500;
+      padding: 2px 7px;
+      border-radius: 5px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      color: #d1d5db;
+    }
+
     .hero-stats {
       display: flex;
       gap: 18px;
@@ -668,6 +762,27 @@
           <h2 id="heroTitle" class="hero-title">Song Title</h2>
           <div id="heroArtist" class="hero-artist">Artist Name</div>
           <div id="heroVibes" class="vibe-pills"></div>
+
+          <!-- Structural Acoustic Breakdown -->
+          <div class="structural-breakdown" id="heroStructure">
+            <div class="struct-row">
+              <span class="struct-label">🎸 Instruments</span>
+              <div id="heroInstruments" class="struct-badges"></div>
+            </div>
+            <div class="struct-row">
+              <span class="struct-label">⏱️ Entry Order</span>
+              <div id="heroOrder" class="struct-timeline"></div>
+            </div>
+            <div class="struct-row">
+              <span class="struct-label">⚡ Pace & Key</span>
+              <span id="heroPaceKey" class="struct-val">--</span>
+            </div>
+            <div class="struct-row">
+              <span class="struct-label">🎤 Vocals</span>
+              <span id="heroVocals" class="struct-val">--</span>
+            </div>
+          </div>
+
           <div class="hero-stats">
             <span id="statBpm">-- BPM</span>
             <span>•</span>
@@ -690,7 +805,7 @@
     <div id="recsSection" class="recs-section">
       <div class="section-header">
         <h3 class="section-title">Similar Acoustic Vibe</h3>
-        <span class="badge" id="neuralBadge">100% Neural Similarity</span>
+        <span class="badge" id="neuralBadge">Neural + Instrument & Vocal Matching</span>
       </div>
       <div id="recsGrid" class="recs-grid"></div>
     </div>
@@ -995,6 +1110,42 @@
         vibesEl.appendChild(pill);
       });
 
+      // Populate Structural Acoustic Breakdown
+      const instEl = document.getElementById('heroInstruments');
+      instEl.innerHTML = '';
+      const instList = (hero.instruments && hero.instruments.length) ? hero.instruments : ['Drums & Percussion', 'Synthesizer & Keys'];
+      instList.forEach(inst => {
+        const badge = document.createElement('span');
+        badge.className = 'struct-badge';
+        badge.textContent = inst;
+        instEl.appendChild(badge);
+      });
+
+      const orderEl = document.getElementById('heroOrder');
+      orderEl.innerHTML = '';
+      const orderList = (hero.instrumentOrder && hero.instrumentOrder.length) ? hero.instrumentOrder : ['Drums', 'Bass', 'Keys / Synth', 'Vocals'];
+      orderList.forEach((item, i) => {
+        const step = document.createElement('span');
+        step.className = 'struct-step';
+        step.textContent = `${i + 1}. ${item}`;
+        orderEl.appendChild(step);
+        if (i < orderList.length - 1) {
+          const arr = document.createElement('span');
+          arr.className = 'struct-arrow';
+          arr.textContent = '→';
+          orderEl.appendChild(arr);
+        }
+      });
+
+      const paceKeyEl = document.getElementById('heroPaceKey');
+      paceKeyEl.textContent = `${hero.key || '—'} Key • ${hero.instrumentPace || 'Steady Mid-Tempo (4-on-the-Floor)'}`;
+
+      const vocalsEl = document.getElementById('heroVocals');
+      const vPres = hero.vocalPresence !== undefined ? Math.round(hero.vocalPresence * 100) : 75;
+      const vPat = hero.vocalPattern || 'Dynamic Melodic Phrasing';
+      const vComp = hero.vocalComplementation || 'In-The-Pocket Groove (Vocals Lock to Beat)';
+      vocalsEl.textContent = `${vPres}% Presence • ${vPat} • ${vComp}`;
+
       // Recs Section
       recsSection.style.display = 'block';
       recsGrid.innerHTML = '';
@@ -1009,12 +1160,21 @@
         card.className = 'rec-card';
         const matchPct = track.matchScore ? Math.round(track.matchScore * 100) : Math.max(70, 96 - idx * 2);
 
+        const instSnippet = (track.instruments || []).slice(0, 2).join(' • ');
+        const vocalSnippet = (track.vocalPattern || '').split('(')[0].trim();
+        const paceSnippet = (track.instrumentPace || '').split('(')[0].trim();
+
         card.innerHTML = `
           <div class="rec-rank">#${idx + 1}</div>
           <img class="rec-art" src="${track.albumArtUrl || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=120'}" alt="">
           <div class="rec-details">
             <div class="rec-title">${track.title}</div>
             <div class="rec-artist">${track.artist}</div>
+            <div class="rec-structural-tags">
+              ${instSnippet ? `<span class="rec-tag">🎸 ${instSnippet}</span>` : ''}
+              ${paceSnippet ? `<span class="rec-tag">⚡ ${paceSnippet}</span>` : ''}
+              ${vocalSnippet ? `<span class="rec-tag">🎤 ${vocalSnippet}</span>` : ''}
+            </div>
           </div>
           <div class="rec-score">${matchPct}%</div>
           <button class="rec-play-btn" title="Play preview">

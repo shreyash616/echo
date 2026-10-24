@@ -9,13 +9,19 @@ class TrackResult(BaseModel):
     album: str
     albumArtUrl: str
     previewUrl: str | None = None
-    durationMs: int
-    matchScore: float | None = None  # cosine similarity 0-1
-    vibes: list[str]
-    bpm: int
-    key: str
-    energy: float   # 0-1
-    valence: float  # 0-1
+    durationMs: int = 0
+    matchScore: float | None = None  # similarity 0-1
+    vibes: list[str] = []
+    bpm: int = 120
+    key: str = "—"
+    energy: float = 0.5   # 0-1
+    valence: float = 0.5  # 0-1
+    instruments: list[str] = []
+    instrumentOrder: list[str] = []
+    instrumentPace: str = "Steady Mid-Tempo"
+    vocalPresence: float = 0.5
+    vocalPattern: str = "Dynamic Melodic Phrasing"
+    vocalComplementation: str = "In-The-Pocket Groove"
 
 
 class IdentifyResponse(BaseModel):

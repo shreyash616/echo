@@ -44,6 +44,12 @@ def _to_track(meta: dict) -> TrackResult:
         key=str(meta.get("key", "—")),
         energy=float(meta.get("energy", 0.5)),
         valence=float(meta.get("valence", 0.5)),
+        instruments=list(meta.get("instruments", [])),
+        instrumentOrder=list(meta.get("instrumentOrder", [])),
+        instrumentPace=str(meta.get("instrumentPace", "Steady Mid-Tempo")),
+        vocalPresence=float(meta.get("vocalPresence", 0.5)),
+        vocalPattern=str(meta.get("vocalPattern", "Dynamic Melodic Phrasing")),
+        vocalComplementation=str(meta.get("vocalComplementation", "In-The-Pocket Groove")),
     )
 
 
@@ -217,11 +223,17 @@ async def _enrich_single_track_with_own_metrics(
     )
     enriched = {
         **track_meta,
-        "bpm":     metrics["bpm"],
-        "key":     metrics["key"],
-        "energy":  metrics["energy"],
-        "valence": metrics["valence"],
-        "vibes":   metrics["vibes"],
+        "bpm":                  metrics["bpm"],
+        "key":                  metrics["key"],
+        "energy":               metrics["energy"],
+        "valence":              metrics["valence"],
+        "vibes":                metrics["vibes"],
+        "instruments":          metrics.get("instruments", []),
+        "instrumentOrder":      metrics.get("instrumentOrder", []),
+        "instrumentPace":       metrics.get("instrumentPace", "Steady Mid-Tempo"),
+        "vocalPresence":        metrics.get("vocalPresence", 0.5),
+        "vocalPattern":         metrics.get("vocalPattern", "Dynamic Melodic Phrasing"),
+        "vocalComplementation": metrics.get("vocalComplementation", "In-The-Pocket Groove"),
     }
     return _to_track(enriched), emb, metrics
 
@@ -397,12 +409,18 @@ async def _find_and_rank_similar_tracks(
 
                 enriched = {
                     **cand,
-                    "matchScore": score,
-                    "bpm":        cand_metrics["bpm"],
-                    "key":        cand_metrics["key"],
-                    "energy":     cand_metrics["energy"],
-                    "valence":    cand_metrics["valence"],
-                    "vibes":      cand_metrics["vibes"],
+                    "matchScore":           score,
+                    "bpm":                  cand_metrics["bpm"],
+                    "key":                  cand_metrics["key"],
+                    "energy":               cand_metrics["energy"],
+                    "valence":              cand_metrics["valence"],
+                    "vibes":                cand_metrics["vibes"],
+                    "instruments":          cand_metrics.get("instruments", []),
+                    "instrumentOrder":      cand_metrics.get("instrumentOrder", []),
+                    "instrumentPace":       cand_metrics.get("instrumentPace", "Steady Mid-Tempo"),
+                    "vocalPresence":        cand_metrics.get("vocalPresence", 0.5),
+                    "vocalPattern":         cand_metrics.get("vocalPattern", "Dynamic Melodic Phrasing"),
+                    "vocalComplementation": cand_metrics.get("vocalComplementation", "In-The-Pocket Groove"),
                 }
                 return _to_track(enriched), score, genre_matched
             except Exception as exc:

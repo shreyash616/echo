@@ -293,13 +293,275 @@ def analyze_mel_spectrogram(mel: np.ndarray, genre_hint: str = "") -> dict:
         if v not in deduped_vibes:
             deduped_vibes.append(v)
 
+    structure = extract_audio_structure(mel, bpm=int(bpm), key=key_str)
+
     return {
         "bpm": int(bpm),
         "key": key_str,
         "energy": round(energy, 2),
         "valence": round(valence, 2),
         "vibes": deduped_vibes[:3],
+        "instruments": structure["instruments"],
+        "instrumentOrder": structure["instrumentOrder"],
+        "instrumentPace": structure["instrumentPace"],
+        "vocalPresence": structure["vocalPresence"],
+        "vocalPattern": structure["vocalPattern"],
+        "vocalComplementation": structure["vocalComplementation"],
     }
+
+
+def extract_audio_structure(
+    mel: np.ndarray,
+    bpm: int = 120,
+    key: str = "C Major",
+) -> dict:
+    """
+    Extract structural musical and vocal patterns directly from a (128, T) mel spectrogram:
+      1. Instruments used (Drums, Bass/808, Keys/Synth, Guitars/Strings)
+      2. Chronological order of entry across temporal slices
+      3. Rhythmic pace and subdivision (driving 16th-note, upbeat 8th-note, steady 4/4, laid-back half-time)
+      4. Vocal presence, phrasing cadence (melodic legato, rhythmic flow, hook chops),
+         and complementation pattern (in-the-pocket groove, call-and-response, counterpoint).
+    """
+    mel = np.asarray(mel, dtype=np.float32)
+    if mel.ndim > 2:
+        mel = mel.reshape(mel.shape[-2], mel.shape[-1])
+    n_mels, T = mel.shape
+    fps = SR / float(HOP_LENGTH)  # ~43.066 frames/sec
+
+    sub_bass = mel[:16, :]    # ~40-180 Hz
+    low_mid = mel[16:40, :]   # ~180-600 Hz
+    mid_band = mel[40:85, :]  # ~600-3500 Hz (vocal formant & acoustic harmonic body)
+    high_band = mel[85:, :]   # ~3500-11000 Hz (crisp transients, cymbals, air)
+
+    # 1. Onsets & Transient Drive (Drums & Percussion)
+    if T > 1:
+        drum_transients = np.maximum(0.0, np.diff(high_band, axis=1)).mean(axis=0)
+        kick_transients = np.maximum(0.0, np.diff(sub_bass[:8, :], axis=1)).mean(axis=0)
+        comb_transients = 0.6 * drum_transients + 0.4 * kick_transients
+        onset_thresh = comb_transients.mean() + 1.1 * comb_transients.std()
+        onsets = np.where(comb_transients > onset_thresh)[0]
+    else:
+        comb_transients = np.zeros(1, dtype=np.float32)
+        onsets = np.array([], dtype=int)
+
+    duration_sec = T / fps
+    onset_rate = len(onsets) / max(1.0, duration_sec)
+
+    p_drums = float(np.clip(comb_transients.mean() * 40.0 + (onset_rate / 6.0) * 0.4, 0.05, 0.98))
+    p_bass = float(np.clip((sub_bass.mean() / (mel.mean() + 1e-6)) * 0.76, 0.05, 0.98))
+
+    mid_flux = float(np.abs(np.diff(mid_band, axis=1)).mean()) if T > 1 else 0.0
+    mid_harmonicity = float(mid_band.mean())
+    p_synth = float(np.clip(mid_harmonicity * 1.45 - mid_flux * 2.8, 0.05, 0.95))
+    p_guitar = float(np.clip(mid_flux * 18.0 + (low_mid.mean() * 0.52), 0.05, 0.95))
+
+    # Vocal Presence via Syllabic Modulation (3-6 Hz envelope rhythm in vocal formant band)
+    mid_env = mid_band.mean(axis=0)
+    if len(mid_env) > 64:
+        env_centered = mid_env - mid_env.mean()
+        fft_env = np.abs(np.fft.rfft(env_centered))
+        freqs = np.fft.rfftfreq(len(env_centered), d=1.0 / fps)
+        vocal_mod_mask = (freqs >= 2.5) & (freqs <= 6.5)
+        total_power = fft_env.sum() + 1e-8
+        vocal_mod_ratio = float(fft_env[vocal_mod_mask].sum() / total_power)
+        vocal_presence = float(np.clip(vocal_mod_ratio * 4.6, 0.0, 0.98))
+    else:
+        vocal_presence = 0.5
+
+    # Instrument List (sorted by acoustic prominence)
+    inst_candidates = [
+        ("Drums & Percussion", p_drums),
+        ("Bass & 808", p_bass),
+        ("Synthesizer & Keys", p_synth),
+        ("Guitar & Strings", p_guitar),
+    ]
+    inst_candidates.sort(key=lambda x: x[1], reverse=True)
+    detected_instruments = [name for name, score in inst_candidates if score >= 0.35]
+    if not detected_instruments:
+        detected_instruments = [inst_candidates[0][0]]
+
+    # 2. Chronological Order of Entry across Temporal Slices (6 segments across clip)
+    num_segs = 6
+    seg_len = max(1, T // num_segs)
+    entry_timeline = []
+    for name, band in [
+        ("Drums", high_band),
+        ("Bass", sub_bass),
+        ("Keys / Synth", mid_band),
+        ("Guitar", low_mid),
+    ]:
+        entry_seg = num_segs - 1
+        for s in range(num_segs):
+            seg_slice = band[:, s * seg_len : (s + 1) * seg_len]
+            if seg_slice.mean() > 0.36:
+                entry_seg = s
+                break
+        entry_timeline.append((name, entry_seg))
+
+    # Add vocal entry segment
+    if vocal_presence >= 0.25:
+        vocal_entry = num_segs - 1
+        for s in range(num_segs):
+            seg_env = mid_env[s * seg_len : (s + 1) * seg_len]
+            if len(seg_env) > 16 and np.abs(np.diff(seg_env)).mean() > 0.02:
+                vocal_entry = s
+                break
+        entry_timeline.append(("Vocals", vocal_entry))
+
+    entry_timeline.sort(key=lambda x: x[1])
+    order_of_entry = [name for name, _ in entry_timeline]
+
+    # 3. Instrument Pace & Subdivision
+    if onset_rate > 5.2 or bpm >= 135:
+        pace = "Rapid & Driving (16th-Note Subdivision)"
+    elif onset_rate > 3.2 or bpm >= 110:
+        pace = "Upbeat & Groovy (8th-Note Subdivision)"
+    elif onset_rate > 1.8 or bpm >= 80:
+        pace = "Steady Mid-Tempo (4-on-the-Floor)"
+    else:
+        pace = "Laid-back & Spacious (Half-Time Groove)"
+
+    # 4. Vocal Pattern & Complementation
+    if vocal_presence < 0.22:
+        vocal_pattern = "Instrumental (No Lead Vocals)"
+        vocal_complementation = "None (Instrumental Focus)"
+    else:
+        syllable_rate = onset_rate * vocal_presence
+        if syllable_rate > 3.8:
+            vocal_pattern = "Rhythmic Cadence (Rap / Flow / Syllabic)"
+        elif mid_flux < 0.038:
+            vocal_pattern = "Melodic Legato (Sustained Ballad / Soulful)"
+        else:
+            vocal_pattern = "Dynamic Melodic Phrasing"
+
+        if T > 2 and len(comb_transients) == len(mid_env) - 1:
+            corr = float(np.corrcoef(comb_transients, mid_env[1:])[0, 1])
+            if np.isnan(corr):
+                corr = 0.3
+        else:
+            corr = 0.3
+
+        if corr > 0.38:
+            vocal_complementation = "Beat-Locked (In-The-Pocket Groove)"
+        elif corr < 0.06:
+            vocal_complementation = "Call-and-Response (Dynamic Interplay)"
+        else:
+            vocal_complementation = "Atmospheric Counterpoint (Floating Lead)"
+
+    return {
+        "instruments": detected_instruments,
+        "instrumentOrder": order_of_entry,
+        "instrumentPace": pace,
+        "vocalPresence": round(vocal_presence, 2),
+        "vocalPattern": vocal_pattern,
+        "vocalComplementation": vocal_complementation,
+    }
+
+
+def _synthesize_structural_meta_if_missing(meta: dict) -> dict:
+    """Enrich metadata dict with structural defaults if missing."""
+    if meta.get("instruments") and meta.get("instrumentOrder") and meta.get("instrumentPace"):
+        return meta
+
+    genre = str(meta.get("genre", "")).lower()
+    bpm = int(meta.get("bpm", 120))
+    energy = float(meta.get("energy", 0.5))
+
+    if any(k in genre for k in ("rock", "metal", "punk", "grunge", "indie")):
+        insts = ["Guitar & Strings", "Drums & Percussion", "Bass & 808"]
+        order = ["Guitar", "Drums", "Bass", "Vocals"]
+    elif any(k in genre for k in ("hip-hop", "rap", "trap", "drill")):
+        insts = ["Drums & Percussion", "Bass & 808", "Synthesizer & Keys"]
+        order = ["Drums", "Bass", "Keys / Synth", "Vocals"]
+    elif any(k in genre for k in ("electronic", "edm", "dance", "house", "techno", "dnb")):
+        insts = ["Synthesizer & Keys", "Drums & Percussion", "Bass & 808"]
+        order = ["Keys / Synth", "Drums", "Bass"]
+    elif any(k in genre for k in ("acoustic", "folk", "classical")):
+        insts = ["Guitar & Strings", "Acoustic Piano & Keys"]
+        order = ["Keys / Synth", "Guitar", "Vocals"]
+    else:
+        insts = ["Drums & Percussion", "Synthesizer & Keys", "Bass & 808"]
+        order = ["Keys / Synth", "Drums", "Bass", "Vocals"]
+
+    if bpm >= 135 or energy >= 0.75:
+        pace = "Rapid & Driving (16th-Note Subdivision)"
+    elif bpm >= 110 or energy >= 0.55:
+        pace = "Upbeat & Groovy (8th-Note Subdivision)"
+    elif bpm >= 80:
+        pace = "Steady Mid-Tempo (4-on-the-Floor)"
+    else:
+        pace = "Laid-back & Spacious (Half-Time Groove)"
+
+    if any(k in genre for k in ("hip-hop", "rap", "trap")):
+        vocal_pattern = "Rhythmic Cadence (Rap / Flow / Syllabic)"
+        vocal_comp = "Beat-Locked (In-The-Pocket Groove)"
+        vocal_pres = 0.88
+    elif any(k in genre for k in ("classical", "ambient", "instrumental")):
+        vocal_pattern = "Instrumental (No Lead Vocals)"
+        vocal_comp = "None (Instrumental Focus)"
+        vocal_pres = 0.05
+    else:
+        vocal_pattern = "Melodic Legato (Sustained Ballad / Soulful)" if energy < 0.5 else "Dynamic Melodic Phrasing"
+        vocal_comp = "Beat-Locked (In-The-Pocket Groove)" if energy > 0.6 else "Call-and-Response (Dynamic Interplay)"
+        vocal_pres = 0.78
+
+    meta["instruments"] = meta.get("instruments") or insts
+    meta["instrumentOrder"] = meta.get("instrumentOrder") or order
+    meta["instrumentPace"] = meta.get("instrumentPace") or pace
+    meta["vocalPresence"] = meta.get("vocalPresence", vocal_pres)
+    meta["vocalPattern"] = meta.get("vocalPattern") or vocal_pattern
+    meta["vocalComplementation"] = meta.get("vocalComplementation") or vocal_comp
+    return meta
+
+
+def _instrument_similarity(insts_a: list[str], insts_b: list[str]) -> float:
+    if not insts_a or not insts_b:
+        return 0.7
+    set_a, set_b = set(insts_a), set(insts_b)
+    jaccard = len(set_a & set_b) / max(1, len(set_a | set_b))
+    return float(np.clip(0.4 + 0.6 * jaccard, 0.2, 1.0))
+
+
+def _order_similarity(order_a: list[str], order_b: list[str]) -> float:
+    if not order_a or not order_b:
+        return 0.7
+    first_match = 1.0 if order_a[0] == order_b[0] else 0.55
+    common = set(order_a) & set(order_b)
+    overlap = len(common) / max(1, len(set(order_a) | set(order_b)))
+    return 0.5 * first_match + 0.5 * overlap
+
+
+def _pace_similarity(pace_a: str, pace_b: str) -> float:
+    if not pace_a or not pace_b:
+        return 0.75
+    if pace_a == pace_b:
+        return 1.0
+    paces = [
+        "Laid-back & Spacious (Half-Time Groove)",
+        "Steady Mid-Tempo (4-on-the-Floor)",
+        "Upbeat & Groovy (8th-Note Subdivision)",
+        "Rapid & Driving (16th-Note Subdivision)",
+    ]
+    idx_a = paces.index(pace_a) if pace_a in paces else 1
+    idx_b = paces.index(pace_b) if pace_b in paces else 1
+    return max(0.35, 1.0 - 0.22 * abs(idx_a - idx_b))
+
+
+def _vocal_similarity(src_m: dict, cand_m: dict) -> float:
+    p_a = float(src_m.get("vocalPresence", 0.5))
+    p_b = float(cand_m.get("vocalPresence", 0.5))
+    presence_score = max(0.25, 1.0 - abs(p_a - p_b))
+
+    pat_a = str(src_m.get("vocalPattern", ""))
+    pat_b = str(cand_m.get("vocalPattern", ""))
+    pat_score = 1.0 if pat_a == pat_b else 0.65
+
+    comp_a = str(src_m.get("vocalComplementation", ""))
+    comp_b = str(cand_m.get("vocalComplementation", ""))
+    comp_score = 1.0 if comp_a == comp_b else 0.70
+
+    return 0.4 * presence_score + 0.3 * pat_score + 0.3 * comp_score
 
 
 def _key_compatibility(key_a: str, key_b: str) -> float:
@@ -356,16 +618,52 @@ def compute_composite_match_score(
     cand_metrics: dict,
 ) -> float:
     """
-    100% Data-Driven Neural Similarity Score in [0, 1].
-    Directly evaluates the learned acoustic, timbral, and emotional geometry in the 512-d
-    latent space discovered by CnnMusicEncoder, free of human-engineered music formulas.
+    Structural Composite Matching Score in [0, 1]:
+      - 512-d neural embedding similarity (timbral & acoustic manifold) [45%]
+      - Instruments used overlap [15%]
+      - Arrangement progression & order of entry [10%]
+      - Instrumental pace & subdivision [10%]
+      - Vocal presence, phrasing pattern & complementation groove [10%]
+      - Harmonic Key & BPM octave compatibility [10%]
     """
     a = src_emb.flatten()
     b = cand_emb.flatten()
     cos_sim = float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-8))
-    # Calibrate neural similarity into intuitive [0.05, 0.99] match percentage
-    score = float(np.clip((cos_sim + 0.1) / 1.1, 0.05, 0.99))
-    return round(score, 4)
+    s_neural = float(np.clip((cos_sim + 0.1) / 1.1, 0.05, 1.0))
+
+    s_inst = _instrument_similarity(
+        src_metrics.get("instruments", []),
+        cand_metrics.get("instruments", []),
+    )
+    s_order = _order_similarity(
+        src_metrics.get("instrumentOrder", []),
+        cand_metrics.get("instrumentOrder", []),
+    )
+    s_pace = _pace_similarity(
+        src_metrics.get("instrumentPace", ""),
+        cand_metrics.get("instrumentPace", ""),
+    )
+    s_vocal = _vocal_similarity(src_metrics, cand_metrics)
+
+    s_key = _key_compatibility(
+        str(src_metrics.get("key", "—")),
+        str(cand_metrics.get("key", "—")),
+    )
+    s_bpm = _bpm_compatibility(
+        int(src_metrics.get("bpm", 0)),
+        int(cand_metrics.get("bpm", 0)),
+    )
+    s_harmonic = 0.5 * s_key + 0.5 * s_bpm
+
+    total = (
+        0.45 * s_neural
+        + 0.15 * s_inst
+        + 0.10 * s_order
+        + 0.10 * s_pace
+        + 0.10 * s_vocal
+        + 0.10 * s_harmonic
+    )
+    return round(float(np.clip(total, 0.05, 0.99)), 4)
 
 
 def _decode_audio(audio_bytes: bytes) -> np.ndarray:
@@ -506,7 +804,8 @@ class MusicRecommender:
 
         logger.info("Loading track metadata from %s", meta_path)
         with open(meta_path, encoding="utf-8") as f:
-            self._metadata = json.load(f)
+            raw_meta = json.load(f)
+            self._metadata = [_synthesize_structural_meta_if_missing(dict(item)) for item in raw_meta]
 
         archetype_path = meta_path.parent / "archetypes.json"
         if archetype_path.exists():
@@ -616,20 +915,28 @@ class MusicRecommender:
             if not artist or (title.startswith("Track ") and title[6:].isdigit()):
                 continue
 
-            # Compute composite score if per-track metrics exist in metadata, else calibrated cosine
-            if source_metrics and meta.get("bpm", 0) > 0:
-                cand_emb_score = float(np.clip((float(dist) - 0.05) / 0.95, 0.0, 1.0))
-                e_diff = abs(float(source_metrics.get("energy", 0.5)) - float(meta.get("energy", 0.5)))
-                v_diff = abs(float(source_metrics.get("valence", 0.5)) - float(meta.get("valence", 0.5)))
-                ev_score = float(np.clip(1.0 - 0.85 * np.hypot(e_diff, v_diff), 0.1, 1.0))
-                bpm_score = _bpm_compatibility(int(source_metrics.get("bpm", 0)), int(meta.get("bpm", 0)))
-                key_score = _key_compatibility(str(source_metrics.get("key", "—")), str(meta.get("key", "—")))
-                meta["matchScore"] = round(
-                    float(np.clip(0.65 * cand_emb_score + 0.15 * ev_score + 0.10 * bpm_score + 0.10 * key_score, 0.01, 0.99)),
-                    4,
+            # Compute structural composite score incorporating neural, instruments, order, pace & vocals
+            if source_metrics:
+                cand_emb_score = float(np.clip((float(dist) + 0.1) / 1.1, 0.05, 1.0))
+                s_inst = _instrument_similarity(source_metrics.get("instruments", []), meta.get("instruments", []))
+                s_order = _order_similarity(source_metrics.get("instrumentOrder", []), meta.get("instrumentOrder", []))
+                s_pace = _pace_similarity(source_metrics.get("instrumentPace", ""), meta.get("instrumentPace", ""))
+                s_vocal = _vocal_similarity(source_metrics, meta)
+                s_key = _key_compatibility(str(source_metrics.get("key", "—")), str(meta.get("key", "—")))
+                s_bpm = _bpm_compatibility(int(source_metrics.get("bpm", 0)), int(meta.get("bpm", 0)))
+                s_harmonic = 0.5 * s_key + 0.5 * s_bpm
+
+                comp_score = (
+                    0.45 * cand_emb_score
+                    + 0.15 * s_inst
+                    + 0.10 * s_order
+                    + 0.10 * s_pace
+                    + 0.10 * s_vocal
+                    + 0.10 * s_harmonic
                 )
+                meta["matchScore"] = round(float(np.clip(comp_score, 0.05, 0.99)), 4)
             else:
-                meta["matchScore"] = round(float(np.clip((float(dist) - 0.05) / 0.95, 0.01, 0.99)), 4)
+                meta["matchScore"] = round(float(np.clip((float(dist) + 0.1) / 1.1, 0.01, 0.99)), 4)
 
             if genre_kw:
                 track_genre_text = " ".join(
