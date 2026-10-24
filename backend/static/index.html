@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>echo — Acoustic AI Music Discovery</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #070709;
+      --bg-card: rgba(18, 18, 24, 0.7);
+      --bg-card-hover: rgba(28, 28, 38, 0.85);
+      --border: rgba(255, 255, 255, 0.08);
+      --border-accent: rgba(139, 92, 246, 0.4);
+      --accent: #8b5cf6;
+      --accent-glow: rgba(139, 92, 246, 0.35);
+      --teal: #2dd4bf;
+      --text: #f8f8fa;
+      --text-muted: #9ca3af;
+      --text-dim: #6b7280;
+      --radius: 16px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+      position: relative;
+    }
+
+    /* Ambient background glow */
+    .ambient-glow {
+      position: fixed;
+      width: 600px;
+      height: 600px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(139, 92, 246, 0.12) 0%, transparent 70%);
+      top: -200px;
+      left: 50%;
+      transform: translateX(-50%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 40px 24px 80px;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Header */
+    header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
+    .brand h1 {
+      font-size: 38px;
+      font-weight: 800;
+      letter-spacing: -1px;
+      background: linear-gradient(135deg, #ffffff 40%, var(--accent) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .badge {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(139, 92, 246, 0.15);
+      border: 1px solid rgba(139, 92, 246, 0.35);
+      color: #c4b5fd;
+    }
+
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 15px;
+    }
+
+    /* Input Card (Record / Search) */
+    .input-section {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      backdrop-filter: blur(20px);
+      border-radius: 24px;
+      padding: 36px 28px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+      margin-bottom: 40px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 28px;
+    }
+
+    /* Search bar */
+    .search-box {
+      width: 100%;
+      max-width: 600px;
+      position: relative;
+    }
+
+    .search-input {
+      width: 100%;
+      padding: 16px 20px 16px 48px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: #fff;
+      font-size: 15px;
+      font-family: inherit;
+      outline: none;
+      transition: all 0.25s ease;
+    }
+
+    .search-input:focus {
+      border-color: var(--accent);
+      background: rgba(255, 255, 255, 0.07);
+      box-shadow: 0 0 20px var(--accent-glow);
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 18px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-dim);
+      pointer-events: none;
+    }
+
+    /* Divider */
+    .divider {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      max-width: 400px;
+      gap: 16px;
+      color: var(--text-dim);
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .divider::before, .divider::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* Record Button Area */
+    .record-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .record-btn {
+      width: 88px;
+      height: 88px;
+      border-radius: 50%;
+      border: none;
+      background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      position: relative;
+      box-shadow: 0 10px 25px rgba(139, 92, 246, 0.45);
+      transition: all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    .record-btn:hover {
+      transform: scale(1.05);
+      box-shadow: 0 14px 30px rgba(139, 92, 246, 0.6);
+    }
+
+    .record-btn.recording {
+      background: linear-gradient(135deg, #ef4444, #b91c1c);
+      box-shadow: 0 10px 30px rgba(239, 68, 68, 0.6);
+      animation: pulse-ring 1.5s infinite;
+    }
+
+    @keyframes pulse-ring {
+      0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+      70% { box-shadow: 0 0 0 22px rgba(239, 68, 68, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    }
+
+    .record-status {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    /* Waveform Canvas */
+    #visualizer {
+      width: 100%;
+      max-width: 400px;
+      height: 48px;
+      border-radius: 8px;
+      display: none;
+    }
+
+    /* Hero Card */
+    .hero-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-accent);
+      border-radius: 24px;
+      padding: 32px;
+      backdrop-filter: blur(20px);
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+      margin-bottom: 40px;
+      display: none;
+    }
+
+    .hero-content {
+      display: flex;
+      gap: 28px;
+      align-items: center;
+    }
+
+    .hero-art {
+      width: 140px;
+      height: 140px;
+      border-radius: 18px;
+      object-fit: cover;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+      flex-shrink: 0;
+    }
+
+    .hero-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .hero-tagline {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--teal);
+      margin-bottom: 6px;
+    }
+
+    .hero-title {
+      font-size: 24px;
+      font-weight: 800;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 4px;
+    }
+
+    .hero-artist {
+      font-size: 16px;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+    }
+
+    .vibe-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .vibe-pill {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.06);
+      color: #e5e7eb;
+      border: 1px solid var(--border);
+    }
+
+    .hero-stats {
+      display: flex;
+      gap: 18px;
+      font-size: 13px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text-dim);
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .btn {
+      padding: 10px 18px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+      font-family: inherit;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+      text-decoration: none;
+    }
+
+    .btn-play {
+      background: var(--text);
+      color: #000;
+    }
+
+    .btn-play:hover {
+      background: #e5e7eb;
+      transform: translateY(-2px);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.14);
+    }
+
+    /* Recommendations Section */
+    .recs-section {
+      display: none;
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    .section-title {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    .recs-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+
+    .rec-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      transition: all 0.2s ease;
+      cursor: pointer;
+    }
+
+    .rec-card:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--border-accent);
+      transform: translateY(-2px);
+    }
+
+    .rec-rank {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-dim);
+      width: 24px;
+    }
+
+    .rec-art {
+      width: 52px;
+      height: 52px;
+      border-radius: 10px;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
+
+    .rec-details {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .rec-title {
+      font-size: 15px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 3px;
+    }
+
+    .rec-artist {
+      font-size: 13px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .rec-score {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      font-weight: 700;
+      padding: 6px 12px;
+      border-radius: 8px;
+      background: rgba(45, 212, 191, 0.12);
+      border: 1px solid rgba(45, 212, 191, 0.3);
+      color: var(--teal);
+    }
+
+    .rec-play-btn {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.05);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .rec-play-btn:hover {
+      background: var(--accent);
+      border-color: var(--accent);
+      transform: scale(1.08);
+    }
+
+    /* Loader */
+    .loader {
+      display: none;
+      text-align: center;
+      padding: 30px 0;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid rgba(139, 92, 246, 0.2);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 12px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    @media (max-width: 640px) {
+      .hero-content {
+        flex-direction: column;
+        text-align: center;
+      }
+      .hero-stats, .hero-actions {
+        justify-content: center;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="ambient-glow"></div>
+
+  <div class="container">
+    <header>
+      <div class="brand">
+        <h1>echo</h1>
+        <span class="badge">Acoustic AI</span>
+      </div>
+      <p class="subtitle">Self-supervised music discovery powered by raw acoustic neural representations</p>
+      
+      <!-- View Switcher -->
+      <div style="display:flex; justify-content:center; gap:12px; margin-top:20px;">
+        <button id="viewAppBtn" class="btn btn-play" style="font-size:12px; padding:6px 16px;">Music Discovery</button>
+        <button id="viewVizBtn" class="btn btn-secondary" style="font-size:12px; padding:6px 16px;">Model Visualizations</button>
+      </div>
+    </header>
+
+    <!-- Visualizations View -->
+    <div id="vizSection" style="display:none; margin-bottom:40px;">
+      <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:24px; padding:28px; backdrop-filter:blur(20px);">
+        <h3 style="font-size:20px; font-weight:700; margin-bottom:8px;">Model Visualizations (1,656 Commercial Songs)</h3>
+        <p style="color:var(--text-muted); font-size:14px; margin-bottom:24px;">The 512-dimensional acoustic universe discovered by CnnMusicEncoder projected into 2D.</p>
+        
+        <div style="display:grid; grid-template-columns:1fr; gap:24px;">
+          <div>
+            <h4 style="font-size:15px; font-weight:600; margin-bottom:8px; color:var(--teal);">2D t-SNE Embedding Cluster Map</h4>
+            <img src="/static/tsne.png" alt="t-SNE Embeddings" style="width:100%; border-radius:12px; border:1px solid var(--border);">
+          </div>
+          <div>
+            <h4 style="font-size:15px; font-weight:600; margin-bottom:8px; color:var(--accent);">Cross-Genre Acoustic Similarity Heatmap</h4>
+            <img src="/static/genre_similarity.png" alt="Genre Similarity" style="width:100%; border-radius:12px; border:1px solid var(--border);">
+          </div>
+          <div>
+            <h4 style="font-size:15px; font-weight:600; margin-bottom:8px; color:#e5e7eb;">Training & Validation Loss Convergence</h4>
+            <img src="/static/training_curves.png" alt="Training Curves" style="width:100%; border-radius:12px; border:1px solid var(--border);">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="input-section">
+      <!-- Search Input -->
+      <div class="search-box">
+        <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input type="text" id="searchInput" class="search-input" placeholder="Search any song or artist (e.g. For a reason Karan Aujla)...">
+      </div>
+
+      <div class="divider">or identify sound</div>
+
+      <!-- Record Button Area -->
+      <div class="record-container">
+        <button id="recordBtn" class="record-btn" title="Click to record audio from microphone">
+          <svg id="micIcon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+            <line x1="12" y1="19" x2="12" y2="23"></line>
+            <line x1="8" y1="23" x2="16" y2="23"></line>
+          </svg>
+        </button>
+        <canvas id="visualizer"></canvas>
+        <div id="recordStatus" class="record-status">Tap microphone to identify music</div>
+      </div>
+    </div>
+
+    <!-- Loading State -->
+    <div id="loader" class="loader">
+      <div class="spinner"></div>
+      <div id="loaderText">Analyzing neural acoustic dimensions...</div>
+    </div>
+
+    <!-- Hero Card -->
+    <div id="heroCard" class="hero-card">
+      <div class="hero-content">
+        <img id="heroArt" class="hero-art" src="" alt="Album Art">
+        <div class="hero-info">
+          <div class="hero-tagline">Identified Acoustic Source</div>
+          <h2 id="heroTitle" class="hero-title">Song Title</h2>
+          <div id="heroArtist" class="hero-artist">Artist Name</div>
+          <div id="heroVibes" class="vibe-pills"></div>
+          <div class="hero-stats">
+            <span id="statBpm">-- BPM</span>
+            <span>•</span>
+            <span id="statKey">-- Key</span>
+            <span>•</span>
+            <span id="statEnergy">Energy: --%</span>
+          </div>
+          <div class="hero-actions">
+            <button id="heroPlayBtn" class="btn btn-play">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+              <span>Play Preview</span>
+            </button>
+            <a id="heroSpotifyBtn" class="btn btn-secondary" href="#" target="_blank">Open in Spotify</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recommendations -->
+    <div id="recsSection" class="recs-section">
+      <div class="section-header">
+        <h3 class="section-title">Similar Acoustic Vibe</h3>
+        <span class="badge" id="neuralBadge">100% Neural Similarity</span>
+      </div>
+      <div id="recsGrid" class="recs-grid"></div>
+    </div>
+  </div>
+
+  <audio id="audioPlayer"></audio>
+
+  <script>
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let audioCtx = null;
+    let analyser = null;
+    let animId = null;
+    let currentlyPlayingBtn = null;
+
+    const recordBtn = document.getElementById('recordBtn');
+    const recordStatus = document.getElementById('recordStatus');
+    const visualizer = document.getElementById('visualizer');
+    const searchInput = document.getElementById('searchInput');
+    const loader = document.getElementById('loader');
+    const loaderText = document.getElementById('loaderText');
+    const heroCard = document.getElementById('heroCard');
+    const recsSection = document.getElementById('recsSection');
+    const recsGrid = document.getElementById('recsGrid');
+    const audioPlayer = document.getElementById('audioPlayer');
+    const heroPlayBtn = document.getElementById('heroPlayBtn');
+    const viewAppBtn = document.getElementById('viewAppBtn');
+    const viewVizBtn = document.getElementById('viewVizBtn');
+    const vizSection = document.getElementById('vizSection');
+    const inputSection = document.querySelector('.input-section');
+
+    viewAppBtn.addEventListener('click', () => {
+      vizSection.style.display = 'none';
+      inputSection.style.display = 'flex';
+      viewAppBtn.className = 'btn btn-play';
+      viewVizBtn.className = 'btn btn-secondary';
+    });
+
+    viewVizBtn.addEventListener('click', () => {
+      vizSection.style.display = 'block';
+      inputSection.style.display = 'none';
+      heroCard.style.display = 'none';
+      recsSection.style.display = 'none';
+      viewVizBtn.className = 'btn btn-play';
+      viewAppBtn.className = 'btn btn-secondary';
+    });
+
+    // Search on Enter
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && searchInput.value.trim()) {
+        performSearch(searchInput.value.trim());
+      }
+    });
+
+    // Audio Playback Handler
+    function togglePlay(url, btn) {
+      if (!url) {
+        alert("No audio preview available for this track.");
+        return;
+      }
+      if (audioPlayer.src === url && !audioPlayer.paused) {
+        audioPlayer.pause();
+        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Play Preview</span>`;
+        currentlyPlayingBtn = null;
+      } else {
+        if (currentlyPlayingBtn && currentlyPlayingBtn !== btn) {
+          currentlyPlayingBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Play Preview</span>`;
+        }
+        audioPlayer.src = url;
+        audioPlayer.play();
+        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg><span>Pause</span>`;
+        currentlyPlayingBtn = btn;
+      }
+    }
+
+    audioPlayer.addEventListener('ended', () => {
+      if (currentlyPlayingBtn) {
+        currentlyPlayingBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Play Preview</span>`;
+        currentlyPlayingBtn = null;
+      }
+    });
+
+    // Recording logic
+    recordBtn.addEventListener('click', async () => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        startRecording(stream);
+      } catch (err) {
+        alert("Microphone access denied or unavailable: " + err.message);
+      }
+    });
+
+    function startRecording(stream) {
+      audioChunks = [];
+      mediaRecorder = new MediaRecorder(stream);
+
+      // Web Audio Visualizer
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = audioCtx.createMediaStreamSource(stream);
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 64;
+      source.connect(analyser);
+
+      visualizer.style.display = 'block';
+      drawVisualizer();
+
+      mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
+      mediaRecorder.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        cancelAnimationFrame(animId);
+        visualizer.style.display = 'none';
+        recordBtn.classList.remove('recording');
+        recordStatus.textContent = 'Analyzing audio with Echo neural encoder...';
+        
+        const audioBlob = new Blob(audioChunks, { type: 'audio/m4a' });
+        sendAudioToBackend(audioBlob);
+      };
+
+      mediaRecorder.start();
+      recordBtn.classList.add('recording');
+      recordStatus.textContent = 'Listening... Tap again to identify';
+
+      // Auto-stop after 12s
+      setTimeout(() => {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+          mediaRecorder.stop();
+        }
+      }, 12000);
+    }
+
+    function drawVisualizer() {
+      const canvas = visualizer;
+      const ctx = canvas.getContext('2d');
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      function draw() {
+        animId = requestAnimationFrame(draw);
+        analyser.getByteFrequencyData(dataArray);
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const barWidth = (canvas.width / bufferLength) * 1.5;
+        let x = 0;
+
+        for (let i = 0; i < bufferLength; i++) {
+          const barHeight = (dataArray[i] / 255) * canvas.height;
+          ctx.fillStyle = `rgba(139, 92, 246, ${dataArray[i] / 255 + 0.2})`;
+          ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+          x += barWidth + 2;
+        }
+      }
+      draw();
+    }
+
+    async function sendAudioToBackend(blob) {
+      showLoader("Fingerprinting & neural encoding...");
+      try {
+        const formData = new FormData();
+        formData.append('file', blob, 'sample.m4a');
+        const res = await fetch('/api/identify', { method: 'POST', body: formData });
+        if (!res.ok) throw new Error("Identification failed (" + res.status + ")");
+        const data = await res.json();
+        renderResults(data.track, data.recommendations);
+      } catch (err) {
+        alert("Audio recognition error: " + err.message);
+      } finally {
+        hideLoader();
+        recordStatus.textContent = 'Tap microphone to identify music';
+      }
+    }
+
+    async function performSearch(query) {
+      showLoader(`Searching "${query}"...`);
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+        if (!res.ok) throw new Error("Search failed (" + res.status + ")");
+        const data = await res.json();
+        if (data.results && data.results.length > 0) {
+          const top = data.results[0];
+          // Get recommendations for top track
+          loaderText.textContent = "Computing neural acoustic neighbors...";
+          const recRes = await fetch(`/api/recommendations/${top.id}`);
+          const recData = await recRes.json();
+          renderResults(top, recData.recommendations);
+        } else {
+          alert("No songs found for that search.");
+        }
+      } catch (err) {
+        alert("Search error: " + err.message);
+      } finally {
+        hideLoader();
+      }
+    }
+
+    function renderResults(hero, recs) {
+      // Hero Card
+      heroCard.style.display = 'block';
+      document.getElementById('heroTitle').textContent = hero.title || 'Unknown Title';
+      document.getElementById('heroArtist').textContent = hero.artist || 'Unknown Artist';
+      document.getElementById('heroArt').src = hero.albumArtUrl || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300';
+      document.getElementById('statBpm').textContent = (hero.bpm || '--') + ' BPM';
+      document.getElementById('statKey').textContent = hero.key || '-- Key';
+      document.getElementById('statEnergy').textContent = 'Energy: ' + Math.round((hero.energy || 0.5) * 100) + '%';
+      document.getElementById('heroSpotifyBtn').href = `https://open.spotify.com/search/${encodeURIComponent(hero.title + ' ' + hero.artist)}`;
+
+      heroPlayBtn.onclick = () => togglePlay(hero.previewUrl, heroPlayBtn);
+
+      const vibesEl = document.getElementById('heroVibes');
+      vibesEl.innerHTML = '';
+      (hero.vibes || []).forEach(v => {
+        const pill = document.createElement('span');
+        pill.className = 'vibe-pill';
+        pill.textContent = v;
+        vibesEl.appendChild(pill);
+      });
+
+      // Recs Section
+      recsSection.style.display = 'block';
+      recsGrid.innerHTML = '';
+
+      if (!recs || recs.length === 0) {
+        recsGrid.innerHTML = '<div style="color:var(--text-dim); text-align:center; padding:20px;">No similar tracks found.</div>';
+        return;
+      }
+
+      recs.forEach((track, idx) => {
+        const card = document.createElement('div');
+        card.className = 'rec-card';
+        const matchPct = track.matchScore ? Math.round(track.matchScore * 100) : 90 - idx * 2;
+
+        card.innerHTML = `
+          <div class="rec-rank">#${idx + 1}</div>
+          <img class="rec-art" src="${track.albumArtUrl || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=120'}" alt="">
+          <div class="rec-details">
+            <div class="rec-title">${track.title}</div>
+            <div class="rec-artist">${track.artist}</div>
+          </div>
+          <div class="rec-score">${matchPct}%</div>
+          <button class="rec-play-btn" title="Play preview">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          </button>
+        `;
+
+        const playBtn = card.querySelector('.rec-play-btn');
+        playBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          togglePlay(track.previewUrl, playBtn);
+        });
+
+        // Clicking card selects it as the new hero
+        card.addEventListener('click', () => {
+          showLoader(`Finding songs with vibe similar to "${track.title}"...`);
+          fetch(`/api/recommendations/${track.id}`)
+            .then(r => r.json())
+            .then(data => renderResults(track, data.recommendations))
+            .catch(err => alert("Error: " + err.message))
+            .finally(hideLoader);
+        });
+
+        recsGrid.appendChild(card);
+      });
+
+      heroCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function showLoader(text) {
+      loaderText.textContent = text || 'Loading...';
+      loader.style.display = 'block';
+    }
+
+    function hideLoader() {
+      loader.style.display = 'none';
+    }
+  </script>
+</body>
+</html>

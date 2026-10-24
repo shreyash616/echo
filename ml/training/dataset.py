@@ -71,8 +71,9 @@ def _energy_matched_crop_pair(
 
     # 1. Sample view_a proportional to window energy (with 5% floor)
     floor = 0.05 * (float(win_e.max()) + 1e-8)
-    weights_a = win_e - float(win_e.min()) + floor
+    weights_a = (win_e - float(win_e.min()) + floor).astype(np.float64)
     probs_a = weights_a / weights_a.sum()
+    probs_a /= probs_a.sum()
     start_a = int(np.random.choice(n_wins, p=probs_a))
 
     # 2. Sample view_b from a window with similar energy to view_a,
@@ -86,8 +87,9 @@ def _energy_matched_crop_pair(
     dist_frames = np.abs(positions - start_a)
     non_overlap = np.where(dist_frames < crop_frames // 3, 0.15, 1.0)
 
-    weights_b = weights_a * sim_weights * non_overlap
+    weights_b = (weights_a * sim_weights * non_overlap).astype(np.float64)
     probs_b = weights_b / (weights_b.sum() + 1e-8)
+    probs_b /= probs_b.sum()
     start_b = int(np.random.choice(n_wins, p=probs_b))
 
     crop_a = mel[:, start_a : start_a + crop_frames].copy()

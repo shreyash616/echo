@@ -27,5 +27,6 @@ hf_hub_download(
 download_if_missing "music_encoder.onnx"
 download_if_missing "music_index.faiss"
 download_if_missing "track_metadata.json"
+download_if_missing "archetypes.json"
 
 exec uvicorn main:app --host 0.0.0.0 --port 7860

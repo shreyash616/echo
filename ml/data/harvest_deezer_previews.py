@@ -20,9 +20,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import glob
 import io
 import json
 import logging
+import os
+import shutil
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -43,6 +46,18 @@ N_MELS      = 128
 N_FFT       = 2048
 HOP_LENGTH  = 512
 TOP_DB      = 80.0
+
+def _get_ffmpeg_cmd() -> str:
+    which = shutil.which("ffmpeg")
+    if which:
+        return which
+    winget_paths = glob.glob(
+        os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg*\**\ffmpeg.exe"),
+        recursive=True,
+    )
+    if winget_paths:
+        return winget_paths[0]
+    return "ffmpeg"
 
 # Curated multi-genre & multi-language seed queries to build a diverse mainstream catalog
 DEFAULT_SEED_QUERIES: list[tuple[str, str]] = [
@@ -81,11 +96,12 @@ _HEADERS = {
 
 
 def _decode_mp3_bytes_to_mel(audio_bytes: bytes) -> np.ndarray | None:
-    """Decode raw MP3 preview bytes via ffmpeg and extract fixed-floor mel spectrogram."""
+    """Decode raw MP3/AAC preview bytes via ffmpeg and extract fixed-floor mel spectrogram."""
     try:
+        ffmpeg_cmd = _get_ffmpeg_cmd()
         proc = subprocess.run(
             [
-                "ffmpeg", "-i", "pipe:0",
+                ffmpeg_cmd, "-i", "pipe:0",
                 "-f", "wav", "-ar", str(SR), "-ac", "1",
                 "-loglevel", "error",
                 "pipe:1",
@@ -111,7 +127,7 @@ def _decode_mp3_bytes_to_mel(audio_bytes: bytes) -> np.ndarray | None:
 
 
 def _fetch_tracks_for_query(client: httpx.Client, query: str, genre: str, limit: int) -> list[dict]:
-    """Query Deezer search API with pagination up to `limit` tracks."""
+    """Query Deezer search API with pagination up to `limit` tracks, with iTunes fallback."""
     collected: list[dict] = []
     index = 0
     page_size = min(50, limit)
@@ -150,8 +166,39 @@ def _fetch_tracks_for_query(client: httpx.Client, query: str, genre: str, limit:
                 break
             time.sleep(0.15)
         except Exception as exc:
-            logger.debug("Query %r failed at index=%d: %s", query, index, exc)
+            logger.debug("Deezer query %r failed at index=%d: %s", query, index, exc)
             break
+
+    # If Deezer returned no previews (e.g. region-restricted), fall back to iTunes Search API
+    if len(collected) < limit:
+        try:
+            needed = limit - len(collected)
+            resp = client.get(
+                "https://itunes.apple.com/search",
+                params={"term": query, "entity": "song", "limit": min(needed, 50)},
+                timeout=10.0,
+            )
+            if resp.status_code == 200:
+                for item in resp.json().get("results", []):
+                    preview = item.get("previewUrl")
+                    if not preview:
+                        continue
+                    art = (item.get("artworkUrl100") or "").replace("100x100bb", "600x600bb")
+                    collected.append({
+                        "id":          f"it_{item['trackId']}",
+                        "title":       item.get("trackName", ""),
+                        "artist":      item.get("artistName", ""),
+                        "album":       item.get("collectionName", ""),
+                        "albumArtUrl": art,
+                        "previewUrl":  preview,
+                        "durationMs":  int(item.get("trackTimeMillis", 30000)),
+                        "genre":       genre,
+                    })
+                    if len(collected) >= limit:
+                        break
+        except Exception as exc:
+            logger.debug("iTunes fallback query %r failed: %s", query, exc)
+
     return collected
 
 

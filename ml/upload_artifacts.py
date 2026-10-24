@@ -18,6 +18,7 @@ ARTIFACTS = [
     "ml/inference/music_encoder.onnx",
     "ml/inference/music_index.faiss",
     "ml/inference/track_metadata.json",
+    "ml/inference/archetypes.json",
 ]
 
 api = HfApi(token=token)

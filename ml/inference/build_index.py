@@ -327,6 +327,48 @@ def main() -> None:
     logger.info("FAISS index saved → %s", index_path)
 
     # ------------------------------------------------------------------ #
+    # Unsupervised Acoustic Archetype Discovery (Data-Discovered Vibes)
+    # ------------------------------------------------------------------ #
+    from collections import Counter
+    from sklearn.cluster import KMeans
+
+    n_clusters = min(14, len(metadata))
+    logger.info("Discovering %d natural acoustic archetypes via unsupervised clustering...", n_clusters)
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    cluster_labels = kmeans.fit_predict(emb_matrix)
+    centers = kmeans.cluster_centers_  # (n_clusters, 512)
+    centers = centers / (np.linalg.norm(centers, axis=1, keepdims=True) + 1e-8)
+
+    # Automatically derive human-interpretable names for each archetype
+    # based on prominent genre/artists in that cluster
+    archetype_names: dict[str, str] = {}
+    for c_id in range(n_clusters):
+        c_indices = np.where(cluster_labels == c_id)[0]
+        c_genres = [metadata[i].get("genre", "") for i in c_indices if metadata[i].get("genre")]
+        top_genres = [g for g, _ in Counter(c_genres).most_common(2) if g]
+        if top_genres:
+            archetype_names[str(c_id)] = " / ".join(top_genres).title()
+        else:
+            archetype_names[str(c_id)] = f"Acoustic Vibe #{c_id + 1}"
+
+    # Assign each song its top-2 matching discovered archetypes
+    for i, meta in enumerate(metadata):
+        song_emb = emb_matrix[i]
+        affinities = np.dot(centers, song_emb)
+        top_archetype_indices = np.argsort(-affinities)[:2]
+        meta["vibes"] = [archetype_names[str(idx)] for idx in top_archetype_indices]
+
+    # Save archetype centers and labels for real-time inference in backend
+    archetype_path = output_dir / "archetypes.json"
+    archetype_data = {
+        "centers": centers.tolist(),
+        "names": archetype_names,
+    }
+    with open(archetype_path, "w", encoding="utf-8") as f:
+        json.dump(archetype_data, f, ensure_ascii=False, indent=2)
+    logger.info("Acoustic archetypes saved to %s", archetype_path)
+
+    # ------------------------------------------------------------------ #
     # Save metadata JSON
     # ------------------------------------------------------------------ #
     meta_path = output_dir / "track_metadata.json"

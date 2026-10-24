@@ -162,6 +162,9 @@ def val_epoch(
     proj_head.eval()
     total_loss = 0.0
 
+    if not len(loader):
+        return 0.0
+
     for view_a, view_b in loader:
         view_a = view_a.to(device, non_blocking=True)
         view_b = view_b.to(device, non_blocking=True)
@@ -221,13 +224,14 @@ def main() -> None:
         pin_memory=True,
         drop_last=True,   # NT-Xent requires consistent batch sizes
     )
+    val_batch = min(args.batch, max(32, len(val_ds) // 2)) if len(val_ds) >= 32 else len(val_ds)
     val_loader = DataLoader(
         val_ds,
-        batch_size=args.batch,
+        batch_size=val_batch,
         shuffle=False,
         num_workers=args.workers,
         pin_memory=True,
-        drop_last=True,
+        drop_last=(len(val_ds) >= val_batch * 2),
     )
 
     model     = CnnMusicEncoder(

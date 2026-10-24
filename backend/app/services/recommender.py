@@ -356,38 +356,16 @@ def compute_composite_match_score(
     cand_metrics: dict,
 ) -> float:
     """
-    Compute Echo's unified similarity score in [0, 1] combining:
-      - 65%: CnnMusicEncoder acoustic + emotion neural cosine similarity
-      - 15%: Self-generated (energy, valence) mood/intensity proximity
-      - 10%: Self-generated BPM / tempo compatibility
-      - 10%: Self-generated harmonic key compatibility
+    100% Data-Driven Neural Similarity Score in [0, 1].
+    Directly evaluates the learned acoustic, timbral, and emotional geometry in the 512-d
+    latent space discovered by CnnMusicEncoder, free of human-engineered music formulas.
     """
     a = src_emb.flatten()
     b = cand_emb.flatten()
     cos_sim = float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-8))
-    # Calibrate cosine similarity so orthogonal (<=0) maps near 0 and strong matches map to [0.6, 0.99]
-    emb_score = float(np.clip((cos_sim - 0.05) / 0.95, 0.0, 1.0))
-
-    e_diff = abs(float(src_metrics.get("energy", 0.5)) - float(cand_metrics.get("energy", 0.5)))
-    v_diff = abs(float(src_metrics.get("valence", 0.5)) - float(cand_metrics.get("valence", 0.5)))
-    ev_score = float(np.clip(1.0 - 0.85 * np.hypot(e_diff, v_diff), 0.1, 1.0))
-
-    bpm_score = _bpm_compatibility(
-        int(src_metrics.get("bpm", 0)),
-        int(cand_metrics.get("bpm", 0)),
-    )
-    key_score = _key_compatibility(
-        str(src_metrics.get("key", "—")),
-        str(cand_metrics.get("key", "—")),
-    )
-
-    composite = (
-        0.65 * emb_score
-        + 0.15 * ev_score
-        + 0.10 * bpm_score
-        + 0.10 * key_score
-    )
-    return round(float(np.clip(composite, 0.01, 0.99)), 4)
+    # Calibrate neural similarity into intuitive [0.05, 0.99] match percentage
+    score = float(np.clip((cos_sim + 0.1) / 1.1, 0.05, 0.99))
+    return round(score, 4)
 
 
 def _decode_audio(audio_bytes: bytes) -> np.ndarray:
@@ -492,6 +470,8 @@ class MusicRecommender:
         self._sess:       ort.InferenceSession | None = None
         self._index:      faiss.Index          | None = None
         self._metadata:   list[dict]                  = []
+        self._archetype_centers: np.ndarray    | None = None
+        self._archetype_names:   dict[str, str]       = {}
         self._input_name: str                         = "mel_spectrogram"
         self._loaded = False
 
@@ -528,6 +508,17 @@ class MusicRecommender:
         with open(meta_path, encoding="utf-8") as f:
             self._metadata = json.load(f)
 
+        archetype_path = meta_path.parent / "archetypes.json"
+        if archetype_path.exists():
+            try:
+                with open(archetype_path, encoding="utf-8") as f:
+                    arch_data = json.load(f)
+                    self._archetype_centers = np.array(arch_data["centers"], dtype=np.float32)
+                    self._archetype_names = arch_data.get("names", {})
+                logger.info("Loaded %d data-discovered archetypes from %s", len(self._archetype_names), archetype_path)
+            except Exception as exc:
+                logger.warning("Could not load archetypes from %s: %s", archetype_path, exc)
+
         self._loaded = True
         logger.info("Recommender ready — %d tracks indexed", self._index.ntotal)
 
@@ -556,6 +547,12 @@ class MusicRecommender:
             pooled = (out * weights[:, np.newaxis]).sum(axis=0, keepdims=True)
             norm = np.linalg.norm(pooled, axis=1, keepdims=True) + 1e-8
             emb = (pooled / norm).astype(np.float32)
+
+            # Assign data-discovered archetypes if loaded
+            if self._archetype_centers is not None and len(self._archetype_centers) > 0:
+                affinities = np.dot(self._archetype_centers, emb.flatten())
+                top_indices = np.argsort(-affinities)[:2]
+                metrics["vibes"] = [self._archetype_names[str(idx)] for idx in top_indices if str(idx) in self._archetype_names]
         else:
             # Fallback deterministic spectral-emotion vector if ONNX session is unavailable
             emb = np.zeros((1, 512), dtype=np.float32)

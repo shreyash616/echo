@@ -63,21 +63,28 @@ def plot_tsne(
     output_path: Path,
 ) -> None:
     logger.info("Running t-SNE on %d × %d embeddings…", *emb.shape)
-    tsne = TSNE(
-        n_components=2,
-        perplexity=40,
-        learning_rate="auto",
-        init="pca",
-        n_iter=1000,
-        random_state=0,
-        n_jobs=-1,
-    )
+    tsne_kwargs = {
+        "n_components": 2,
+        "perplexity": 40,
+        "learning_rate": "auto",
+        "init": "pca",
+        "random_state": 0,
+        "n_jobs": -1,
+    }
+    try:
+        tsne = TSNE(max_iter=1000, **tsne_kwargs)
+    except TypeError:
+        tsne = TSNE(n_iter=1000, **tsne_kwargs)
     coords = tsne.fit_transform(emb)    # (N, 2)
 
     le = LabelEncoder().fit(genres)
     labels = le.transform(genres)
     n_classes = len(le.classes_)
-    cmap = cm.get_cmap("tab20", n_classes)
+    try:
+        cmap = plt.get_cmap("tab20", n_classes)
+    except Exception:
+        import matplotlib
+        cmap = matplotlib.colormaps.get_cmap("tab20")
 
     fig, ax = plt.subplots(figsize=(14, 10))
     fig.patch.set_facecolor("#0d0d0d")
