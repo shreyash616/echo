@@ -1161,7 +1161,15 @@
       searchDropdown.style.display = 'none';
       searchInput.value = `${song.title} - ${song.artist}`;
 
-      showLoader(`Analyzing acoustic vibe for "${song.title}"...`);
+      // Instant optimistic rendering for immediate user feedback
+      heroCard.style.display = 'block';
+      document.getElementById('heroTitle').textContent = song.title || 'Selected Track';
+      document.getElementById('heroArtist').textContent = song.artist || 'Unknown Artist';
+      document.getElementById('heroArt').src = song.albumArtUrl || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300';
+      recsSection.style.display = 'none';
+      heroCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      showLoader(`Analyzing acoustic dimensions & matching candidates for "${song.title}"...`);
       try {
         const divVal = diversitySlider ? diversitySlider.value : 0.72;
         // Fetch recommendations and enriched track stats concurrently
@@ -1322,9 +1330,6 @@
 
         recsGrid.appendChild(card);
       });
-    }
-
-      heroCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     function showLoader(text) {
