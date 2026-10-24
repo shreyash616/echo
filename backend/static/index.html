@@ -484,6 +484,58 @@
       color: #d1d5db;
     }
 
+    .rec-reasons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 6px;
+    }
+
+    .reason-badge {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(45, 212, 191, 0.12);
+      border: 1px solid rgba(45, 212, 191, 0.35);
+      color: #5eead4;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .discovery-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(18, 18, 24, 0.8);
+      border: 1px solid var(--border);
+      padding: 6px 14px;
+      border-radius: 999px;
+    }
+
+    .discovery-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+    }
+
+    .discovery-val {
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--teal);
+      min-width: 90px;
+    }
+
+    input[type=range].discovery-slider {
+      accent-color: var(--accent);
+      cursor: pointer;
+      width: 100px;
+      height: 4px;
+    }
+
     .hero-stats {
       display: flex;
       gap: 18px;
@@ -806,8 +858,15 @@
     <!-- Recommendations -->
     <div id="recsSection" class="recs-section">
       <div class="section-header">
-        <h3 class="section-title">Similar Acoustic Vibe</h3>
-        <span class="badge" id="neuralBadge">Neural + Instrument & Vocal Matching</span>
+        <div>
+          <h3 class="section-title">Similar Acoustic Vibe</h3>
+          <span class="badge" id="neuralBadge">Neural + MMR Diversity Reranked</span>
+        </div>
+        <div class="discovery-control" title="Tune between strict acoustic clones and broader sonic discovery">
+          <span class="discovery-label">Discovery Mode</span>
+          <input type="range" id="diversitySlider" class="discovery-slider" min="0.50" max="0.95" step="0.05" value="0.72">
+          <span id="diversityValue" class="discovery-val">Balanced (0.72)</span>
+        </div>
       </div>
       <div id="recsGrid" class="recs-grid"></div>
     </div>
@@ -838,6 +897,47 @@
     const viewVizBtn = document.getElementById('viewVizBtn');
     const vizSection = document.getElementById('vizSection');
     const inputSection = document.querySelector('.input-section');
+    const diversitySlider = document.getElementById('diversitySlider');
+    const diversityValue = document.getElementById('diversityValue');
+    let currentHeroTrack = null;
+
+    if (diversitySlider && diversityValue) {
+      diversitySlider.addEventListener('input', () => {
+        const val = parseFloat(diversitySlider.value);
+        if (val >= 0.85) {
+          diversityValue.textContent = `Strict (${val.toFixed(2)})`;
+        } else if (val >= 0.65) {
+          diversityValue.textContent = `Balanced (${val.toFixed(2)})`;
+        } else {
+          diversityValue.textContent = `Discovery (${val.toFixed(2)})`;
+        }
+      });
+
+      let diversityDebounce = null;
+      diversitySlider.addEventListener('change', () => {
+        clearTimeout(diversityDebounce);
+        diversityDebounce = setTimeout(() => {
+          reloadRecommendations();
+        }, 150);
+      });
+    }
+
+    async function reloadRecommendations() {
+      if (!currentHeroTrack || !currentHeroTrack.id) return;
+      const diversity = diversitySlider ? diversitySlider.value : 0.72;
+      try {
+        recsGrid.style.opacity = '0.45';
+        const res = await fetch(`/api/recommendations/${currentHeroTrack.id}?diversity=${diversity}`);
+        if (!res.ok) throw new Error("Recommendation reranking failed");
+        const data = await res.json();
+        const recList = Array.isArray(data) ? data : (data.recommendations || []);
+        renderRecCardsOnly(recList);
+      } catch (err) {
+        console.error("reload recommendations error:", err);
+      } finally {
+        recsGrid.style.opacity = '1.0';
+      }
+    }
 
     viewAppBtn.addEventListener('click', () => {
       vizSection.style.display = 'none';
@@ -1063,9 +1163,10 @@
 
       showLoader(`Analyzing acoustic vibe for "${song.title}"...`);
       try {
+        const divVal = diversitySlider ? diversitySlider.value : 0.72;
         // Fetch recommendations and enriched track stats concurrently
         const [recPromise, trackPromise] = await Promise.allSettled([
-          fetch(`/api/recommendations/${song.id}`),
+          fetch(`/api/recommendations/${song.id}?diversity=${divVal}`),
           fetch(`/api/track/${song.id}`),
         ]);
 
@@ -1089,6 +1190,7 @@
     }
 
     function renderResults(hero, recs) {
+      currentHeroTrack = hero;
       const trackList = Array.isArray(recs) ? recs : (recs && recs.recommendations ? recs.recommendations : []);
 
       // Hero Card
@@ -1108,7 +1210,8 @@
       }
 
       document.getElementById('statBpm').textContent = (hero.bpm > 0 ? hero.bpm : '--') + ' BPM';
-      document.getElementById('statKey').textContent = (hero.key && hero.key !== '—' ? hero.key : '--') + ' Key';
+      const cKey = (hero.camelotKey && hero.camelotKey !== '—') ? ` (${hero.camelotKey})` : '';
+      document.getElementById('statKey').textContent = (hero.key && hero.key !== '—' ? hero.key : '--') + cKey + ' Key';
       document.getElementById('statEnergy').textContent = 'Energy: ' + Math.round((hero.energy || 0.5) * 100) + '%';
       document.getElementById('heroSpotifyBtn').href = `https://open.spotify.com/search/${encodeURIComponent(hero.title + ' ' + hero.artist)}`;
 
@@ -1151,7 +1254,7 @@
       });
 
       const paceKeyEl = document.getElementById('heroPaceKey');
-      paceKeyEl.textContent = `${hero.key || '—'} Key • ${hero.instrumentPace || 'Steady Mid-Tempo (4-on-the-Floor)'}`;
+      paceKeyEl.textContent = `${hero.key || '—'}${cKey} Key • ${hero.instrumentPace || 'Steady Mid-Tempo (4-on-the-Floor)'}`;
 
       const vocalsEl = document.getElementById('heroVocals');
       const vPres = hero.vocalPresence !== undefined ? Math.round(hero.vocalPresence * 100) : 75;
@@ -1161,6 +1264,12 @@
 
       // Recs Section
       recsSection.style.display = 'block';
+      renderRecCardsOnly(trackList);
+
+      heroCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function renderRecCardsOnly(trackList) {
       recsGrid.innerHTML = '';
 
       if (!trackList || trackList.length === 0) {
@@ -1176,6 +1285,8 @@
         const instSnippet = (track.instruments || []).slice(0, 2).join(' • ');
         const vocalSnippet = (track.vocalPattern || '').split('(')[0].trim();
         const paceSnippet = (track.instrumentPace || '').split('(')[0].trim();
+        const camelotBadge = (track.camelotKey && track.camelotKey !== '—') ? `<span class="rec-tag">🎼 ${track.camelotKey}</span>` : '';
+        const reasonsHtml = (track.matchReasons || []).map(r => `<span class="reason-badge">✨ ${r}</span>`).join('');
 
         card.innerHTML = `
           <div class="rec-rank">#${idx + 1}</div>
@@ -1185,10 +1296,12 @@
             <div class="rec-artist">${track.artist}</div>
             <div class="rec-structural-tags">
               ${track.year ? `<span class="rec-tag">📅 ${track.year} (${track.decade || ''})</span>` : ''}
+              ${camelotBadge}
               ${instSnippet ? `<span class="rec-tag">🎸 ${instSnippet}</span>` : ''}
               ${paceSnippet ? `<span class="rec-tag">⚡ ${paceSnippet}</span>` : ''}
               ${vocalSnippet ? `<span class="rec-tag">🎤 ${vocalSnippet}</span>` : ''}
             </div>
+            ${reasonsHtml ? `<div class="rec-reasons">${reasonsHtml}</div>` : ''}
           </div>
           <div class="rec-score">${matchPct}%</div>
           <button class="rec-play-btn" title="Play preview">
@@ -1209,6 +1322,7 @@
 
         recsGrid.appendChild(card);
       });
+    }
 
       heroCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }

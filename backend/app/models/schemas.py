@@ -14,6 +14,7 @@ class TrackResult(BaseModel):
     vibes: list[str] = []
     bpm: int = 120
     key: str = "—"
+    camelotKey: str | None = None
     energy: float = 0.5   # 0-1
     valence: float = 0.5  # 0-1
     instruments: list[str] = []
@@ -24,6 +25,7 @@ class TrackResult(BaseModel):
     vocalComplementation: str = "In-The-Pocket Groove"
     year: int | None = None
     decade: str | None = None
+    matchReasons: list[str] = []
 
 
 class IdentifyResponse(BaseModel):

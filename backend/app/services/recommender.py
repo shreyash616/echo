@@ -611,6 +611,48 @@ def _bpm_compatibility(bpm_a: int, bpm_b: int) -> float:
     return float(np.clip(np.exp(-4.5 * min_rel_diff), 0.15, 1.0))
 
 
+_CAMELOT_KEY_MAP = {
+    "C Major": "8B", "A Minor": "8A",
+    "G Major": "9B", "E Minor": "9A",
+    "D Major": "10B", "B Minor": "10A",
+    "A Major": "11B", "F# Minor": "11A",
+    "E Major": "12B", "C# Minor": "12A",
+    "B Major": "1B", "G# Minor": "1A",
+    "F# Major": "2B", "D# Minor": "2A",
+    "C# Major": "3B", "A# Minor": "3A",
+    "G# Major": "4B", "F Minor": "4A",
+    "D# Major": "5B", "C Minor": "5A",
+    "A# Major": "6B", "G Minor": "6A",
+    "F Major": "7B", "D Minor": "7A",
+}
+
+
+def to_camelot_key(key: str) -> str:
+    """Return Camelot notation (e.g. '8A' for A Minor) or '—'."""
+    clean = key.strip() if key else ""
+    return _CAMELOT_KEY_MAP.get(clean, "—")
+
+
+def _mood_dynamics_similarity(src_metrics: dict, cand_metrics: dict) -> float:
+    """
+    Computes acoustic energy dynamics and valence alignment:
+      - Energy: perceived loudness, acoustic intensity & dynamic compression
+      - Valence: musical positivity vs melancholy
+    """
+    try:
+        e_src = float(src_metrics.get("energy", 0.5))
+        e_cand = float(cand_metrics.get("energy", 0.5))
+        v_src = float(src_metrics.get("valence", 0.5))
+        v_cand = float(cand_metrics.get("valence", 0.5))
+
+        e_diff = abs(e_src - e_cand)
+        v_diff = abs(v_src - v_cand)
+        score = 1.0 - (0.55 * (e_diff ** 1.3) + 0.45 * (v_diff ** 1.3))
+        return float(np.clip(score, 0.1, 1.0))
+    except Exception:
+        return 0.75
+
+
 def _era_similarity(year_a: int | None, year_b: int | None) -> float:
     """
     Era / release decade compatibility:
@@ -638,6 +680,74 @@ def _era_similarity(year_a: int | None, year_b: int | None) -> float:
         return 0.75
 
 
+def compute_match_reasons(
+    src_metrics: dict,
+    cand_metrics: dict,
+) -> list[str]:
+    """
+    Derive human-interpretable explainability badges explaining why the track was recommended:
+      - Historical era alignment
+      - Camelot harmonic key progression
+      - Shared arrangement instrument texture
+      - Rhythmic tempo alignment
+      - Energy dynamics & mood cohesion
+    """
+    reasons: list[str] = []
+
+    # 1. Historical Era
+    y_src = src_metrics.get("year")
+    y_cand = cand_metrics.get("year")
+    if y_src and y_cand:
+        diff = abs(int(y_src) - int(y_cand))
+        if diff <= 3:
+            reasons.append(f"Direct Contemporary ({y_src} & {y_cand})")
+        elif diff <= 8:
+            reasons.append(f"Shared {src_metrics.get('decade', '')} Era")
+
+    # 2. Key / Camelot Wheel
+    k_src = str(src_metrics.get("key", "—"))
+    k_cand = str(cand_metrics.get("key", "—"))
+    c_src = _CAMELOT_KEY_MAP.get(k_src)
+    c_cand = _CAMELOT_KEY_MAP.get(k_cand)
+    if c_src and c_cand:
+        s_k = _key_compatibility(k_src, k_cand)
+        if s_k >= 0.85:
+            reasons.append(f"Camelot Harmonic Lock ({c_src} & {c_cand})")
+        elif s_k >= 0.70:
+            reasons.append(f"Harmonic Progression ({c_src} -> {c_cand})")
+
+    # 3. Instrument Overlap
+    inst_src = set(src_metrics.get("instruments", []))
+    inst_cand = set(cand_metrics.get("instruments", []))
+    common_inst = inst_src.intersection(inst_cand)
+    if common_inst:
+        reasons.append(f"Shared {', '.join(list(common_inst)[:2])}")
+
+    # 4. Tempo / Rhythm
+    bpm_src = int(src_metrics.get("bpm", 0))
+    bpm_cand = int(cand_metrics.get("bpm", 0))
+    if bpm_src > 0 and bpm_cand > 0:
+        if abs(bpm_src - bpm_cand) <= 5:
+            reasons.append(f"Tempo Synced ({bpm_src} BPM)")
+        elif abs(bpm_src * 2 - bpm_cand) <= 8 or abs(bpm_cand * 2 - bpm_src) <= 8:
+            reasons.append(f"Half/Double-Time ({bpm_src} & {bpm_cand} BPM)")
+
+    # 5. Energy & Mood
+    s_mood = _mood_dynamics_similarity(src_metrics, cand_metrics)
+    if s_mood >= 0.85:
+        reasons.append("Matching Mood & Energy Dynamics")
+
+    # 6. Vocals
+    v_src = float(src_metrics.get("vocalPresence", 0.5))
+    v_cand = float(cand_metrics.get("vocalPresence", 0.5))
+    if v_src < 0.25 and v_cand < 0.25:
+        reasons.append("Instrumental Immersion")
+    elif abs(v_src - v_cand) <= 0.15 and v_src > 0.60:
+        reasons.append("Matched Vocal Intensity")
+
+    return reasons[:3]
+
+
 def compute_composite_match_score(
     src_emb: np.ndarray,
     src_metrics: dict,
@@ -646,13 +756,14 @@ def compute_composite_match_score(
 ) -> float:
     """
     Structural Composite Matching Score in [0, 1]:
-      - 512-d neural embedding similarity (timbral & acoustic manifold) [40%]
+      - 512-d neural embedding similarity (timbral & acoustic manifold) [35%]
       - Instruments used overlap [15%]
       - Arrangement progression & order of entry [10%]
       - Instrumental pace & subdivision [10%]
       - Vocal presence, phrasing pattern & complementation groove [10%]
-      - Harmonic Key & BPM octave compatibility [5%]
-      - Era & release decade compatibility [10%]
+      - Harmonic Key & BPM octave compatibility [8%]
+      - Mood & Energy dynamic range alignment [7%]
+      - Era & release decade compatibility [5%]
     """
     a = src_emb.flatten()
     b = cand_emb.flatten()
@@ -683,15 +794,17 @@ def compute_composite_match_score(
     )
     s_harmonic = 0.5 * s_key + 0.5 * s_bpm
     s_era = _era_similarity(src_metrics.get("year"), cand_metrics.get("year"))
+    s_mood = _mood_dynamics_similarity(src_metrics, cand_metrics)
 
     total = (
-        0.40 * s_neural
+        0.35 * s_neural
         + 0.15 * s_inst
         + 0.10 * s_order
         + 0.10 * s_pace
         + 0.10 * s_vocal
-        + 0.05 * s_harmonic
-        + 0.10 * s_era
+        + 0.08 * s_harmonic
+        + 0.07 * s_mood
+        + 0.05 * s_era
     )
     return round(float(np.clip(total, 0.05, 0.99)), 4)
 
@@ -805,9 +918,17 @@ class MusicRecommender:
 
     def load(self) -> None:
         """Load ONNX model + FAISS index. Called once at server startup."""
-        onnx_path  = Path(settings.onnx_model_path)
-        index_path = Path(settings.faiss_index_path)
-        meta_path  = Path(settings.track_metadata_path)
+        def _resolve(p: Path) -> Path:
+            if p.exists():
+                return p
+            for c in [p, Path("ml/inference") / p.name, Path("../ml/inference") / p.name, Path("backend/ml/inference") / p.name]:
+                if c.exists():
+                    return c
+            return p
+
+        onnx_path  = _resolve(Path(settings.onnx_model_path))
+        index_path = _resolve(Path(settings.faiss_index_path))
+        meta_path  = _resolve(Path(settings.track_metadata_path))
 
         if not onnx_path.exists():
             logger.warning(
@@ -905,6 +1026,18 @@ class MusicRecommender:
         _, metrics = self.encode_and_analyze_audio(audio_bytes, genre_hint=genre_hint)
         return metrics
 
+    def get_embedding(self, idx: int) -> np.ndarray | None:
+        """Retrieve L2-normalised 512-d embedding vector for an index track."""
+        if not self._loaded or self._index is None:
+            return None
+        if 0 <= idx < self._index.ntotal:
+            try:
+                vec = self._index.reconstruct(idx)
+                return np.ascontiguousarray(vec, dtype=np.float32).reshape(1, -1)
+            except Exception:
+                return None
+        return None
+
     def recommend(
         self,
         embedding: np.ndarray,
@@ -943,6 +1076,7 @@ class MusicRecommender:
             if idx < 0 or idx >= len(self._metadata):
                 continue
             meta = dict(self._metadata[idx])
+            meta["_idx"] = int(idx)
             if exclude_id and str(meta.get("id")) == str(exclude_id):
                 continue
 
@@ -965,7 +1099,8 @@ class MusicRecommender:
                 if cand_lang is not None:
                     continue
 
-            # Compute structural composite score incorporating neural, instruments, order, pace, vocals & era
+            # Compute structural composite score incorporating neural, instruments, order, pace, vocals, era & mood
+            meta["camelotKey"] = to_camelot_key(str(meta.get("key", "—")))
             if source_metrics:
                 cand_emb_score = float(np.clip((float(dist) + 0.1) / 1.1, 0.05, 1.0))
                 s_inst = _instrument_similarity(source_metrics.get("instruments", []), meta.get("instruments", []))
@@ -976,19 +1111,23 @@ class MusicRecommender:
                 s_bpm = _bpm_compatibility(int(source_metrics.get("bpm", 0)), int(meta.get("bpm", 0)))
                 s_harmonic = 0.5 * s_key + 0.5 * s_bpm
                 s_era = _era_similarity(source_metrics.get("year"), meta.get("year"))
+                s_mood = _mood_dynamics_similarity(source_metrics, meta)
 
                 comp_score = (
-                    0.40 * cand_emb_score
+                    0.35 * cand_emb_score
                     + 0.15 * s_inst
                     + 0.10 * s_order
                     + 0.10 * s_pace
                     + 0.10 * s_vocal
-                    + 0.05 * s_harmonic
-                    + 0.10 * s_era
+                    + 0.08 * s_harmonic
+                    + 0.07 * s_mood
+                    + 0.05 * s_era
                 )
                 meta["matchScore"] = round(float(np.clip(comp_score, 0.05, 0.99)), 4)
+                meta["matchReasons"] = compute_match_reasons(source_metrics, meta)
             else:
                 meta["matchScore"] = round(float(np.clip((float(dist) + 0.1) / 1.1, 0.01, 0.99)), 4)
+                meta["matchReasons"] = []
 
             if genre_kw:
                 if any(kw in cand_genre for kw in genre_kw):
