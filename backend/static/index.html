@@ -813,21 +813,11 @@
           <div class="hero-tagline">Identified Acoustic Source</div>
           <h2 id="heroTitle" class="hero-title">Song Title</h2>
           <div id="heroArtist" class="hero-artist">Artist Name</div>
-          <div id="heroVibes" class="vibe-pills"></div>
-
           <!-- Structural Acoustic Breakdown -->
           <div class="structural-breakdown" id="heroStructure">
             <div class="struct-row">
               <span class="struct-label">🎸 Instruments</span>
               <div id="heroInstruments" class="struct-badges"></div>
-            </div>
-            <div class="struct-row">
-              <span class="struct-label">⏱️ Entry Order</span>
-              <div id="heroOrder" class="struct-timeline"></div>
-            </div>
-            <div class="struct-row">
-              <span class="struct-label">⚡ Pace & Key</span>
-              <span id="heroPaceKey" class="struct-val">--</span>
             </div>
             <div class="struct-row">
               <span class="struct-label">🎤 Vocals</span>
@@ -836,13 +826,7 @@
           </div>
 
           <div class="hero-stats">
-            <span id="statEra" style="display:none; color:var(--accent); font-weight:600;"></span>
-            <span id="statEraDot" style="display:none;">•</span>
-            <span id="statBpm">-- BPM</span>
-            <span>•</span>
-            <span id="statKey">-- Key</span>
-            <span>•</span>
-            <span id="statEnergy">Energy: --%</span>
+            <span id="statEra" style="display:none; color:var(--teal); font-weight:700; font-size:13px; letter-spacing:0.5px;"></span>
           </div>
           <div class="hero-actions">
             <button id="heroPlayBtn" class="btn btn-play">
@@ -1207,34 +1191,18 @@
       document.getElementById('heroArtist').textContent = hero.artist || 'Unknown Artist';
       document.getElementById('heroArt').src = hero.albumArtUrl || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300';
       const eraEl = document.getElementById('statEra');
-      const eraDot = document.getElementById('statEraDot');
-      if (hero.year) {
-        eraEl.textContent = `📅 ${hero.year} (${hero.decade || 'Era'})`;
-        eraEl.style.display = 'inline';
-        eraDot.style.display = 'inline';
+      const decadeVal = hero.decade || (hero.year ? `${Math.floor(hero.year / 10) * 10}s` : '');
+      if (decadeVal) {
+        eraEl.textContent = `📅 (${decadeVal})`;
+        eraEl.style.display = 'inline-block';
       } else {
         eraEl.style.display = 'none';
-        eraDot.style.display = 'none';
       }
 
-      document.getElementById('statBpm').textContent = (hero.bpm > 0 ? hero.bpm : '--') + ' BPM';
-      const cKey = (hero.camelotKey && hero.camelotKey !== '—') ? ` (${hero.camelotKey})` : '';
-      document.getElementById('statKey').textContent = (hero.key && hero.key !== '—' ? hero.key : '--') + cKey + ' Key';
-      document.getElementById('statEnergy').textContent = 'Energy: ' + Math.round((hero.energy || 0.5) * 100) + '%';
       document.getElementById('heroSpotifyBtn').href = `https://open.spotify.com/search/${encodeURIComponent(hero.title + ' ' + hero.artist)}`;
-
       heroPlayBtn.onclick = () => togglePlay(hero.previewUrl, heroPlayBtn);
 
-      const vibesEl = document.getElementById('heroVibes');
-      vibesEl.innerHTML = '';
-      (hero.vibes || []).forEach(v => {
-        const pill = document.createElement('span');
-        pill.className = 'vibe-pill';
-        pill.textContent = v;
-        vibesEl.appendChild(pill);
-      });
-
-      // Populate Structural Acoustic Breakdown
+      // Populate Structural Acoustic Breakdown (Instruments & Vocals)
       const instEl = document.getElementById('heroInstruments');
       instEl.innerHTML = '';
       const instList = (hero.instruments && hero.instruments.length) ? hero.instruments : ['Drums & Percussion', 'Synthesizer & Keys'];
@@ -1244,25 +1212,6 @@
         badge.textContent = inst;
         instEl.appendChild(badge);
       });
-
-      const orderEl = document.getElementById('heroOrder');
-      orderEl.innerHTML = '';
-      const orderList = (hero.instrumentOrder && hero.instrumentOrder.length) ? hero.instrumentOrder : ['Drums', 'Bass', 'Keys / Synth', 'Vocals'];
-      orderList.forEach((item, i) => {
-        const step = document.createElement('span');
-        step.className = 'struct-step';
-        step.textContent = `${i + 1}. ${item}`;
-        orderEl.appendChild(step);
-        if (i < orderList.length - 1) {
-          const arr = document.createElement('span');
-          arr.className = 'struct-arrow';
-          arr.textContent = '→';
-          orderEl.appendChild(arr);
-        }
-      });
-
-      const paceKeyEl = document.getElementById('heroPaceKey');
-      paceKeyEl.textContent = `${hero.key || '—'}${cKey} Key • ${hero.instrumentPace || 'Steady Mid-Tempo (4-on-the-Floor)'}`;
 
       const vocalsEl = document.getElementById('heroVocals');
       const vPres = hero.vocalPresence !== undefined ? Math.round(hero.vocalPresence * 100) : 75;
@@ -1292,9 +1241,10 @@
 
         const instSnippet = (track.instruments || []).slice(0, 2).join(' • ');
         const vocalSnippet = (track.vocalPattern || '').split('(')[0].trim();
-        const paceSnippet = (track.instrumentPace || '').split('(')[0].trim();
-        const camelotBadge = (track.camelotKey && track.camelotKey !== '—') ? `<span class="rec-tag">🎼 ${track.camelotKey}</span>` : '';
-        const reasonsHtml = (track.matchReasons || []).map(r => `<span class="reason-badge">✨ ${r}</span>`).join('');
+        const recDecade = track.decade || (track.year ? `${Math.floor(track.year / 10) * 10}s` : '');
+        const reasonsHtml = (track.matchReasons || [])
+          .filter(r => !r.toLowerCase().includes('bpm') && !r.toLowerCase().includes('camelot') && !r.toLowerCase().includes('key'))
+          .map(r => `<span class="reason-badge">✨ ${r}</span>`).join('');
 
         card.innerHTML = `
           <div class="rec-rank">#${idx + 1}</div>
@@ -1303,10 +1253,8 @@
             <div class="rec-title">${track.title}</div>
             <div class="rec-artist">${track.artist}</div>
             <div class="rec-structural-tags">
-              ${track.year ? `<span class="rec-tag">📅 ${track.year} (${track.decade || ''})</span>` : ''}
-              ${camelotBadge}
+              ${recDecade ? `<span class="rec-tag">📅 (${recDecade})</span>` : ''}
               ${instSnippet ? `<span class="rec-tag">🎸 ${instSnippet}</span>` : ''}
-              ${paceSnippet ? `<span class="rec-tag">⚡ ${paceSnippet}</span>` : ''}
               ${vocalSnippet ? `<span class="rec-tag">🎤 ${vocalSnippet}</span>` : ''}
             </div>
             ${reasonsHtml ? `<div class="rec-reasons">${reasonsHtml}</div>` : ''}
