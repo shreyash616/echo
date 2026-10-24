@@ -15,6 +15,10 @@ class TrackResult(BaseModel):
     bpm: int = 120
     key: str = "—"
     camelotKey: str | None = None
+    stereoWidth: float = 0.5
+    phaseCorrelation: float = 0.95
+    crestFactor: float = 10.0
+    spatialStaging: str = "Balanced Stereo"
     energy: float = 0.5   # 0-1
     valence: float = 0.5  # 0-1
     instruments: list[str] = []

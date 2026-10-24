@@ -4,12 +4,10 @@ set -e
 REPO="shreyash616/echo-ml-artifacts"
 DEST="/app/ml/inference"
 
-download_if_missing() {
+download_file() {
     local filename=$1
-    local dest_path="$DEST/$filename"
-    if [ ! -f "$dest_path" ]; then
-        echo "[startup] Downloading $filename from HF Hub..."
-        python -c "
+    echo "[startup] Syncing $filename from HF Hub ($REPO)..."
+    python -c "
 from huggingface_hub import hf_hub_download
 hf_hub_download(
     repo_id='$REPO',
@@ -18,15 +16,12 @@ hf_hub_download(
     local_dir='$DEST',
 )
 "
-        echo "[startup] $filename ready."
-    else
-        echo "[startup] $filename already present, skipping."
-    fi
+    echo "[startup] $filename synced."
 }
 
-download_if_missing "music_encoder.onnx"
-download_if_missing "music_index.faiss"
-download_if_missing "track_metadata.json"
-download_if_missing "archetypes.json"
+download_file "music_encoder.onnx"
+download_file "music_index.faiss"
+download_file "track_metadata.json"
+download_file "archetypes.json"
 
 exec uvicorn main:app --host 0.0.0.0 --port 7860

@@ -59,7 +59,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from ml.models.music_encoder import CnnMusicEncoder, ProjectionHead
 from ml.training.dataset import ContrastiveSpectrogramDataset
-from ml.training.losses import NTXentLoss
+from ml.training.losses import NTXentLoss, RegularizedNTXentLoss
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
@@ -83,7 +83,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--crop-frames",   type=int,   default=256)
     p.add_argument("--warmup-epochs", type=int,   default=5)
     p.add_argument("--val-split",     type=float, default=0.1)
-    p.add_argument("--workers",       type=int,   default=4)
+    p.add_argument("--workers",       type=int,   default=0,
+                   help="DataLoader workers (default 0 for fastest in-memory access on Windows)")
     p.add_argument("--resume",        type=str,   default=None)
     return p.parse_args()
 
@@ -242,7 +243,7 @@ def main() -> None:
         in_dim=args.embedding_dim,
         out_dim=args.proj_dim,
     ).to(device)
-    criterion = NTXentLoss(temperature=args.temperature)
+    criterion = RegularizedNTXentLoss(temperature=args.temperature)
 
     n_params = sum(p.numel() for p in model.parameters())
     n_proj   = sum(p.numel() for p in proj_head.parameters())

@@ -357,6 +357,12 @@ def extract_audio_structure(
     p_guitar = float(np.clip(mid_flux * 18.0 + (low_mid.mean() * 0.52), 0.05, 0.95))
 
     # Vocal Presence via Syllabic Modulation (3-6 Hz envelope rhythm in vocal formant band)
+    # Combined with Singer's Formant resonance (2.5 - 3.2 kHz acoustic vocal tract peak)
+    singers_formant = mel[73:82, :]
+    surrounding_upper_mid = mel[55:73, :]
+    formant_ratio = float(singers_formant.mean() / (surrounding_upper_mid.mean() + 1e-6))
+    formant_boost = float(np.clip((formant_ratio - 0.70) * 2.0, 0.5, 1.25))
+
     mid_env = mid_band.mean(axis=0)
     if len(mid_env) > 64:
         env_centered = mid_env - mid_env.mean()
@@ -365,7 +371,7 @@ def extract_audio_structure(
         vocal_mod_mask = (freqs >= 2.5) & (freqs <= 6.5)
         total_power = fft_env.sum() + 1e-8
         vocal_mod_ratio = float(fft_env[vocal_mod_mask].sum() / total_power)
-        vocal_presence = float(np.clip(vocal_mod_ratio * 4.6, 0.0, 0.98))
+        vocal_presence = float(np.clip(vocal_mod_ratio * 4.0 * formant_boost, 0.0, 0.98))
     else:
         vocal_presence = 0.5
 
@@ -461,6 +467,14 @@ def extract_audio_structure(
 
 def _synthesize_structural_meta_if_missing(meta: dict) -> dict:
     """Enrich metadata dict with structural defaults if missing."""
+    meta["stereoWidth"] = float(meta.get("stereoWidth", 0.50))
+    meta["phaseCorrelation"] = float(meta.get("phaseCorrelation", 0.95))
+    meta["crestFactor"] = float(meta.get("crestFactor", 10.0))
+    meta["spatialStaging"] = meta.get("spatialStaging") or (
+        "Expansive / Wide 3D Spatial" if meta.get("stereoWidth", 0.50) >= 0.52
+        else ("Intimate / Focused Mono" if meta.get("stereoWidth", 0.50) < 0.15 else "Balanced Stereo Soundstage")
+    )
+
     if meta.get("instruments") and meta.get("instrumentOrder") and meta.get("instrumentPace"):
         return meta
 
@@ -512,6 +526,13 @@ def _synthesize_structural_meta_if_missing(meta: dict) -> dict:
     meta["vocalPresence"] = meta.get("vocalPresence", vocal_pres)
     meta["vocalPattern"] = meta.get("vocalPattern") or vocal_pattern
     meta["vocalComplementation"] = meta.get("vocalComplementation") or vocal_comp
+    meta["stereoWidth"] = float(meta.get("stereoWidth", 0.50))
+    meta["phaseCorrelation"] = float(meta.get("phaseCorrelation", 0.95))
+    meta["crestFactor"] = float(meta.get("crestFactor", 10.0))
+    meta["spatialStaging"] = meta.get("spatialStaging") or (
+        "Expansive / Wide 3D Spatial" if meta.get("stereoWidth", 0.50) >= 0.52
+        else ("Intimate / Focused Mono" if meta.get("stereoWidth", 0.50) < 0.15 else "Balanced Stereo Soundstage")
+    )
     return meta
 
 
@@ -583,6 +604,10 @@ def _key_compatibility(key_a: str, key_b: str) -> float:
     root_b, mode_b = parts_b[0], parts_b[1].lower()
     if root_a not in _FIFTHS_POS or root_b not in _FIFTHS_POS:
         return 0.6
+
+    # 1. Parallel Keys / Modal Interchange (e.g. C Minor <-> C Major share the tonic root)
+    if root_a == root_b:
+        return 0.88
 
     # Convert minor keys to their relative major position on the Circle of Fifths (+3 semitones = -3 fifths)
     idx_a = _PITCH_NAMES.index(root_a)
@@ -711,7 +736,11 @@ def compute_match_reasons(
     c_cand = _CAMELOT_KEY_MAP.get(k_cand)
     if c_src and c_cand:
         s_k = _key_compatibility(k_src, k_cand)
-        if s_k >= 0.85:
+        parts_s = k_src.split()
+        parts_c = k_cand.split()
+        if len(parts_s) == 2 and len(parts_c) == 2 and parts_s[0] == parts_c[0] and k_src != k_cand:
+            reasons.append(f"Parallel Modal Harmony ({k_src} & {k_cand})")
+        elif s_k >= 0.85:
             reasons.append(f"Camelot Harmonic Lock ({c_src} & {c_cand})")
         elif s_k >= 0.70:
             reasons.append(f"Harmonic Progression ({c_src} -> {c_cand})")
@@ -745,7 +774,44 @@ def compute_match_reasons(
     elif abs(v_src - v_cand) <= 0.15 and v_src > 0.60:
         reasons.append("Matched Vocal Intensity")
 
+    # 7. Stereophonic & Spatial Staging
+    w_src = float(src_metrics.get("stereoWidth", 0.5))
+    w_cand = float(cand_metrics.get("stereoWidth", 0.5))
+    rho_src = float(src_metrics.get("phaseCorrelation", 0.95))
+    rho_cand = float(cand_metrics.get("phaseCorrelation", 0.95))
+    if w_src >= 0.55 and w_cand >= 0.55:
+        reasons.append("Expansive Stereo Soundstage")
+    elif w_src <= 0.20 and w_cand <= 0.20:
+        reasons.append("Focused Intimate Staging")
+    elif abs(w_src - w_cand) <= 0.12 and abs(rho_src - rho_cand) <= 0.10:
+        reasons.append("Phase-Aligned Spatial Mixing")
+
     return reasons[:3]
+
+
+def _stereo_dynamics_similarity(src_metrics: dict, cand_metrics: dict) -> float:
+    """
+    Computes stereophonic spatial staging and mastering dynamic alignment:
+      - Stereo Width: matches intimate/narrow vs expansive 3D wide mixes
+      - Phase Correlation: ensures acoustic phase compatibility
+      - Dynamic Crest Factor (PLR): matches micro-dynamics & mastering compression
+    """
+    try:
+        w_a = float(src_metrics.get("stereoWidth", 0.5))
+        w_b = float(cand_metrics.get("stereoWidth", 0.5))
+        rho_a = float(src_metrics.get("phaseCorrelation", 0.95))
+        rho_b = float(cand_metrics.get("phaseCorrelation", 0.95))
+        cf_a = float(src_metrics.get("crestFactor", 10.0))
+        cf_b = float(cand_metrics.get("crestFactor", 10.0))
+
+        w_diff = abs(w_a - w_b)
+        rho_diff = abs(rho_a - rho_b)
+        cf_diff = abs(cf_a - cf_b) / 10.0
+
+        score = 1.0 - (0.45 * w_diff + 0.25 * rho_diff + 0.30 * min(1.0, cf_diff))
+        return float(np.clip(score, 0.1, 1.0))
+    except Exception:
+        return 0.80
 
 
 def compute_composite_match_score(
@@ -756,13 +822,14 @@ def compute_composite_match_score(
 ) -> float:
     """
     Structural Composite Matching Score in [0, 1]:
-      - 512-d neural embedding similarity (timbral & acoustic manifold) [35%]
+      - 512-d neural embedding similarity (timbral & acoustic manifold) [30%]
+      - Stereophonic spatial staging & mastering dynamics [10%]
       - Instruments used overlap [15%]
-      - Arrangement progression & order of entry [10%]
-      - Instrumental pace & subdivision [10%]
-      - Vocal presence, phrasing pattern & complementation groove [10%]
-      - Harmonic Key & BPM octave compatibility [8%]
-      - Mood & Energy dynamic range alignment [7%]
+      - Arrangement progression & order of entry [8%]
+      - Instrumental pace & subdivision [8%]
+      - Vocal presence, formant & complementation groove [9%]
+      - Harmonic Key (with Modal Interchange) & BPM compatibility [7%]
+      - Mood & Energy dynamic range alignment [8%]
       - Era & release decade compatibility [5%]
     """
     a = src_emb.flatten()
@@ -770,6 +837,7 @@ def compute_composite_match_score(
     cos_sim = float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-8))
     s_neural = float(np.clip((cos_sim + 0.1) / 1.1, 0.05, 1.0))
 
+    s_spatial = _stereo_dynamics_similarity(src_metrics, cand_metrics)
     s_inst = _instrument_similarity(
         src_metrics.get("instruments", []),
         cand_metrics.get("instruments", []),
@@ -797,58 +865,127 @@ def compute_composite_match_score(
     s_mood = _mood_dynamics_similarity(src_metrics, cand_metrics)
 
     total = (
-        0.35 * s_neural
+        0.30 * s_neural
+        + 0.10 * s_spatial
         + 0.15 * s_inst
-        + 0.10 * s_order
-        + 0.10 * s_pace
-        + 0.10 * s_vocal
-        + 0.08 * s_harmonic
-        + 0.07 * s_mood
+        + 0.08 * s_order
+        + 0.08 * s_pace
+        + 0.09 * s_vocal
+        + 0.07 * s_harmonic
+        + 0.08 * s_mood
         + 0.05 * s_era
     )
     return round(float(np.clip(total, 0.05, 0.99)), 4)
 
 
-def _decode_audio(audio_bytes: bytes) -> np.ndarray:
-    """Decode audio bytes of any format ffmpeg supports → mono float32 at SR."""
+def _decode_audio_stereo(audio_bytes: bytes) -> tuple[np.ndarray, dict]:
+    """
+    Decodes audio preserving stereophonic sound staging:
+      1. Retains (2, N) multi-channel stereo rather than destructive mono collapse.
+      2. Mid/Side decomposition: M = (L+R)/sqrt(2), S = (L-R)/sqrt(2).
+      3. Computes Stereo Width Index (W) and Inter-Channel Phase Correlation (rho).
+      4. Dynamic Peak-to-Loudness Crest Factor (PLR in dB).
+      5. Returns phase-aligned Mid channel float32 signal at SR, plus spatial metrics dict.
+    """
+    spatial_metrics = {
+        "stereoWidth": 0.50,
+        "phaseCorrelation": 0.95,
+        "crestFactor": 10.0,
+        "spatialStaging": "Balanced Stereo",
+    }
+    L, R = None, None
+
+    # Step A: Attempt soundfile stereo read
     try:
-        y, sr = sf.read(io.BytesIO(audio_bytes), dtype="float32", always_2d=False)
-        if y.ndim > 1:
-            y = y.mean(axis=1)
+        y, sr = sf.read(io.BytesIO(audio_bytes), dtype="float32", always_2d=True)
         if sr != SR:
-            y = librosa.resample(y, orig_sr=sr, target_sr=SR)
-        return y.astype(np.float32)
+            y = librosa.resample(y.T, orig_sr=sr, target_sr=SR).T
+        if y.shape[1] >= 2:
+            L, R = y[:, 0], y[:, 1]
+        else:
+            L, R = y[:, 0], y[:, 0]
     except Exception:
         pass
 
-    proc = subprocess.run(
-        [
-            "ffmpeg", "-i", "pipe:0",
-            "-f", "wav", "-ar", str(SR), "-ac", "1",
-            "-loglevel", "error",
-            "pipe:1",
-        ],
-        input=audio_bytes,
-        capture_output=True,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(f"ffmpeg decode failed: {proc.stderr.decode()[:300]}")
+    # Step B: ffmpeg stereo fallback
+    if L is None or R is None:
+        proc = subprocess.run(
+            [
+                "ffmpeg", "-i", "pipe:0",
+                "-f", "wav", "-ar", str(SR), "-ac", "2",
+                "-loglevel", "error",
+                "pipe:1",
+            ],
+            input=audio_bytes,
+            capture_output=True,
+        )
+        if proc.returncode == 0:
+            y, _ = sf.read(io.BytesIO(proc.stdout), dtype="float32", always_2d=True)
+            if y.shape[1] >= 2:
+                L, R = y[:, 0], y[:, 1]
+            else:
+                L, R = y[:, 0], y[:, 0]
+        else:
+            # Last resort mono
+            mono_proc = subprocess.run(
+                ["ffmpeg", "-i", "pipe:0", "-f", "wav", "-ar", str(SR), "-ac", "1", "-loglevel", "error", "pipe:1"],
+                input=audio_bytes, capture_output=True,
+            )
+            if mono_proc.returncode != 0:
+                raise RuntimeError("ffmpeg audio decode failed")
+            m_sig, _ = sf.read(io.BytesIO(mono_proc.stdout), dtype="float32", always_2d=False)
+            L, R = m_sig, m_sig
 
-    y, _ = sf.read(io.BytesIO(proc.stdout), dtype="float32", always_2d=False)
-    return y.astype(np.float32)
+    L = np.ascontiguousarray(L, dtype=np.float32)
+    R = np.ascontiguousarray(R, dtype=np.float32)
+
+    # Stereophonic Analysis: Mid/Side (M/S) Matrix
+    SQRT2 = 1.41421356
+    M = (L + R) / SQRT2
+    S = (L - R) / SQRT2
+
+    # 1. Inter-Channel Phase Correlation rho in [-1, +1]
+    denom = np.sqrt(np.sum(L * L) * np.sum(R * R)) + 1e-8
+    rho = float(np.clip(np.sum(L * R) / denom, -1.0, 1.0))
+    spatial_metrics["phaseCorrelation"] = round(rho, 3)
+
+    # Phase-aligned mono signal: if out-of-phase comb-filtering is detected (rho < -0.2),
+    # downmix using energy-envelope rather than destructive cancellation
+    if rho < -0.2:
+        mono_signal = np.where(np.abs(L) > np.abs(R), L, R)
+    else:
+        mono_signal = (L + R) * 0.5
+
+    # 2. Stereo Width Index W in [0, 1]
+    rms_m = float(np.sqrt(np.mean(M * M)) + 1e-6)
+    rms_s = float(np.sqrt(np.mean(S * S)) + 1e-6)
+    width = float(np.clip((rms_s / rms_m) * 1.35, 0.0, 1.0))
+    spatial_metrics["stereoWidth"] = round(width, 3)
+
+    if width < 0.15:
+        spatial_metrics["spatialStaging"] = "Intimate / Focused Mono"
+    elif width < 0.52:
+        spatial_metrics["spatialStaging"] = "Balanced Stereo Soundstage"
+    else:
+        spatial_metrics["spatialStaging"] = "Expansive / Wide 3D Spatial"
+
+    # 3. Dynamic Crest Factor / Peak-to-Loudness Ratio (PLR in dB)
+    peak = float(np.max(np.abs(mono_signal)) + 1e-6)
+    crest_factor = float(np.clip(20.0 * np.log10(peak / rms_m), 4.0, 22.0))
+    spatial_metrics["crestFactor"] = round(crest_factor, 1)
+
+    return mono_signal.astype(np.float32), spatial_metrics
 
 
-def _audio_bytes_to_full_mel(audio_bytes: bytes) -> np.ndarray:
+def _audio_bytes_to_full_mel(audio_bytes: bytes) -> tuple[np.ndarray, dict]:
     """
-    Decode audio bytes to a full-clip (128, T) float32 mel spectrogram in [0, 1]
-    using a fixed 80 dB floor.
+    Decode audio bytes preserving stereo soundstaging, returning a full-clip
+    (128, T) float32 mel spectrogram in [0, 1] using fixed 80 dB floor,
+    and a dictionary of stereophonic spatial metrics.
     """
-    y = _decode_audio(audio_bytes)
-    if y.ndim > 1:
-        y = y.mean(axis=1)
-    y = y.astype(np.float32)
+    y, spatial_metrics = _decode_audio_stereo(audio_bytes)
 
-    # Cap extremely long recordings to the central 60 seconds for bounded latency
+    # Cap extremely long recordings to central 60 seconds
     max_samples = int(SR * 60.0)
     if len(y) > max_samples:
         start = (len(y) - max_samples) // 2
@@ -859,7 +996,7 @@ def _audio_bytes_to_full_mel(audio_bytes: bytes) -> np.ndarray:
     )
     mel_db = librosa.power_to_db(mel, ref=np.max, top_db=TOP_DB)
     mel_norm = np.clip((mel_db + TOP_DB) / TOP_DB, 0.0, 1.0)
-    return mel_norm.astype(np.float32)
+    return mel_norm.astype(np.float32), spatial_metrics
 
 
 def _extract_energy_crops(
@@ -988,8 +1125,9 @@ class MusicRecommender:
             return _audio_analysis_cache[cache_key]  # type: ignore[return-value]
 
         t0 = time.perf_counter()
-        mel = _audio_bytes_to_full_mel(audio_bytes)
+        mel, spatial_metrics = _audio_bytes_to_full_mel(audio_bytes)
         metrics = analyze_mel_spectrogram(mel, genre_hint=genre_hint)
+        metrics.update(spatial_metrics)
 
         if self._sess is not None:
             crops, weights = _extract_energy_crops(mel, crop_frames=CROP_FRAMES, n_crops=N_CROPS)
@@ -1101,8 +1239,13 @@ class MusicRecommender:
 
             # Compute structural composite score incorporating neural, instruments, order, pace, vocals, era & mood
             meta["camelotKey"] = to_camelot_key(str(meta.get("key", "—")))
+            meta["stereoWidth"] = float(meta.get("stereoWidth", 0.50))
+            meta["phaseCorrelation"] = float(meta.get("phaseCorrelation", 0.95))
+            meta["crestFactor"] = float(meta.get("crestFactor", 10.0))
+            meta["spatialStaging"] = str(meta.get("spatialStaging", "Balanced Stereo Soundstage"))
             if source_metrics:
                 cand_emb_score = float(np.clip((float(dist) + 0.1) / 1.1, 0.05, 1.0))
+                s_spatial = _stereo_dynamics_similarity(source_metrics, meta)
                 s_inst = _instrument_similarity(source_metrics.get("instruments", []), meta.get("instruments", []))
                 s_order = _order_similarity(source_metrics.get("instrumentOrder", []), meta.get("instrumentOrder", []))
                 s_pace = _pace_similarity(source_metrics.get("instrumentPace", ""), meta.get("instrumentPace", ""))
@@ -1114,13 +1257,14 @@ class MusicRecommender:
                 s_mood = _mood_dynamics_similarity(source_metrics, meta)
 
                 comp_score = (
-                    0.35 * cand_emb_score
+                    0.30 * cand_emb_score
+                    + 0.10 * s_spatial
                     + 0.15 * s_inst
-                    + 0.10 * s_order
-                    + 0.10 * s_pace
-                    + 0.10 * s_vocal
-                    + 0.08 * s_harmonic
-                    + 0.07 * s_mood
+                    + 0.08 * s_order
+                    + 0.08 * s_pace
+                    + 0.09 * s_vocal
+                    + 0.07 * s_harmonic
+                    + 0.08 * s_mood
                     + 0.05 * s_era
                 )
                 meta["matchScore"] = round(float(np.clip(comp_score, 0.05, 0.99)), 4)

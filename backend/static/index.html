@@ -823,6 +823,10 @@
               <span class="struct-label">🎤 Vocals</span>
               <span id="heroVocals" class="struct-val">--</span>
             </div>
+            <div class="struct-row" id="heroSoundstageRow" style="display:none;">
+              <span class="struct-label">🎧 Soundstage</span>
+              <span id="heroSoundstage" class="struct-val">--</span>
+            </div>
           </div>
 
           <div class="hero-stats">
@@ -1218,6 +1222,15 @@
       const vPat = hero.vocalPattern || 'Dynamic Melodic Phrasing';
       const vComp = hero.vocalComplementation || 'In-The-Pocket Groove (Vocals Lock to Beat)';
       vocalsEl.textContent = `${vPres}% Presence • ${vPat} • ${vComp}`;
+
+      const stageRow = document.getElementById('heroSoundstageRow');
+      const stageEl = document.getElementById('heroSoundstage');
+      if (hero.spatialStaging && stageRow && stageEl) {
+        stageEl.textContent = hero.spatialStaging;
+        stageRow.style.display = 'flex';
+      } else if (stageRow) {
+        stageRow.style.display = 'none';
+      }
 
       // Recs Section
       recsSection.style.display = 'block';

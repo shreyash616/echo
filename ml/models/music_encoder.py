@@ -57,6 +57,35 @@ class ConvBlock(nn.Module):
         return self.block(x)
 
 
+class ResidualBlock(nn.Module):
+    """
+    Residual acoustic block with pre-activation shortcut:
+      Conv2d(3x3, stride) -> BN -> GELU -> Conv2d(3x3) -> BN + shortcut -> GELU
+    """
+
+    def __init__(self, in_ch: int, out_ch: int, stride: int = 1) -> None:
+        super().__init__()
+        self.conv1 = nn.Conv2d(in_ch, out_ch, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(out_ch)
+        self.act = nn.GELU()
+        self.conv2 = nn.Conv2d(out_ch, out_ch, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_ch)
+
+        if stride != 1 or in_ch != out_ch:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_ch, out_ch, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(out_ch),
+            )
+        else:
+            self.shortcut = nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        res = self.shortcut(x)
+        out = self.act(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        return self.act(out + res)
+
+
 class EmotionFeatureExtractor(nn.Module):
     """
     Differentiable extractor of 16 emotion, tonal, and rhythm/beat features from a mel spectrogram.
@@ -224,7 +253,7 @@ class ProjectionHead(nn.Module):
 
 class CnnMusicEncoder(nn.Module):
     """
-    Joint acoustic + emotion/rhythm encoder for mel spectrograms.
+    Joint acoustic ResNet + emotion/rhythm encoder for mel spectrograms.
 
     Input:  (B, 1, 128, T)
     Output: (B, embedding_dim) — L2-normalised joint embedding
@@ -232,15 +261,25 @@ class CnnMusicEncoder(nn.Module):
 
     def __init__(self, embedding_dim: int = 512, emotion_dim: int = 64) -> None:
         super().__init__()
+        # Initial 7x7 wide receptive field stem
+        self.stem = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=7, stride=1, padding=3, bias=False),
+            nn.BatchNorm2d(32),
+            nn.GELU(),
+        )
+        # Deep Residual acoustic stages with skip connections
         self.features = nn.Sequential(
-            ConvBlock(1,   32),
-            ConvBlock(32,  64,  stride=2),
-            ConvBlock(64,  128, stride=2),
-            ConvBlock(128, 256, stride=2),
-            ConvBlock(256, 512, stride=2),
+            ResidualBlock(32, 64, stride=2),
+            ResidualBlock(64, 64, stride=1),
+            ResidualBlock(64, 128, stride=2),
+            ResidualBlock(128, 128, stride=1),
+            ResidualBlock(128, 256, stride=2),
+            ResidualBlock(256, 256, stride=1),
+            ResidualBlock(256, 512, stride=2),
+            ResidualBlock(512, 512, stride=1),
         )
         self.emotion = EmotionFeatureExtractor(n_mels=128, out_dim=emotion_dim)
-        # Pool both mean and temporal std of CNN feature maps (512 + 512) + emotion_dim
+        # Pool both mean and temporal std of residual feature maps (512 + 512) + emotion_dim
         self.proj    = nn.Linear(512 * 2 + emotion_dim, embedding_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -250,7 +289,8 @@ class CnnMusicEncoder(nn.Module):
         Returns:
             (B, embedding_dim) L2-normalised joint embedding.
         """
-        feat_map = self.features(x)                         # (B, 512, H', T')
+        out      = self.stem(x)
+        feat_map = self.features(out)                       # (B, 512, H', T')
         # Mean over frequency, then capture both mean and temporal std over time
         freq_mean = feat_map.mean(dim=2)                    # (B, 512, T')
         h_mean    = freq_mean.mean(dim=2)                   # (B, 512)

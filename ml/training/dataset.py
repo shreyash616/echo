@@ -147,16 +147,17 @@ class ContrastiveSpectrogramDataset(Dataset):
         (view_a, view_b)  — both shape (1, 128, crop_frames), float32
     """
 
-    def __init__(self, spec_dir: str, crop_frames: int = CROP_FRAMES) -> None:
+    def __init__(self, spec_dir: str, crop_frames: int = CROP_FRAMES, preload: bool = True) -> None:
         self.spec_dir    = Path(spec_dir)
         self.crop_frames = crop_frames
         self.paths       = sorted(self.spec_dir.glob("*.npy"))
+        self._cache: dict[int, np.ndarray] = {}
 
         if not self.paths:
             raise RuntimeError(f"No .npy files found in {self.spec_dir}")
 
         logger.info(
-            "ContrastiveSpectrogramDataset: %d tracks, spec_dir=%s",
+            "ContrastiveSpectrogramDataset: %d tracks, spec_dir=%s (RAM caching enabled)",
             len(self.paths), self.spec_dir,
         )
 
@@ -164,12 +165,13 @@ class ContrastiveSpectrogramDataset(Dataset):
         return len(self.paths)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        # Cast to float32 immediately (supports both float16 and float32 .npy files)
-        mel = np.load(self.paths[idx]).astype(np.float32)
-
-        # If an older spectrogram has values outside [0, 1], normalise safely
-        if mel.min() < -1e-3 or mel.max() > 1.0 + 1e-3:
-            mel = (mel - mel.min()) / (mel.max() - mel.min() + 1e-8)
+        if idx in self._cache:
+            mel = self._cache[idx]
+        else:
+            mel = np.load(self.paths[idx]).astype(np.float32)
+            if mel.min() < -1e-3 or mel.max() > 1.0 + 1e-3:
+                mel = (mel - mel.min()) / (mel.max() - mel.min() + 1e-8)
+            self._cache[idx] = mel
 
         crop_a, crop_b = _energy_matched_crop_pair(mel, self.crop_frames)
         view_a = _augment(crop_a)
