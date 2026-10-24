@@ -287,16 +287,15 @@ async def _find_and_rank_similar_tracks(
         if q:
             external_queries.append(q)
 
-    # Only resolve FAISS FMA tracks when source is English or when FAISS entry is a real catalog track
+    # Always include FAISS nearest neighbors (already from our trained commercial index)
     direct_faiss_cands: list[dict] = []
-    if not source_lang:
-        for m in faiss_raw[:20]:
-            if m.get("previewUrl") and not str(m.get("id", "")).startswith("fma_"):
-                direct_faiss_cands.append(m)
-            else:
-                q = f"{m.get('title', '')} {m.get('artist', '')}".strip()
-                if q:
-                    external_queries.append(q)
+    for m in faiss_raw[:20]:
+        if m.get("previewUrl"):
+            direct_faiss_cands.append(m)
+        else:
+            q = f"{m.get('title', '')} {m.get('artist', '')}".strip()
+            if q:
+                external_queries.append(q)
 
     async def _resolve_query(q: str) -> dict | None:
         try:
@@ -305,14 +304,14 @@ async def _find_and_rank_similar_tracks(
         except Exception:
             return None
 
-    resolved_external = await asyncio.gather(*[_resolve_query(q) for q in external_queries[:24]])
+    resolved_external = await asyncio.gather(*[_resolve_query(q) for q in external_queries[:16]])
 
     # Merge and deduplicate candidate pool
     seen_ids: set[str] = {source_id} if source_id else set()
     seen_keys: set[str] = {f"{primary_artist.lower()}:{source_title.lower().strip()}"}
     merged_candidates: list[dict] = []
 
-    for cand in deezer_cands + direct_faiss_cands + [r for r in resolved_external if r is not None]:
+    for cand in direct_faiss_cands + deezer_cands + [r for r in resolved_external if r is not None]:
         cid = str(cand.get("id", ""))
         ckey = f"{_primary_artist_name(str(cand.get('artist', ''))).lower()}:{str(cand.get('title', '')).lower().strip()}"
         if not cid or cid in seen_ids or ckey in seen_keys or not cand.get("previewUrl"):
@@ -320,15 +319,19 @@ async def _find_and_rank_similar_tracks(
         seen_ids.add(cid)
         seen_keys.add(ckey)
         merged_candidates.append(cand)
-        if len(merged_candidates) >= 36:
+        if len(merged_candidates) >= 30:
             break
 
     if not merged_candidates:
         logger.warning("recommendations | no candidates with preview URLs found")
-        return []
+        return [_to_track(m) for m in faiss_raw[:limit]]
 
     # 2. Verify genre & language compatibility and score each candidate using our own ML + audio metrics
     async def _evaluate_candidate(cand: dict) -> tuple[TrackResult, float, bool] | None:
+        # Fast path: Candidates directly from our FAISS index already have trained model scores & metrics
+        if cand.get("matchScore") is not None and cand.get("bpm", 0) > 0:
+            return _to_track(cand), float(cand["matchScore"]), True
+
         async with _ENCODE_SEM:
             try:
                 cand_artist = _primary_artist_name(str(cand.get("artist", "")))
@@ -417,6 +420,8 @@ async def _find_and_rank_similar_tracks(
     other_valid.sort(key=lambda x: x[1], reverse=True)
 
     ordered = [item[0] for item in (genre_strict + other_valid)]
+    if not ordered and faiss_raw:
+        ordered = [_to_track(m) for m in faiss_raw]
     logger.info(
         "rank_similar | evaluated=%d/%d  genre_strict=%d  top_score=%.3f",
         len(valid), len(merged_candidates), len(genre_strict),
@@ -515,24 +520,40 @@ async def identify(audio: UploadFile = File(...)) -> IdentifyResponse:
 
 
 @router.get("/search", response_model=SearchResponse)
-async def search(q: str = Query(..., min_length=1)) -> SearchResponse:
+async def search(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(5, ge=1, le=20),
+    enrich: bool = Query(False),
+) -> SearchResponse:
     """
-    Search by song / artist name. Enriches the top match with self-generated
-    audio metrics (BPM, Key, Energy, Valence, Vibes) so the Hero card on the
-    Results screen displays complete musical stats immediately.
+    Search by song / artist name. Returns fast results for debounced autocomplete.
     """
     t0 = time.perf_counter()
-    logger.info("search | query=%r", q)
-    tracks_data = await search_track(q, limit=10)
+    logger.info("search | query=%r  limit=%d  enrich=%s", q, limit, enrich)
+    tracks_data = await search_track(q, limit=limit)
     if not tracks_data:
         return SearchResponse(results=[], recommendations=[])
 
-    # Enrich top search result (Hero card) with our self-generated audio metrics
-    top_enriched, _, _ = await _enrich_single_track_with_own_metrics(tracks_data[0])
-    results = [top_enriched] + [_to_track(t) for t in tracks_data[1:]]
+    if enrich and tracks_data:
+        top_enriched, _, _ = await _enrich_single_track_with_own_metrics(tracks_data[0])
+        results = [top_enriched] + [_to_track(t) for t in tracks_data[1:]]
+    else:
+        results = [_to_track(t) for t in tracks_data]
 
     logger.info("search | results=%d  total=%.3fs", len(results), time.perf_counter() - t0)
     return SearchResponse(results=results, recommendations=[])
+
+
+@router.get("/track/{track_id}", response_model=TrackResult)
+async def get_track_detail(track_id: str) -> TrackResult:
+    """
+    Fetch track details and enrich with self-generated audio analytics if preview is available.
+    """
+    track = await get_track(track_id)
+    if not track:
+        raise HTTPException(404, f"Track {track_id} not found")
+    enriched, _, _ = await _enrich_single_track_with_own_metrics(track)
+    return enriched
 
 
 @router.get("/recommendations/{track_id}", response_model=list[TrackResult])
@@ -547,17 +568,17 @@ async def get_recommendations(track_id: str) -> list[TrackResult]:
 
     track = await get_track(track_id)
     if not track:
-        raise HTTPException(404, f"Track {track_id} not found on Deezer")
+        raise HTTPException(404, f"Track {track_id} not found")
 
     preview_url = track.get("previewUrl")
     if not preview_url:
         logger.warning("recommendations | no preview available  track_id=%s", track_id)
-        return []
+        return [_to_track(m) for m in recommender._metadata[:settings.max_recommendations]]
 
     preview_bytes = await fetch_preview_audio(preview_url)
     if not preview_bytes:
         logger.warning("recommendations | preview download failed  track_id=%s", track_id)
-        return []
+        return [_to_track(m) for m in recommender._metadata[:settings.max_recommendations]]
 
     _, genre_family, _ = await _detect_track_context(track)
     source_embedding, source_metrics = await asyncio.to_thread(
@@ -572,6 +593,16 @@ async def get_recommendations(track_id: str) -> list[TrackResult]:
         source_metrics=source_metrics,
         limit=settings.max_recommendations,
     )
+
+    if not recommendations and recommender._metadata:
+        logger.info("recommendations | falling back directly to FAISS index neighbors")
+        faiss_fallback = recommender.recommend(
+            source_embedding,
+            source_metrics=source_metrics,
+            exclude_id=track_id,
+            k=settings.max_recommendations,
+        )
+        recommendations = [_to_track(m) for m in faiss_fallback]
 
     logger.info(
         "recommendations | done  title=%r  recs=%d  total=%.3fs",

@@ -141,6 +141,97 @@
       box-shadow: 0 0 20px var(--accent-glow);
     }
 
+    .search-results-dropdown {
+      position: absolute;
+      top: calc(100% + 8px);
+      left: 0;
+      right: 0;
+      background: rgba(18, 18, 24, 0.96);
+      border: 1px solid var(--border-accent);
+      border-radius: 18px;
+      box-shadow: 0 24px 50px rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(28px);
+      overflow: hidden;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .search-result-item {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 12px 18px;
+      cursor: pointer;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      transition: all 0.2s ease;
+    }
+
+    .search-result-item:last-child {
+      border-bottom: none;
+    }
+
+    .search-result-item:hover, .search-result-item.active {
+      background: rgba(139, 92, 246, 0.2);
+    }
+
+    .search-result-thumb {
+      width: 44px;
+      height: 44px;
+      border-radius: 8px;
+      object-fit: cover;
+      flex-shrink: 0;
+      border: 1px solid var(--border);
+    }
+
+    .search-result-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .search-result-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .search-result-artist {
+      font-size: 12px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 2px;
+    }
+
+    .search-result-action {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent);
+      background: rgba(139, 92, 246, 0.15);
+      border: 1px solid rgba(139, 92, 246, 0.3);
+      padding: 5px 12px;
+      border-radius: 999px;
+      flex-shrink: 0;
+      transition: all 0.2s ease;
+    }
+
+    .search-result-item:hover .search-result-action {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 0 12px var(--accent-glow);
+    }
+
+    .search-loading-hint {
+      padding: 16px 20px;
+      color: var(--text-dim);
+      font-size: 13px;
+      text-align: center;
+    }
+
     .search-icon {
       position: absolute;
       left: 18px;
@@ -536,12 +627,13 @@
 
     <div class="input-section">
       <!-- Search Input -->
-      <div class="search-box">
+      <div class="search-box" id="searchBox">
         <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="11" cy="11" r="8"></circle>
           <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
         </svg>
-        <input type="text" id="searchInput" class="search-input" placeholder="Search any song or artist (e.g. For a reason Karan Aujla)...">
+        <input type="text" id="searchInput" class="search-input" placeholder="Search any song or artist (e.g. Starboy, Karan Aujla)..." autocomplete="off">
+        <div id="searchResultsDropdown" class="search-results-dropdown" style="display:none;"></div>
       </div>
 
       <div class="divider">or identify sound</div>
@@ -646,10 +738,80 @@
       viewAppBtn.className = 'btn btn-secondary';
     });
 
-    // Search on Enter
+    // Debounced Search & Matches Dropdown
+    const searchDropdown = document.getElementById('searchResultsDropdown');
+    const searchBox = document.getElementById('searchBox');
+    let searchDebounceTimer = null;
+
+    searchInput.addEventListener('input', () => {
+      const query = searchInput.value.trim();
+      clearTimeout(searchDebounceTimer);
+
+      if (query.length < 2) {
+        searchDropdown.style.display = 'none';
+        searchDropdown.innerHTML = '';
+        return;
+      }
+
+      searchDebounceTimer = setTimeout(() => {
+        fetchSearchMatches(query);
+      }, 250);
+    });
+
+    async function fetchSearchMatches(query) {
+      try {
+        searchDropdown.style.display = 'block';
+        searchDropdown.innerHTML = '<div class="search-loading-hint">Searching songs...</div>';
+
+        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&limit=5`);
+        if (!res.ok) throw new Error("Search failed (" + res.status + ")");
+        const data = await res.json();
+        const matches = (data.results || []).slice(0, 5);
+
+        if (matches.length === 0) {
+          searchDropdown.innerHTML = '<div class="search-loading-hint">No matching songs found</div>';
+          return;
+        }
+
+        searchDropdown.innerHTML = '';
+        matches.forEach((song) => {
+          const item = document.createElement('div');
+          item.className = 'search-result-item';
+          item.innerHTML = `
+            <img class="search-result-thumb" src="${song.albumArtUrl || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=100'}" alt="">
+            <div class="search-result-info">
+              <div class="search-result-title">${song.title}</div>
+              <div class="search-result-artist">${song.artist} • ${song.album || 'Single'}</div>
+            </div>
+            <div class="search-result-action">Select & Match →</div>
+          `;
+
+          item.addEventListener('click', () => {
+            selectSongAndStartFlow(song);
+          });
+
+          searchDropdown.appendChild(item);
+        });
+      } catch (err) {
+        searchDropdown.innerHTML = `<div class="search-loading-hint">Search error: ${err.message}</div>`;
+      }
+    }
+
+    // Close dropdown on outside click or Escape
+    document.addEventListener('click', (e) => {
+      if (searchBox && !searchBox.contains(e.target)) {
+        searchDropdown.style.display = 'none';
+      }
+    });
+
     searchInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && searchInput.value.trim()) {
-        performSearch(searchInput.value.trim());
+      if (e.key === 'Escape') {
+        searchDropdown.style.display = 'none';
+      } else if (e.key === 'Enter') {
+        const query = searchInput.value.trim();
+        if (query) {
+          fetchSearchMatches(query);
+        }
       }
     });
 
@@ -763,10 +925,13 @@
       try {
         const formData = new FormData();
         formData.append('file', blob, 'sample.m4a');
+        formData.append('audio', blob, 'sample.m4a');
         const res = await fetch('/api/identify', { method: 'POST', body: formData });
         if (!res.ok) throw new Error("Identification failed (" + res.status + ")");
         const data = await res.json();
-        renderResults(data.track, data.recommendations);
+        const heroTrack = data.identified || data.track;
+        const recommendations = Array.isArray(data.recommendations) ? data.recommendations : [];
+        renderResults(heroTrack, recommendations);
       } catch (err) {
         alert("Audio recognition error: " + err.message);
       } finally {
@@ -775,37 +940,47 @@
       }
     }
 
-    async function performSearch(query) {
-      showLoader(`Searching "${query}"...`);
+    async function selectSongAndStartFlow(song) {
+      searchDropdown.style.display = 'none';
+      searchInput.value = `${song.title} - ${song.artist}`;
+
+      showLoader(`Analyzing acoustic vibe for "${song.title}"...`);
       try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
-        if (!res.ok) throw new Error("Search failed (" + res.status + ")");
-        const data = await res.json();
-        if (data.results && data.results.length > 0) {
-          const top = data.results[0];
-          // Get recommendations for top track
-          loaderText.textContent = "Computing neural acoustic neighbors...";
-          const recRes = await fetch(`/api/recommendations/${top.id}`);
-          const recData = await recRes.json();
-          renderResults(top, recData.recommendations);
-        } else {
-          alert("No songs found for that search.");
+        // Fetch recommendations and enriched track stats concurrently
+        const [recPromise, trackPromise] = await Promise.allSettled([
+          fetch(`/api/recommendations/${song.id}`),
+          fetch(`/api/track/${song.id}`),
+        ]);
+
+        let recommendations = [];
+        if (recPromise.status === 'fulfilled' && recPromise.value.ok) {
+          const recData = await recPromise.value.json();
+          recommendations = Array.isArray(recData) ? recData : (recData.recommendations || []);
         }
+
+        let heroTrack = song;
+        if (trackPromise.status === 'fulfilled' && trackPromise.value.ok) {
+          heroTrack = await trackPromise.value.json();
+        }
+
+        renderResults(heroTrack, recommendations);
       } catch (err) {
-        alert("Search error: " + err.message);
+        alert("Recommendation error: " + err.message);
       } finally {
         hideLoader();
       }
     }
 
     function renderResults(hero, recs) {
+      const trackList = Array.isArray(recs) ? recs : (recs && recs.recommendations ? recs.recommendations : []);
+
       // Hero Card
       heroCard.style.display = 'block';
       document.getElementById('heroTitle').textContent = hero.title || 'Unknown Title';
       document.getElementById('heroArtist').textContent = hero.artist || 'Unknown Artist';
       document.getElementById('heroArt').src = hero.albumArtUrl || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300';
-      document.getElementById('statBpm').textContent = (hero.bpm || '--') + ' BPM';
-      document.getElementById('statKey').textContent = hero.key || '-- Key';
+      document.getElementById('statBpm').textContent = (hero.bpm > 0 ? hero.bpm : '--') + ' BPM';
+      document.getElementById('statKey').textContent = (hero.key && hero.key !== '—' ? hero.key : '--') + ' Key';
       document.getElementById('statEnergy').textContent = 'Energy: ' + Math.round((hero.energy || 0.5) * 100) + '%';
       document.getElementById('heroSpotifyBtn').href = `https://open.spotify.com/search/${encodeURIComponent(hero.title + ' ' + hero.artist)}`;
 
@@ -824,15 +999,15 @@
       recsSection.style.display = 'block';
       recsGrid.innerHTML = '';
 
-      if (!recs || recs.length === 0) {
-        recsGrid.innerHTML = '<div style="color:var(--text-dim); text-align:center; padding:20px;">No similar tracks found.</div>';
+      if (!trackList || trackList.length === 0) {
+        recsGrid.innerHTML = '<div style="color:var(--text-dim); text-align:center; padding:28px 16px; font-size:14px;">No similar tracks found for this song.</div>';
         return;
       }
 
-      recs.forEach((track, idx) => {
+      trackList.forEach((track, idx) => {
         const card = document.createElement('div');
         card.className = 'rec-card';
-        const matchPct = track.matchScore ? Math.round(track.matchScore * 100) : 90 - idx * 2;
+        const matchPct = track.matchScore ? Math.round(track.matchScore * 100) : Math.max(70, 96 - idx * 2);
 
         card.innerHTML = `
           <div class="rec-rank">#${idx + 1}</div>
@@ -853,14 +1028,9 @@
           togglePlay(track.previewUrl, playBtn);
         });
 
-        // Clicking card selects it as the new hero
+        // Clicking card selects it as the new hero and explores similar vibes
         card.addEventListener('click', () => {
-          showLoader(`Finding songs with vibe similar to "${track.title}"...`);
-          fetch(`/api/recommendations/${track.id}`)
-            .then(r => r.json())
-            .then(data => renderResults(track, data.recommendations))
-            .catch(err => alert("Error: " + err.message))
-            .finally(hideLoader);
+          selectSongAndStartFlow(track);
         });
 
         recsGrid.appendChild(card);
