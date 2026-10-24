@@ -611,6 +611,33 @@ def _bpm_compatibility(bpm_a: int, bpm_b: int) -> float:
     return float(np.clip(np.exp(-4.5 * min_rel_diff), 0.15, 1.0))
 
 
+def _era_similarity(year_a: int | None, year_b: int | None) -> float:
+    """
+    Era / release decade compatibility:
+      - Unknown years: neutral default 0.75
+      - Diff <= 3 years: 1.0 (exact contemporaries / same album cycle)
+      - Diff <= 8 years: 0.9 (same decade)
+      - Diff <= 15 years: 0.7 (adjacent generation)
+      - Diff <= 25 years: 0.4 (different musical generation)
+      - Diff > 25 years: decaying down to 0.1 (strong era clash penalty)
+    """
+    try:
+        if not year_a or not year_b or int(year_a) <= 0 or int(year_b) <= 0:
+            return 0.75
+        diff = abs(int(year_a) - int(year_b))
+        if diff <= 3:
+            return 1.0
+        if diff <= 8:
+            return 0.9
+        if diff <= 15:
+            return 0.7
+        if diff <= 25:
+            return 0.4
+        return float(np.clip(1.0 - (diff / 35.0), 0.1, 1.0))
+    except Exception:
+        return 0.75
+
+
 def compute_composite_match_score(
     src_emb: np.ndarray,
     src_metrics: dict,
@@ -619,12 +646,13 @@ def compute_composite_match_score(
 ) -> float:
     """
     Structural Composite Matching Score in [0, 1]:
-      - 512-d neural embedding similarity (timbral & acoustic manifold) [45%]
+      - 512-d neural embedding similarity (timbral & acoustic manifold) [40%]
       - Instruments used overlap [15%]
       - Arrangement progression & order of entry [10%]
       - Instrumental pace & subdivision [10%]
       - Vocal presence, phrasing pattern & complementation groove [10%]
-      - Harmonic Key & BPM octave compatibility [10%]
+      - Harmonic Key & BPM octave compatibility [5%]
+      - Era & release decade compatibility [10%]
     """
     a = src_emb.flatten()
     b = cand_emb.flatten()
@@ -654,14 +682,16 @@ def compute_composite_match_score(
         int(cand_metrics.get("bpm", 0)),
     )
     s_harmonic = 0.5 * s_key + 0.5 * s_bpm
+    s_era = _era_similarity(src_metrics.get("year"), cand_metrics.get("year"))
 
     total = (
-        0.45 * s_neural
+        0.40 * s_neural
         + 0.15 * s_inst
         + 0.10 * s_order
         + 0.10 * s_pace
         + 0.10 * s_vocal
-        + 0.10 * s_harmonic
+        + 0.05 * s_harmonic
+        + 0.10 * s_era
     )
     return round(float(np.clip(total, 0.05, 0.99)), 4)
 
@@ -880,13 +910,14 @@ class MusicRecommender:
         embedding: np.ndarray,
         source_metrics: dict | None = None,
         genre_keywords: list[str] | None = None,
+        source_lang: str | None = None,
         exclude_id: str | None = None,
         k: int = 20,
     ) -> list[dict]:
         """
         Return up to k track dicts from the FAISS index most similar to the
-        given embedding, filtering by genre family when `genre_keywords` is provided
-        and skipping invalid stub entries.
+        given embedding, enforcing strict language boundaries, era matching,
+        and musical genre filtering.
         """
         if not self._loaded or self._index is None:
             logger.warning("Recommender not loaded; returning empty list")
@@ -902,6 +933,12 @@ class MusicRecommender:
         matched_genre_results: list[dict] = []
         fallback_results: list[dict] = []
 
+        _GENRE_TO_LANG: dict[str, str] = {
+            "hindi": "hi", "bollywood": "hi", "punjabi": "pa",
+            "tamil": "ta", "telugu": "te", "k-pop": "ko",
+            "j-pop": "ja", "latin": "es",
+        }
+
         for dist, idx in zip(distances[0], indices[0]):
             if idx < 0 or idx >= len(self._metadata):
                 continue
@@ -915,7 +952,20 @@ class MusicRecommender:
             if not artist or (title.startswith("Track ") and title[6:].isdigit()):
                 continue
 
-            # Compute structural composite score incorporating neural, instruments, order, pace & vocals
+            cand_genre = str(meta.get("genre", "")).lower()
+            cand_lang = _GENRE_TO_LANG.get(cand_genre)
+
+            # Strict language gate for catalog tracks:
+            # - If source is non-English, do not allow English or foreign non-matching tracks
+            # - If source is English, do not allow non-English tracks
+            if source_lang:
+                if cand_lang != source_lang:
+                    continue
+            else:
+                if cand_lang is not None:
+                    continue
+
+            # Compute structural composite score incorporating neural, instruments, order, pace, vocals & era
             if source_metrics:
                 cand_emb_score = float(np.clip((float(dist) + 0.1) / 1.1, 0.05, 1.0))
                 s_inst = _instrument_similarity(source_metrics.get("instruments", []), meta.get("instruments", []))
@@ -925,24 +975,23 @@ class MusicRecommender:
                 s_key = _key_compatibility(str(source_metrics.get("key", "—")), str(meta.get("key", "—")))
                 s_bpm = _bpm_compatibility(int(source_metrics.get("bpm", 0)), int(meta.get("bpm", 0)))
                 s_harmonic = 0.5 * s_key + 0.5 * s_bpm
+                s_era = _era_similarity(source_metrics.get("year"), meta.get("year"))
 
                 comp_score = (
-                    0.45 * cand_emb_score
+                    0.40 * cand_emb_score
                     + 0.15 * s_inst
                     + 0.10 * s_order
                     + 0.10 * s_pace
                     + 0.10 * s_vocal
-                    + 0.10 * s_harmonic
+                    + 0.05 * s_harmonic
+                    + 0.10 * s_era
                 )
                 meta["matchScore"] = round(float(np.clip(comp_score, 0.05, 0.99)), 4)
             else:
                 meta["matchScore"] = round(float(np.clip((float(dist) + 0.1) / 1.1, 0.01, 0.99)), 4)
 
             if genre_kw:
-                track_genre_text = " ".join(
-                    [str(meta.get("genre", "")), " ".join(meta.get("vibes", []))]
-                ).lower()
-                if any(kw in track_genre_text for kw in genre_kw):
+                if any(kw in cand_genre for kw in genre_kw):
                     matched_genre_results.append(meta)
                 else:
                     fallback_results.append(meta)

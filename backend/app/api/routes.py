@@ -20,7 +20,7 @@ from app.services.deezer import (
     fetch_preview_audio,
 )
 from app.services.lastfm import get_artist_tags, get_similar_tracks
-from app.services.recommender import recommender, compute_composite_match_score
+from app.services.recommender import recommender, compute_composite_match_score, _era_similarity
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
@@ -50,6 +50,8 @@ def _to_track(meta: dict) -> TrackResult:
         vocalPresence=float(meta.get("vocalPresence", 0.5)),
         vocalPattern=str(meta.get("vocalPattern", "Dynamic Melodic Phrasing")),
         vocalComplementation=str(meta.get("vocalComplementation", "In-The-Pocket Groove")),
+        year=int(meta["year"]) if meta.get("year") else None,
+        decade=str(meta["decade"]) if meta.get("decade") else None,
     )
 
 
@@ -221,6 +223,11 @@ async def _enrich_single_track_with_own_metrics(
         preview_bytes,
         genre_hint or str(track_meta.get("genre", "")),
     )
+    if track_meta.get("year"):
+        metrics["year"] = track_meta["year"]
+    if track_meta.get("decade"):
+        metrics["decade"] = track_meta["decade"]
+
     enriched = {
         **track_meta,
         "bpm":                  metrics["bpm"],
@@ -234,6 +241,8 @@ async def _enrich_single_track_with_own_metrics(
         "vocalPresence":        metrics.get("vocalPresence", 0.5),
         "vocalPattern":         metrics.get("vocalPattern", "Dynamic Melodic Phrasing"),
         "vocalComplementation": metrics.get("vocalComplementation", "In-The-Pocket Groove"),
+        "year":                 track_meta.get("year"),
+        "decade":               track_meta.get("decade"),
     }
     return _to_track(enriched), emb, metrics
 
@@ -281,6 +290,7 @@ async def _find_and_rank_similar_tracks(
         source_embedding,
         source_metrics=source_metrics,
         genre_keywords=genre_keywords + ([lang_hint] if lang_hint else []),
+        source_lang=source_lang,
         exclude_id=source_id,
         k=limit * 2,
     )
@@ -338,55 +348,59 @@ async def _find_and_rank_similar_tracks(
         logger.warning("recommendations | no candidates with preview URLs found")
         return [_to_track(m) for m in faiss_raw[:limit]]
 
-    # 2. Verify genre & language compatibility and score each candidate using our own ML + audio metrics
+    # 2. Verify genre, language compatibility, and era, then score each candidate
     async def _evaluate_candidate(cand: dict) -> tuple[TrackResult, float, bool] | None:
-        # Fast path: Candidates directly from our FAISS index already have trained model scores & metrics
-        if cand.get("matchScore") is not None and cand.get("bpm", 0) > 0:
-            return _to_track(cand), float(cand["matchScore"]), True
+        try:
+            cand_artist = _primary_artist_name(str(cand.get("artist", "")))
+            cand_title = str(cand.get("title", ""))
 
-        async with _ENCODE_SEM:
-            try:
-                cand_artist = _primary_artist_name(str(cand.get("artist", "")))
-                cand_title = str(cand.get("title", ""))
+            # Step 1: Language detection (script, explicit genre tag, and artist tags)
+            cand_script_lang = _detect_script_language(cand_title, cand_artist)
+            cand_tags: list[str] = []
+            if cand.get("genre"):
+                cand_tags.append(str(cand["genre"]))
 
-                # Language & genre check
-                cand_script_lang = _detect_script_language(cand_title, cand_artist)
-                cand_tags: list[str] = []
-                if cand.get("genre"):
-                    cand_tags.append(str(cand["genre"]))
+            if not cand.get("_trusted_scene"):
+                cand_tags.extend(await get_artist_tags(cand_artist))
+                if not cand_tags and cand.get("albumId"):
+                    cand_tags.extend(await get_album_genres(str(cand["albumId"])))
 
-                if not cand.get("_trusted_scene"):
-                    # Fetch tags to verify language and genre for non-graph candidates
-                    cand_tags.extend(await get_artist_tags(cand_artist))
-                    if not cand_tags and cand.get("albumId"):
-                        cand_tags.extend(await get_album_genres(str(cand["albumId"])))
+            cand_tag_lang = _detect_language_from_tags(cand_tags)
+            cand_lang = cand_tag_lang or cand_script_lang
 
-                cand_tag_lang = _detect_language_from_tags(cand_tags)
-                cand_lang = cand_tag_lang or cand_script_lang
+            # Step 2: Strict language barrier
+            # - If source is non-English, candidate MUST match source_lang
+            # - If source is English, reject non-English tracks
+            if source_lang:
+                if cand_lang and cand_lang != source_lang:
+                    return None
+                if not cand.get("_trusted_scene") and cand_lang != source_lang:
+                    return None
+            else:
+                if cand_lang is not None:
+                    return None
 
-                # Enforce strict language matching:
-                # - If source is non-English (e.g. 'hi', 'pa', 'ko'), candidate must either be
-                #   from the trusted related-artist scene (with no conflicting language tag)
-                #   or explicitly match source_lang.
-                # - If source is English (None), reject candidates explicitly tagged as non-English.
-                if source_lang:
-                    if cand_lang and cand_lang != source_lang:
-                        return None
-                    if not cand.get("_trusted_scene") and cand_lang != source_lang:
-                        return None
-                else:
-                    if cand_lang is not None:
-                        return None
+            # Step 3: Genre compatibility
+            cand_genre_family, _ = _detect_genre_family(cand_tags)
+            genre_matched = bool(
+                cand.get("_trusted_scene")
+                or not genre_family
+                or cand_genre_family == genre_family
+                or any(kw in " ".join(cand_tags).lower() for kw in genre_keywords)
+            )
 
-                # Check genre compatibility
-                cand_genre_family, _ = _detect_genre_family(cand_tags)
-                genre_matched = bool(
-                    cand.get("_trusted_scene")
-                    or not genre_family
-                    or cand_genre_family == genre_family
-                    or any(kw in " ".join(cand_tags).lower() for kw in genre_keywords)
-                )
+            # Step 4: Fast path for FAISS candidates that already passed language barrier
+            if cand.get("matchScore") is not None and cand.get("bpm", 0) > 0:
+                score = float(cand["matchScore"])
+                src_year = source_metrics.get("year") or source_track_info.get("year")
+                cand_year = cand.get("year")
+                s_era = _era_similarity(src_year, cand_year)
+                if s_era < 0.5:
+                    score = round(max(0.05, score * s_era * 1.5), 4)
+                return _to_track(cand), score, genre_matched
 
+            # Step 5: External audio preview download + ML encoding + structural analysis
+            async with _ENCODE_SEM:
                 preview_bytes = await fetch_preview_audio(str(cand["previewUrl"]))
                 if not preview_bytes:
                     return None
@@ -396,6 +410,10 @@ async def _find_and_rank_similar_tracks(
                     preview_bytes,
                     genre_family or cand_genre_family,
                 )
+                if cand.get("year"):
+                    cand_metrics["year"] = cand["year"]
+                if cand.get("decade"):
+                    cand_metrics["decade"] = cand["decade"]
 
                 score = compute_composite_match_score(
                     source_embedding,
@@ -403,7 +421,6 @@ async def _find_and_rank_similar_tracks(
                     cand_emb,
                     cand_metrics,
                 )
-                # Slight bonus for verified same-genre family
                 if genre_matched:
                     score = round(min(0.99, score + 0.03), 4)
 
@@ -421,11 +438,13 @@ async def _find_and_rank_similar_tracks(
                     "vocalPresence":        cand_metrics.get("vocalPresence", 0.5),
                     "vocalPattern":         cand_metrics.get("vocalPattern", "Dynamic Melodic Phrasing"),
                     "vocalComplementation": cand_metrics.get("vocalComplementation", "In-The-Pocket Groove"),
+                    "year":                 cand.get("year"),
+                    "decade":               cand.get("decade"),
                 }
                 return _to_track(enriched), score, genre_matched
-            except Exception as exc:
-                logger.debug("evaluate_candidate failed for %r: %s", cand.get("title"), exc)
-                return None
+        except Exception as exc:
+            logger.debug("evaluate_candidate failed for %r: %s", cand.get("title"), exc)
+            return None
 
     evaluated = await asyncio.gather(*[_evaluate_candidate(c) for c in merged_candidates])
     valid = [item for item in evaluated if item is not None]

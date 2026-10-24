@@ -22,6 +22,8 @@ class TrackResult(BaseModel):
     vocalPresence: float = 0.5
     vocalPattern: str = "Dynamic Melodic Phrasing"
     vocalComplementation: str = "In-The-Pocket Groove"
+    year: int | None = None
+    decade: str | None = None
 
 
 class IdentifyResponse(BaseModel):

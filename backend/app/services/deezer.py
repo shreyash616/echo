@@ -11,6 +11,7 @@ import logging
 
 import httpx
 from cachetools import TTLCache
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +20,28 @@ DEEZER_BASE = "https://api.deezer.com"
 _cache: TTLCache = TTLCache(maxsize=1024, ttl=3600)
 
 
+def _extract_year_decade(date_str: str | None) -> tuple[int | None, str | None]:
+    """Parse release year (e.g. 1982) and derive release decade (e.g. '1980s')."""
+    if not date_str:
+        return None, None
+    try:
+        clean = str(date_str).strip()
+        if len(clean) >= 4 and clean[:4].isdigit():
+            y = int(clean[:4])
+            if 1920 <= y <= 2035:
+                return y, f"{(y // 10) * 10}s"
+    except Exception:
+        pass
+    return None, None
+
+
 def _normalize(item: dict, genre_override: str = "") -> dict:
     """Map a Deezer track object to the internal track dict format."""
     artist = item.get("artist", {})
     album = item.get("album", {})
     art = album.get("cover_xl") or album.get("cover_medium") or album.get("cover", "")
+    raw_date = item.get("release_date") or album.get("release_date") or item.get("releaseDate")
+    year, decade = _extract_year_decade(raw_date)
     return {
         "id":          str(item["id"]),
         "title":       item.get("title", ""),
@@ -40,6 +58,8 @@ def _normalize(item: dict, genre_override: str = "") -> dict:
         "energy":      0.5,
         "valence":     0.5,
         "vibes":       [genre_override.lower()] if genre_override else [],
+        "year":        year,
+        "decade":      decade,
     }
 
 
@@ -74,6 +94,7 @@ async def search_track(query: str, limit: int = 5) -> list[dict]:
                 if it_resp.status_code == 200:
                     for item in it_resp.json().get("results", []):
                         art = (item.get("artworkUrl100") or "").replace("100x100bb", "600x600bb")
+                        y, dec = _extract_year_decade(item.get("releaseDate"))
                         results.append({
                             "id":          f"it_{item['trackId']}",
                             "title":       item.get("trackName", ""),
@@ -90,6 +111,8 @@ async def search_track(query: str, limit: int = 5) -> list[dict]:
                             "energy":      0.5,
                             "valence":     0.5,
                             "vibes":       [item.get("primaryGenreName", "").lower()] if item.get("primaryGenreName") else [],
+                            "year":        y,
+                            "decade":      dec,
                         })
         except Exception as exc:
             logger.debug("itunes search fallback failed: %s", exc)
@@ -99,7 +122,7 @@ async def search_track(query: str, limit: int = 5) -> list[dict]:
 
 
 async def get_track(deezer_id: str) -> dict | None:
-    """Fetch a single track by Deezer ID or iTunes ID, including album genre if available."""
+    """Fetch a single track by Deezer ID or iTunes ID, including album genre and release year."""
     cache_key = f"track:{deezer_id}"
     if cache_key in _cache:
         return _cache[cache_key]  # type: ignore[return-value]
@@ -117,6 +140,7 @@ async def get_track(deezer_id: str) -> dict | None:
                     if results:
                         item = results[0]
                         art = (item.get("artworkUrl100") or "").replace("100x100bb", "600x600bb")
+                        y, dec = _extract_year_decade(item.get("releaseDate"))
                         res = {
                             "id":          deezer_id,
                             "title":       item.get("trackName", ""),
@@ -133,6 +157,8 @@ async def get_track(deezer_id: str) -> dict | None:
                             "energy":      0.5,
                             "valence":     0.5,
                             "vibes":       [item.get("primaryGenreName", "").lower()] if item.get("primaryGenreName") else [],
+                            "year":        y,
+                            "decade":      dec,
                         }
                         _cache[cache_key] = res
                         return res
@@ -157,6 +183,12 @@ async def get_track(deezer_id: str) -> dict | None:
         return None
 
     result = _normalize(item)
+    if not result.get("year"):
+        raw_date = item.get("release_date") or item.get("album", {}).get("release_date")
+        y, dec = _extract_year_decade(raw_date)
+        if y:
+            result["year"] = y
+            result["decade"] = dec
     album_id = result.get("albumId")
     if album_id:
         genres = await get_album_genres(album_id)
@@ -256,15 +288,24 @@ async def get_genre_and_language_candidates(
 ) -> list[dict]:
     """
     Build a rich pool of candidate tracks that inherently share the source
-    track's genre and language/cultural scene using Deezer's artist graph and
-    targeted genre/language search:
-      1. Other tracks by the same artist (capped at 2 so results stay diverse)
-      2. Top tracks from Deezer's `/artist/{id}/related` artists (same genre & language)
-      3. Targeted genre + language search queries if additional candidates are needed
+    track's genre, language, era, and musical scene using Deezer's artist graph,
+    multi-artist decomposition, and targeted scene searches:
+      1. Tracks by the source artist(s) & collaborating artists
+      2. Top tracks from Deezer's `/artist/{id}/related` artists
+      3. Targeted era, language, and genre queries
     """
     artist_id = str(track_info.get("artistId", ""))
     artist_name = str(track_info.get("artist", ""))
     source_id = str(track_info.get("id", ""))
+    source_year = track_info.get("year")
+    source_decade = track_info.get("decade")
+
+    # Split multi-artist string (e.g. "Asha Bhosle & Kishore Kumar" -> ["Asha Bhosle", "Kishore Kumar"])
+    artist_parts = [
+        p.strip()
+        for p in re.split(r"\s*(?:,|&|\bfeat\.?|\bft\.?|\bx\b|/)\s*", artist_name, flags=re.IGNORECASE)
+        if p.strip()
+    ]
 
     # If artistId is missing, resolve it via a quick search
     if not artist_id and artist_name:
@@ -278,7 +319,7 @@ async def get_genre_and_language_candidates(
         f"{artist_name.lower().strip()}:{str(track_info.get('title', '')).lower().strip()}"
     }
 
-    def _add_candidate(t: dict) -> None:
+    def _add_candidate(t: dict, trusted: bool = False) -> None:
         tid = str(t.get("id", ""))
         key = f"{str(t.get('artist', '')).lower().strip()}:{str(t.get('title', '')).lower().strip()}"
         if not tid or tid in seen_ids or key in seen_keys or not t.get("previewUrl"):
@@ -287,16 +328,19 @@ async def get_genre_and_language_candidates(
         seen_keys.add(key)
         if genre_hint and not t.get("genre"):
             t = {**t, "genre": genre_hint}
+        if trusted:
+            t["_trusted_scene"] = True
         candidates.append(t)
 
-    if artist_id:
+    # 1. Deezer artist graph (for Deezer artist IDs)
+    if artist_id and not artist_id.startswith("it_"):
         own_top_task = get_artist_top_tracks(artist_id, limit=3, genre_hint=genre_hint)
         related_task = get_related_artists(artist_id, limit=12)
         own_top, related_artists = await asyncio.gather(own_top_task, related_task)
 
         # Include at most 2 other tracks from the same artist
         for t in own_top[:2]:
-            _add_candidate(t)
+            _add_candidate(t, trusted=True)
 
         # Fetch top 3 tracks from each related artist concurrently
         if related_artists:
@@ -308,21 +352,39 @@ async def get_genre_and_language_candidates(
             )
             for track_list in rel_lists:
                 for t in track_list:
-                    _add_candidate(t)
+                    _add_candidate(t, trusted=True)
                     if len(candidates) >= limit:
                         break
                 if len(candidates) >= limit:
                     break
 
-    # Supplement with genre + language search if needed
-    if len(candidates) < limit // 2:
+    # 2. Multi-artist and scene-targeted search (especially when iTunes or Deezer graph had few items)
+    if len(candidates) < limit:
+        search_tasks = []
+        # Query for each named artist individually
+        for part in artist_parts[:3]:
+            search_tasks.append(search_track(part, limit=5))
+            if source_decade:
+                search_tasks.append(search_track(f"{part} {source_decade}", limit=4))
+
+        # Query for primary artist + genre
+        if artist_parts and genre_hint:
+            search_tasks.append(search_track(f"{artist_parts[0]} {genre_hint}", limit=5))
+
+        # Query for language + genre
         query_parts = [p for p in [lang_hint, genre_hint] if p]
         if query_parts:
-            extra = await search_track(" ".join(query_parts), limit=20)
+            search_tasks.append(search_track(" ".join(query_parts), limit=10))
+
+        extra_lists = await asyncio.gather(*search_tasks)
+        for i, extra in enumerate(extra_lists):
+            is_artist_specific = (i < len(artist_parts) * 2)
             for t in extra:
-                _add_candidate(t)
+                _add_candidate(t, trusted=is_artist_specific)
                 if len(candidates) >= limit:
                     break
+            if len(candidates) >= limit:
+                break
 
     return candidates[:limit]
 

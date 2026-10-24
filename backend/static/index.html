@@ -784,6 +784,8 @@
           </div>
 
           <div class="hero-stats">
+            <span id="statEra" style="display:none; color:var(--accent); font-weight:600;"></span>
+            <span id="statEraDot" style="display:none;">•</span>
             <span id="statBpm">-- BPM</span>
             <span>•</span>
             <span id="statKey">-- Key</span>
@@ -896,7 +898,7 @@
             <img class="search-result-thumb" src="${song.albumArtUrl || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=100'}" alt="">
             <div class="search-result-info">
               <div class="search-result-title">${song.title}</div>
-              <div class="search-result-artist">${song.artist} • ${song.album || 'Single'}</div>
+              <div class="search-result-artist">${song.artist} • ${song.year ? `${song.year} • ` : ''}${song.album || 'Single'}</div>
             </div>
             <div class="search-result-action">Select & Match →</div>
           `;
@@ -1094,6 +1096,17 @@
       document.getElementById('heroTitle').textContent = hero.title || 'Unknown Title';
       document.getElementById('heroArtist').textContent = hero.artist || 'Unknown Artist';
       document.getElementById('heroArt').src = hero.albumArtUrl || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300';
+      const eraEl = document.getElementById('statEra');
+      const eraDot = document.getElementById('statEraDot');
+      if (hero.year) {
+        eraEl.textContent = `📅 ${hero.year} (${hero.decade || 'Era'})`;
+        eraEl.style.display = 'inline';
+        eraDot.style.display = 'inline';
+      } else {
+        eraEl.style.display = 'none';
+        eraDot.style.display = 'none';
+      }
+
       document.getElementById('statBpm').textContent = (hero.bpm > 0 ? hero.bpm : '--') + ' BPM';
       document.getElementById('statKey').textContent = (hero.key && hero.key !== '—' ? hero.key : '--') + ' Key';
       document.getElementById('statEnergy').textContent = 'Energy: ' + Math.round((hero.energy || 0.5) * 100) + '%';
@@ -1171,6 +1184,7 @@
             <div class="rec-title">${track.title}</div>
             <div class="rec-artist">${track.artist}</div>
             <div class="rec-structural-tags">
+              ${track.year ? `<span class="rec-tag">📅 ${track.year} (${track.decade || ''})</span>` : ''}
               ${instSnippet ? `<span class="rec-tag">🎸 ${instSnippet}</span>` : ''}
               ${paceSnippet ? `<span class="rec-tag">⚡ ${paceSnippet}</span>` : ''}
               ${vocalSnippet ? `<span class="rec-tag">🎤 ${vocalSnippet}</span>` : ''}
