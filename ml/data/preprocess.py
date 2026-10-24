@@ -2,9 +2,11 @@
 Mel spectrogram pre-processing for raw audio training.
 
 This script:
-  1. Reads a directory of .mp3/.wav files (FMA large/medium/small dataset).
-  2. Extracts 128-bin mel spectrograms using librosa.
-  3. Saves them as .npy files for fast loading during training.
+  1. Reads a directory of .mp3/.wav files (FMA dataset or harvested raw previews).
+  2. Extracts 128-bin mel spectrograms using librosa with a fixed 80 dB dynamic
+     range floor (preserving true loudness contrast and dynamic range across
+     both full-length tracks and 30s preview clips).
+  3. Saves them as .npy files for fast loading during training and indexing.
 
 Runs in parallel across all CPU cores by default.
 
@@ -33,6 +35,7 @@ logger = logging.getLogger(__name__)
 N_MELS     = 128
 HOP_LENGTH = 512
 N_FFT      = 2048
+TOP_DB     = 80.0   # Fixed 80 dB dynamic range floor (avoids per-clip min-max distortion)
 
 
 def audio_to_mel(
@@ -41,18 +44,25 @@ def audio_to_mel(
     n_mels: int = N_MELS,
 ) -> np.ndarray | None:
     """
-    Load the full audio track, compute mel spectrogram,
-    return (n_mels, T) float32 in [0, 1].
-    Returns None if the file is unreadable or silent.
+    Load the audio track, compute mel spectrogram with a fixed 80 dB floor,
+    and return (n_mels, T) float32 in [0, 1].
+    Returns None if the file is unreadable, too short (<2s), or near-silent.
     """
     try:
         y, _ = librosa.load(path, sr=sr, mono=True)
-        mel    = librosa.feature.melspectrogram(
+        if len(y) < sr * 2 or float(np.max(np.abs(y))) < 1e-4:
+            return None
+
+        mel = librosa.feature.melspectrogram(
             y=y, sr=sr, n_mels=n_mels, n_fft=N_FFT, hop_length=HOP_LENGTH
         )
-        mel_db = librosa.power_to_db(mel, ref=np.max)
-        mel_db = (mel_db - mel_db.min()) / (mel_db.max() - mel_db.min() + 1e-8)
-        return mel_db.astype(np.float32)
+        # Fixed 80 dB floor below track peak: maps [-80 dB, 0 dB] -> [0.0, 1.0].
+        # Unlike per-clip (min, max) stretching, this preserves true dynamic range
+        # and prevents silent intro/outro frames from skewing the scale between
+        # full-length training tracks and 30-second inference clips.
+        mel_db = librosa.power_to_db(mel, ref=np.max, top_db=TOP_DB)
+        mel_norm = np.clip((mel_db + TOP_DB) / TOP_DB, 0.0, 1.0)
+        return mel_norm.astype(np.float32)
     except Exception:
         return None
 
@@ -81,14 +91,14 @@ def _worker(args: tuple[str, str, int, bool]) -> tuple[str, bool]:
 
 def main() -> None:
     p = argparse.ArgumentParser(
-        description="Parallel mel spectrogram extraction from FMA audio files"
+        description="Parallel mel spectrogram extraction from raw audio files"
     )
     p.add_argument("--audio-dir",  required=True, help="Directory with .mp3/.wav files")
     p.add_argument("--output-dir", required=True, help="Directory to write .npy files")
     p.add_argument("--sr",         type=int,   default=22_050)
     p.add_argument("--workers",    type=int,   default=min(8, mp.cpu_count()),
                    help="Parallel worker processes (default: min(8, cpu_count))")
-    p.add_argument("--fp16",      action="store_true",
+    p.add_argument("--fp16",       action="store_true",
                    help="Save spectrograms as float16 (halves disk usage, ~0.63 MB/track)")
     args = p.parse_args()
 

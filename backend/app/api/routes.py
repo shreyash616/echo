@@ -2,109 +2,130 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 import unicodedata
 import numpy as np
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query
 
-try:
-    from langdetect import detect as _langdetect
-    from langdetect import DetectorFactory
-    DetectorFactory.seed = 0  # make langdetect deterministic
-    _LANGDETECT_AVAILABLE = True
-except ImportError:
-    _LANGDETECT_AVAILABLE = False
-
 from app.config import settings
 from app.models.schemas import IdentifyResponse, SearchResponse, TrackResult
 from app.services.audio_recognition import recognizer
-from app.services.deezer import search_track, get_track, fetch_preview_audio
+from app.services.deezer import (
+    search_track,
+    get_track,
+    get_album_genres,
+    get_genre_and_language_candidates,
+    fetch_preview_audio,
+)
 from app.services.lastfm import get_artist_tags, get_similar_tracks
-from app.services.recommender import recommender
-
+from app.services.recommender import recommender, compute_composite_match_score
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
 
+# Concurrency limiter for preview downloads + ONNX encoding
+_ENCODE_SEM = asyncio.Semaphore(8)
+
 
 def _to_track(meta: dict) -> TrackResult:
     return TrackResult(
-        id=meta.get("id", ""),
-        title=meta.get("title", ""),
-        artist=meta.get("artist", ""),
-        album=meta.get("album", ""),
-        albumArtUrl=meta.get("albumArtUrl", ""),
+        id=str(meta.get("id", "")),
+        title=str(meta.get("title", "")),
+        artist=str(meta.get("artist", "")),
+        album=str(meta.get("album", "")),
+        albumArtUrl=str(meta.get("albumArtUrl", "")),
         previewUrl=meta.get("previewUrl"),
-        durationMs=meta.get("durationMs", 0),
+        durationMs=int(meta.get("durationMs", 0)),
         matchScore=meta.get("matchScore"),
-        vibes=meta.get("vibes", []),
-        bpm=meta.get("bpm", 0),
-        key=meta.get("key", ""),
-        energy=meta.get("energy", 0.5),
-        valence=meta.get("valence", 0.5),
+        vibes=list(meta.get("vibes", [])),
+        bpm=int(meta.get("bpm", 0)),
+        key=str(meta.get("key", "—")),
+        energy=float(meta.get("energy", 0.5)),
+        valence=float(meta.get("valence", 0.5)),
     )
 
 
-# Maps language codes to human-readable search hints for Spotify queries
+def _primary_artist_name(artist: str) -> str:
+    """Extract the primary artist name from multi-artist strings ('A, B & C' -> 'A')."""
+    if not artist:
+        return ""
+    parts = re.split(r"\s*(?:,|&|\bfeat\.?|\bft\.?|\bx\b|/)\s*", artist, flags=re.IGNORECASE)
+    return parts[0].strip() if parts else artist.strip()
+
+
+# Maps language codes to human-readable search hints
 _LANG_SEARCH_HINT: dict[str, str] = {
-    "hi": "hindi", "ar": "arabic", "ko": "korean", "ja": "japanese",
-    "zh-cn": "chinese", "zh-tw": "chinese", "ru": "russian", "th": "thai",
-    "ta": "tamil", "te": "telugu", "bn": "bengali", "pa": "punjabi",
+    "hi": "hindi", "pa": "punjabi", "ta": "tamil", "te": "telugu",
+    "bn": "bengali", "kn": "kannada", "ml": "malayalam", "mr": "marathi",
+    "ko": "korean", "ja": "japanese", "zh-cn": "chinese",
+    "ar": "arabic", "tr": "turkish", "ru": "russian", "th": "thai",
     "es": "spanish", "fr": "french", "pt": "portuguese", "de": "german",
-    "it": "italian", "tr": "turkish", "nl": "dutch", "pl": "polish",
+    "it": "italian",
 }
 
-# Maps Spotify genre keyword fragments (lowercase) to language codes.
-# Ordered from most-specific to least-specific so first match wins.
+# Genre / tag fragments -> language code (ordered most-specific to least-specific)
 _GENRE_LANG_RULES: list[tuple[str, str]] = [
     # South Asian
     ("punjabi", "pa"), ("bhangra", "pa"),
-    ("hindi", "hi"), ("bollywood", "hi"), ("filmi", "hi"), ("desi pop", "hi"),
-    ("tamil", "ta"), ("telugu", "te"), ("bengali", "bn"), ("kannada", "kn"),
-    ("malayalam", "ml"), ("marathi", "mr"),
+    ("hindi", "hi"), ("bollywood", "hi"), ("filmi", "hi"), ("desi", "hi"),
+    ("indian pop", "hi"), ("indipop", "hi"), ("sufi", "hi"),
+    ("tamil", "ta"), ("kollywood", "ta"),
+    ("telugu", "te"), ("tollywood", "te"),
+    ("bengali", "bn"), ("kannada", "kn"), ("malayalam", "ml"), ("marathi", "mr"),
     # East Asian
-    ("k-pop", "ko"), ("k-indie", "ko"), ("k-r&b", "ko"), ("k-rap", "ko"), ("korean", "ko"),
-    ("j-pop", "ja"), ("j-rock", "ja"), ("j-rap", "ja"), ("japanese", "ja"),
+    ("k-pop", "ko"), ("kpop", "ko"), ("k-indie", "ko"), ("k-r&b", "ko"), ("k-rap", "ko"), ("korean", "ko"),
+    ("j-pop", "ja"), ("jpop", "ja"), ("j-rock", "ja"), ("j-rap", "ja"), ("anime", "ja"), ("japanese", "ja"),
     ("mandopop", "zh-cn"), ("cantopop", "zh-cn"), ("c-pop", "zh-cn"), ("chinese", "zh-cn"),
-    # Middle East / North Africa
+    # Middle East / Europe / Latin
     ("arabic", "ar"), ("khaleeji", "ar"), ("turkish", "tr"),
-    # Other regions
     ("thai", "th"), ("russian", "ru"),
-    # Latin (broad — check last so "latin trap" etc. don't override more specific)
-    ("reggaeton", "es"), ("latin pop", "es"), ("latin", "es"),
+    ("reggaeton", "es"), ("latin", "es"), ("urbano latino", "es"), ("bachata", "es"), ("salsa", "es"),
+    ("french", "fr"), ("chanson", "fr"),
+    ("german", "de"), ("deutschrap", "de"),
+    ("italian", "it"), ("sertanejo", "pt"), ("funk carioca", "pt"), ("bossa nova", "pt"),
 ]
 
+# Canonical genre families -> matching tag substrings
+_GENRE_FAMILIES: dict[str, list[str]] = {
+    "hip-hop":    ["hip hop", "hip-hop", "rap", "trap", "drill", "boom bap", "grime", "phonk"],
+    "electronic": ["electronic", "electro", "edm", "house", "techno", "trance", "dubstep", "drum and bass", "dnb", "synthwave", "dance", "club"],
+    "rock":       ["rock", "alternative", "punk", "grunge", "shoegaze", "emo", "new wave", "britpop", "garage"],
+    "metal":      ["metal", "hardcore", "metalcore", "deathcore", "thrash", "doom"],
+    "r&b":        ["r&b", "rnb", "soul", "neo-soul", "neo soul", "funk", "motown", "contemporary r&b"],
+    "indie":      ["indie", "lo-fi", "lofi", "bedroom pop", "dream pop", "chillwave"],
+    "acoustic":   ["acoustic", "folk", "singer-songwriter", "country", "americana", "unplugged"],
+    "jazz":       ["jazz", "blues", "bebop", "swing", "bossa"],
+    "classical":  ["classical", "orchestra", "piano", "symphony", "instrumental", "soundtrack", "score", "ambient"],
+    "pop":        ["pop", "mainstream", "teen pop", "electropop", "synthpop", "disco"],
+}
 
-def _detect_language_from_genres(genres: list[str]) -> str | None:
-    """
-    Map Spotify artist genre tags to a BCP-47-style language code.
-    Returns None if no genre matches (i.e. treat as English/unknown).
-    """
-    joined = " ".join(genres).lower()
+
+def _detect_language_from_tags(tags: list[str]) -> str | None:
+    """Map genre/artist/album tags to a language code, or None for English/unspecified."""
+    joined = " ".join(tags).lower()
     for keyword, lang in _GENRE_LANG_RULES:
         if keyword in joined:
-            logger.debug("detect_genre_lang | keyword=%r  lang=%s  genres=%s", keyword, lang, genres)
             return lang
     return None
 
 
-def _detect_language(title: str, artist: str) -> str | None:
+def _detect_script_language(title: str, artist: str) -> str | None:
     """
-    Returns a BCP-47-style language code for the track, or None for English.
-    Uses Unicode script detection for non-Latin scripts (reliable) and
-    langdetect for Latin-script languages (Spanish, French, etc.).
+    Detect language from non-Latin Unicode scripts ONLY.
+    Does NOT run statistical `langdetect` on short Latin-script song titles,
+    avoiding false positives where English titles like 'Levitating' get tagged as Italian.
     """
     text = f"{title} {artist}".strip()
     if not text:
         return None
 
-    # Non-Latin scripts — check character by character (highly reliable)
     _SCRIPT_LANGS = {
-        "DEVANAGARI": "hi", "ARABIC": "ar", "HANGUL": "ko",
-        "HIRAGANA": "ja", "KATAKANA": "ja", "CJK UNIFIED": "zh-cn",
-        "CYRILLIC": "ru", "THAI": "th", "TAMIL": "ta",
-        "TELUGU": "te", "BENGALI": "bn", "GURMUKHI": "pa",
+        "DEVANAGARI": "hi", "GURMUKHI": "pa", "TAMIL": "ta",
+        "TELUGU": "te", "BENGALI": "bn", "KANNADA": "kn", "MALAYALAM": "ml",
+        "HANGUL": "ko", "HIRAGANA": "ja", "KATAKANA": "ja", "CJK UNIFIED": "zh-cn",
+        "ARABIC": "ar", "CYRILLIC": "ru", "THAI": "th",
     }
     for char in text:
         if not char.isalpha():
@@ -112,171 +133,296 @@ def _detect_language(title: str, artist: str) -> str | None:
         name = unicodedata.name(char, "")
         for script, lang in _SCRIPT_LANGS.items():
             if script in name:
-                logger.debug("detect_language | script=%s  lang=%s", script, lang)
                 return lang
-
-    # Latin script — use langdetect
-    if _LANGDETECT_AVAILABLE:
-        try:
-            lang = _langdetect(text)
-            return lang if lang != "en" else None
-        except Exception:
-            pass
-
-    return None  # English or undetectable → no filtering
+    return None
 
 
-async def _get_source_lang(track_info: dict) -> str | None:
+def _detect_genre_family(tags: list[str]) -> tuple[str, list[str]]:
     """
-    Determine the cultural/language origin of a source track.
-    Tries Spotify artist genres first (most reliable), falls back to
-    Unicode script / langdetect heuristics on the title + artist text.
+    Map raw genre/artist tags to a canonical genre family name and its matching keywords.
+    Returns (genre_family, family_keywords).
     """
-    artist_name = track_info.get("artist", "")
-    if artist_name:
-        tags = await get_artist_tags(artist_name)
-        lang = _detect_language_from_genres(tags)
-        if lang:
-            logger.info(
-                "source_lang | lastfm  artist=%r  tags=%s  lang=%s",
-                artist_name, tags, lang,
-            )
-            return lang
-
-    # Fallback: text-based detection (works for non-Latin scripts)
-    lang = _detect_language(track_info.get("title", ""), track_info.get("artist", ""))
-    if lang:
-        logger.info("source_lang | text  lang=%s", lang)
-    return lang
+    joined = " ".join(tags).lower()
+    for family, keywords in _GENRE_FAMILIES.items():
+        if any(kw in joined for kw in keywords):
+            return family, keywords
+    if tags:
+        clean = tags[0].lower().strip()
+        return clean, [clean]
+    return "", []
 
 
-async def _resolve_tracks(raw_recs: list[dict], limit: int, source_lang: str | None = None) -> list[TrackResult]:
+async def _detect_track_context(track_info: dict) -> tuple[str | None, str, list[str]]:
     """
-    FAISS results come from the FMA dataset — resolve each one to a real
-    Deezer track (proper ID, album art, preview URL), preserving the ML
-    match score. Runs all lookups concurrently.
-
-    When source_lang is set, a language hint is appended to each search query
-    and each resolved track is verified to be in the same language.
+    Determine the source track's (language_code, genre_family, genre_keywords)
+    using Deezer album genres, Last.fm artist tags, and Unicode script detection.
     """
-    lang_hint = _LANG_SEARCH_HINT.get(source_lang, source_lang) if source_lang else None
+    raw_tags: list[str] = []
 
-    async def lookup(meta: dict) -> TrackResult | None:
-        base = f"{meta.get('title', '')} {meta.get('artist', '')}"
-        query = f"{base} {lang_hint}" if lang_hint else base
-        try:
-            results = await search_track(query, limit=1)
-            if results:
-                track_meta = results[0]
-                # Language gate: verify the resolved track matches source language.
-                if source_lang:
-                    tags = await get_artist_tags(track_meta.get("artist", ""))
-                    result_lang = _detect_language_from_genres(tags) or _detect_language(
-                        track_meta.get("title", ""), track_meta.get("artist", "")
-                    )
-                    if result_lang != source_lang:
-                        logger.debug(
-                            "resolve_tracks | lang mismatch  want=%s  got=%s  track=%r",
-                            source_lang, result_lang, base,
-                        )
-                        return None
-                track_meta["matchScore"] = meta.get("matchScore")
-                return _to_track(track_meta)
-        except Exception as exc:
-            logger.debug("resolve_tracks | lookup failed  query=%r  err=%s", query, exc)
-        return None
+    if track_info.get("genre"):
+        raw_tags.append(str(track_info["genre"]))
+    if track_info.get("genres"):
+        raw_tags.extend(str(g) for g in track_info["genres"])
 
-    results = await asyncio.gather(*[lookup(r) for r in raw_recs])
-    found = [r for r in results if r is not None]
-    logger.info("resolve_tracks | %d/%d resolved", len(found), len(raw_recs))
-    return found[:limit]
+    album_id = str(track_info.get("albumId", ""))
+    artist_name = _primary_artist_name(str(track_info.get("artist", "")))
+
+    album_task = get_album_genres(album_id) if album_id and not track_info.get("genres") else asyncio.sleep(0, result=[])
+    lastfm_task = get_artist_tags(artist_name) if artist_name else asyncio.sleep(0, result=[])
+    album_genres, artist_tags = await asyncio.gather(album_task, lastfm_task)
+
+    raw_tags.extend(album_genres)
+    raw_tags.extend(artist_tags)
+
+    # 1. Language detection (tags first, then non-Latin script fallback)
+    lang = _detect_language_from_tags(raw_tags) or _detect_script_language(
+        str(track_info.get("title", "")),
+        str(track_info.get("artist", "")),
+    )
+
+    # 2. Genre family detection
+    genre_family, genre_keywords = _detect_genre_family(raw_tags)
+    if not genre_family and lang and lang in _LANG_SEARCH_HINT:
+        genre_family = _LANG_SEARCH_HINT[lang]
+        genre_keywords = [genre_family]
+
+    logger.info(
+        "track_context | title=%r  artist=%r  lang=%s  genre=%r",
+        track_info.get("title"), track_info.get("artist"), lang or "en", genre_family or "general",
+    )
+    return lang, genre_family, genre_keywords
 
 
-async def _lastfm_recommendations(
-    artist: str,
-    title: str,
-    source_lang: str,
+async def _enrich_single_track_with_own_metrics(
+    track_meta: dict,
+    genre_hint: str = "",
+) -> tuple[TrackResult, np.ndarray | None, dict]:
+    """
+    Download a track's 30s preview (if available), run CnnMusicEncoder +
+    self-generated audio analytics (BPM, Key, Energy, Valence, Vibes), and
+    return (enriched_TrackResult, embedding, metrics_dict).
+    """
+    preview_url = track_meta.get("previewUrl")
+    if not preview_url:
+        return _to_track(track_meta), None, {}
+
+    preview_bytes = await fetch_preview_audio(preview_url)
+    if not preview_bytes:
+        return _to_track(track_meta), None, {}
+
+    emb, metrics = await asyncio.to_thread(
+        recommender.encode_and_analyze_audio,
+        preview_bytes,
+        genre_hint or str(track_meta.get("genre", "")),
+    )
+    enriched = {
+        **track_meta,
+        "bpm":     metrics["bpm"],
+        "key":     metrics["key"],
+        "energy":  metrics["energy"],
+        "valence": metrics["valence"],
+        "vibes":   metrics["vibes"],
+    }
+    return _to_track(enriched), emb, metrics
+
+
+async def _find_and_rank_similar_tracks(
+    source_track_info: dict,
     source_embedding: np.ndarray,
+    source_metrics: dict,
     limit: int,
 ) -> list[TrackResult]:
     """
-    For non-English sources, FMA/FAISS has no matching tracks.
-    Strategy:
-      1. Last.fm provides culturally-relevant candidates (same language/culture).
-      2. Our model re-ranks them by acoustic similarity to the source embedding.
-    The ML model stays central — Last.fm just replaces FMA as the candidate pool.
+    Unified recommendation pipeline that:
+      1. Identifies the source song's language and genre family.
+      2. Collects genre- and language-matched candidate songs from:
+         - Deezer's artist/genre neighborhood (`get_genre_and_language_candidates`)
+         - Last.fm similar tracks (`get_similar_tracks`)
+         - FAISS index neighbors (`recommender.recommend`) filtered by genre
+      3. Enforces genre & language matching so recommendations stay within the
+         source song's language and musical style.
+      4. Encodes every candidate's 30s audio preview using our own `CnnMusicEncoder`
+         and computes our own self-generated metrics (`bpm`, `key`, `energy`,
+         `valence`, `vibes`).
+      5. Ranks all candidates by `compute_composite_match_score`.
     """
-    similar = await get_similar_tracks(artist, title, limit=limit * 4)
-    if not similar:
-        return []
+    source_lang, genre_family, genre_keywords = await _detect_track_context(source_track_info)
+    lang_hint = _LANG_SEARCH_HINT.get(source_lang, "") if source_lang else ""
 
-    seen: set[str] = set()
+    primary_artist = _primary_artist_name(str(source_track_info.get("artist", "")))
+    source_title = str(source_track_info.get("title", ""))
+    source_id = str(source_track_info.get("id", ""))
 
-    async def resolve(meta: dict) -> dict | None:
-        """Resolve a Last.fm candidate to a Deezer track with its audio embedding."""
-        key = f"{meta['artist'].lower()}:{meta['title'].lower()}"
-        if key in seen:
-            return None
-        seen.add(key)
-        try:
-            results = await search_track(f"{meta['title']} {meta['artist']}", limit=1)
-            if not results:
-                return None
-            track_meta = results[0]
-            # Language gate
-            tags = await get_artist_tags(track_meta.get("artist", ""))
-            result_lang = _detect_language_from_genres(tags) or _detect_language(
-                track_meta.get("title", ""), track_meta.get("artist", "")
-            )
-            if result_lang != source_lang:
-                return None
-            # Download preview and encode with our model
-            preview_url = track_meta.get("previewUrl")
-            if not preview_url:
-                return None
-            preview_bytes = await fetch_preview_audio(preview_url)
-            if not preview_bytes:
-                return None
-            embedding = await asyncio.to_thread(recommender.encode_audio, preview_bytes)
-            return {"meta": track_meta, "embedding": embedding}
-        except Exception as exc:
-            logger.debug("lastfm_recs | resolve failed  meta=%r  err=%s", meta, exc)
-            return None
-
-    resolved = await asyncio.gather(*[resolve(m) for m in similar])
-    candidates = [r for r in resolved if r is not None]
-
-    if not candidates:
-        logger.info("lastfm_recs | no candidates after language gate  lang=%s", source_lang)
-        return []
-
-    # Re-rank by cosine similarity to source embedding
-    src = source_embedding / (np.linalg.norm(source_embedding) + 1e-9)
-    for c in candidates:
-        emb = c["embedding"]
-        emb_norm = emb / (np.linalg.norm(emb) + 1e-9)
-        c["score"] = float(np.dot(src, emb_norm))
-
-    candidates.sort(key=lambda c: c["score"], reverse=True)
-
-    seen_ids: set[str] = set()
-    results = []
-    for c in candidates:
-        if len(results) >= limit:
-            break
-        tid = c["meta"].get("id", "")
-        if tid in seen_ids:
-            continue
-        seen_ids.add(tid)
-        track = _to_track(c["meta"])
-        track = track.model_copy(update={"matchScore": round(c["score"], 4)})
-        results.append(track)
-
-    logger.info(
-        "lastfm_recs | %d/%d candidates  top_score=%.3f  lang=%s",
-        len(candidates), len(similar), candidates[0]["score"] if candidates else 0, source_lang,
+    # 1. Gather candidates concurrently from Deezer artist/genre graph, Last.fm, and FAISS
+    deezer_cand_task = get_genre_and_language_candidates(
+        source_track_info,
+        genre_hint=genre_family,
+        lang_hint=lang_hint,
+        limit=max(limit * 2, 30),
     )
-    return results
+    lastfm_cand_task = (
+        get_similar_tracks(primary_artist, source_title, limit=limit * 2)
+        if primary_artist and source_title
+        else asyncio.sleep(0, result=[])
+    )
+    faiss_raw = recommender.recommend(
+        source_embedding,
+        source_metrics=source_metrics,
+        genre_keywords=genre_keywords + ([lang_hint] if lang_hint else []),
+        exclude_id=source_id,
+        k=limit * 2,
+    )
+
+    deezer_cands, lastfm_raw = await asyncio.gather(deezer_cand_task, lastfm_cand_task)
+
+    # Mark candidates from the source artist's direct Deezer related-artist graph
+    # (these inherently match the artist's language & genre scene)
+    for c in deezer_cands:
+        c["_trusted_scene"] = True
+
+    # Resolve Last.fm and FAISS candidates to Deezer tracks with preview URLs concurrently
+    external_queries: list[str] = []
+    for m in lastfm_raw[:20]:
+        q = f"{m.get('title', '')} {m.get('artist', '')}".strip()
+        if q:
+            external_queries.append(q)
+
+    # Only resolve FAISS FMA tracks when source is English or when FAISS entry is a real catalog track
+    direct_faiss_cands: list[dict] = []
+    if not source_lang:
+        for m in faiss_raw[:20]:
+            if m.get("previewUrl") and not str(m.get("id", "")).startswith("fma_"):
+                direct_faiss_cands.append(m)
+            else:
+                q = f"{m.get('title', '')} {m.get('artist', '')}".strip()
+                if q:
+                    external_queries.append(q)
+
+    async def _resolve_query(q: str) -> dict | None:
+        try:
+            res = await search_track(q, limit=1)
+            return res[0] if res and res[0].get("previewUrl") else None
+        except Exception:
+            return None
+
+    resolved_external = await asyncio.gather(*[_resolve_query(q) for q in external_queries[:24]])
+
+    # Merge and deduplicate candidate pool
+    seen_ids: set[str] = {source_id} if source_id else set()
+    seen_keys: set[str] = {f"{primary_artist.lower()}:{source_title.lower().strip()}"}
+    merged_candidates: list[dict] = []
+
+    for cand in deezer_cands + direct_faiss_cands + [r for r in resolved_external if r is not None]:
+        cid = str(cand.get("id", ""))
+        ckey = f"{_primary_artist_name(str(cand.get('artist', ''))).lower()}:{str(cand.get('title', '')).lower().strip()}"
+        if not cid or cid in seen_ids or ckey in seen_keys or not cand.get("previewUrl"):
+            continue
+        seen_ids.add(cid)
+        seen_keys.add(ckey)
+        merged_candidates.append(cand)
+        if len(merged_candidates) >= 36:
+            break
+
+    if not merged_candidates:
+        logger.warning("recommendations | no candidates with preview URLs found")
+        return []
+
+    # 2. Verify genre & language compatibility and score each candidate using our own ML + audio metrics
+    async def _evaluate_candidate(cand: dict) -> tuple[TrackResult, float, bool] | None:
+        async with _ENCODE_SEM:
+            try:
+                cand_artist = _primary_artist_name(str(cand.get("artist", "")))
+                cand_title = str(cand.get("title", ""))
+
+                # Language & genre check
+                cand_script_lang = _detect_script_language(cand_title, cand_artist)
+                cand_tags: list[str] = []
+                if cand.get("genre"):
+                    cand_tags.append(str(cand["genre"]))
+
+                if not cand.get("_trusted_scene"):
+                    # Fetch tags to verify language and genre for non-graph candidates
+                    cand_tags.extend(await get_artist_tags(cand_artist))
+                    if not cand_tags and cand.get("albumId"):
+                        cand_tags.extend(await get_album_genres(str(cand["albumId"])))
+
+                cand_tag_lang = _detect_language_from_tags(cand_tags)
+                cand_lang = cand_tag_lang or cand_script_lang
+
+                # Enforce strict language matching:
+                # - If source is non-English (e.g. 'hi', 'pa', 'ko'), candidate must either be
+                #   from the trusted related-artist scene (with no conflicting language tag)
+                #   or explicitly match source_lang.
+                # - If source is English (None), reject candidates explicitly tagged as non-English.
+                if source_lang:
+                    if cand_lang and cand_lang != source_lang:
+                        return None
+                    if not cand.get("_trusted_scene") and cand_lang != source_lang:
+                        return None
+                else:
+                    if cand_lang is not None:
+                        return None
+
+                # Check genre compatibility
+                cand_genre_family, _ = _detect_genre_family(cand_tags)
+                genre_matched = bool(
+                    cand.get("_trusted_scene")
+                    or not genre_family
+                    or cand_genre_family == genre_family
+                    or any(kw in " ".join(cand_tags).lower() for kw in genre_keywords)
+                )
+
+                preview_bytes = await fetch_preview_audio(str(cand["previewUrl"]))
+                if not preview_bytes:
+                    return None
+
+                cand_emb, cand_metrics = await asyncio.to_thread(
+                    recommender.encode_and_analyze_audio,
+                    preview_bytes,
+                    genre_family or cand_genre_family,
+                )
+
+                score = compute_composite_match_score(
+                    source_embedding,
+                    source_metrics,
+                    cand_emb,
+                    cand_metrics,
+                )
+                # Slight bonus for verified same-genre family
+                if genre_matched:
+                    score = round(min(0.99, score + 0.03), 4)
+
+                enriched = {
+                    **cand,
+                    "matchScore": score,
+                    "bpm":        cand_metrics["bpm"],
+                    "key":        cand_metrics["key"],
+                    "energy":     cand_metrics["energy"],
+                    "valence":    cand_metrics["valence"],
+                    "vibes":      cand_metrics["vibes"],
+                }
+                return _to_track(enriched), score, genre_matched
+            except Exception as exc:
+                logger.debug("evaluate_candidate failed for %r: %s", cand.get("title"), exc)
+                return None
+
+    evaluated = await asyncio.gather(*[_evaluate_candidate(c) for c in merged_candidates])
+    valid = [item for item in evaluated if item is not None]
+
+    # Prefer strict genre-matched candidates first, sorted by our composite ML + audio metric score
+    genre_strict = [item for item in valid if item[2]]
+    genre_strict.sort(key=lambda x: x[1], reverse=True)
+
+    other_valid = [item for item in valid if not item[2]]
+    other_valid.sort(key=lambda x: x[1], reverse=True)
+
+    ordered = [item[0] for item in (genre_strict + other_valid)]
+    logger.info(
+        "rank_similar | evaluated=%d/%d  genre_strict=%d  top_score=%.3f",
+        len(valid), len(merged_candidates), len(genre_strict),
+        ordered[0].matchScore if ordered and ordered[0].matchScore else 0.0,
+    )
+    return ordered[:limit]
 
 
 @router.get("/health")
@@ -288,9 +434,9 @@ async def health() -> dict:
 async def identify(audio: UploadFile = File(...)) -> IdentifyResponse:
     """
     Receive an audio snippet, fingerprint it via AcoustID to identify the song,
-    then use the Spotify 30s preview of that song as the clean audio source for
-    ML recommendations. Falls back to encoding the raw mic audio if the song
-    cannot be identified or has no Spotify preview.
+    compute self-generated audio metrics + embedding from its clean preview (or
+    raw mic clip as fallback), and return genre- and language-matched songs
+    ranked by our own ML + audio similarity metrics.
     """
     t0 = time.perf_counter()
     content = await audio.read()
@@ -300,60 +446,61 @@ async def identify(audio: UploadFile = File(...)) -> IdentifyResponse:
     if size_mb > settings.max_audio_size_mb:
         raise HTTPException(413, f"Audio file too large ({size_mb:.1f} MB)")
 
-    # 1. Fingerprint with AcoustID to identify the song
     raw = await recognizer.recognize(content)
     parsed = recognizer.parse_result(raw)
 
     identified_track: TrackResult | None = None
-    audio_for_embedding: bytes = content  # fallback: use raw mic audio
+    source_track_info: dict = {}
+    audio_for_embedding: bytes = content
 
     if parsed:
         logger.info(
             "identify | AcoustID match  title=%r  artist=%r  score=%.2f",
             parsed["title"], parsed["artist"], parsed.get("score", 0),
         )
-        # 2. Look up on Spotify for display metadata + preview URL
         query = f"{parsed['title']} {parsed['artist']}"
         tracks = await search_track(query, limit=1)
         if tracks:
-            identified_track = _to_track(tracks[0])
-            # Use the clean Spotify 30s preview instead of the noisy mic clip
-            preview_url = tracks[0].get("previewUrl")
+            source_track_info = tracks[0]
+            preview_url = source_track_info.get("previewUrl")
             if preview_url:
                 preview_bytes = await fetch_preview_audio(preview_url)
                 if preview_bytes:
                     audio_for_embedding = preview_bytes
-                    logger.info("identify | using Spotify preview for embedding")
-                else:
-                    logger.warning("identify | Spotify preview download failed, using mic audio")
-            else:
-                logger.info("identify | no Spotify preview URL, using mic audio")
-    else:
-        logger.info("identify | AcoustID no match, using raw mic audio for embedding")
+                    logger.info("identify | using clean 30s preview for embedding & metrics")
 
-    # 3. Encode → FAISS → resolve FMA results to Spotify tracks
-    embedding = await asyncio.to_thread(recommender.encode_audio, audio_for_embedding)
-    exclude_id = identified_track.id if identified_track else None
-    raw_recs = recommender.recommend(
-        embedding,
-        exclude_id=exclude_id,
-        k=settings.max_recommendations * 2,  # oversample — some won't be on Spotify
+    _, genre_family, _ = await _detect_track_context(source_track_info) if source_track_info else (None, "", [])
+    source_embedding, source_metrics = await asyncio.to_thread(
+        recommender.encode_and_analyze_audio,
+        audio_for_embedding,
+        genre_family,
     )
-    source_track_info = tracks[0] if (parsed and tracks) else {}
-    source_lang = await _get_source_lang(source_track_info) if source_track_info else None
 
-    if source_lang:
-        # Non-English: Last.fm provides culturally-relevant candidates;
-        # our model re-ranks them by acoustic similarity to the source embedding.
-        recommendations = await _lastfm_recommendations(
-            source_track_info.get("artist", ""),
-            source_track_info.get("title", ""),
-            source_lang,
-            source_embedding=embedding,
+    if source_track_info:
+        identified_track = _to_track({
+            **source_track_info,
+            "bpm":     source_metrics["bpm"],
+            "key":     source_metrics["key"],
+            "energy":  source_metrics["energy"],
+            "valence": source_metrics["valence"],
+            "vibes":   source_metrics["vibes"],
+        })
+
+    if source_track_info:
+        recommendations = await _find_and_rank_similar_tracks(
+            source_track_info=source_track_info,
+            source_embedding=source_embedding,
+            source_metrics=source_metrics,
             limit=settings.max_recommendations,
         )
     else:
-        recommendations = await _resolve_tracks(raw_recs, limit=settings.max_recommendations)
+        # Unidentified raw mic audio: fall back to FAISS nearest neighbors resolved on Deezer
+        faiss_recs = recommender.recommend(
+            source_embedding,
+            source_metrics=source_metrics,
+            k=settings.max_recommendations,
+        )
+        recommendations = [_to_track(r) for r in faiss_recs]
 
     logger.info(
         "identify | done  identified=%s  recs=%d  total=%.3fs",
@@ -370,13 +517,20 @@ async def identify(audio: UploadFile = File(...)) -> IdentifyResponse:
 @router.get("/search", response_model=SearchResponse)
 async def search(q: str = Query(..., min_length=1)) -> SearchResponse:
     """
-    Search by song / artist name. Returns Deezer results for the user to pick from.
-    No recommendations yet — user selects a track, then /recommendations is called.
+    Search by song / artist name. Enriches the top match with self-generated
+    audio metrics (BPM, Key, Energy, Valence, Vibes) so the Hero card on the
+    Results screen displays complete musical stats immediately.
     """
     t0 = time.perf_counter()
     logger.info("search | query=%r", q)
     tracks_data = await search_track(q, limit=10)
-    results = [_to_track(t) for t in tracks_data]
+    if not tracks_data:
+        return SearchResponse(results=[], recommendations=[])
+
+    # Enrich top search result (Hero card) with our self-generated audio metrics
+    top_enriched, _, _ = await _enrich_single_track_with_own_metrics(tracks_data[0])
+    results = [top_enriched] + [_to_track(t) for t in tracks_data[1:]]
+
     logger.info("search | results=%d  total=%.3fs", len(results), time.perf_counter() - t0)
     return SearchResponse(results=results, recommendations=[])
 
@@ -384,8 +538,9 @@ async def search(q: str = Query(..., min_length=1)) -> SearchResponse:
 @router.get("/recommendations/{track_id}", response_model=list[TrackResult])
 async def get_recommendations(track_id: str) -> list[TrackResult]:
     """
-    User selected a track from search — download its Deezer 30s preview,
-    encode with CnnMusicEncoder, and return similar songs from the FAISS index.
+    Download the selected track's 30s preview, compute its embedding + self-generated
+    metrics, and return genre- and language-matched songs ranked by our own ML
+    and audio metrics.
     """
     t0 = time.perf_counter()
     logger.info("recommendations | track_id=%s", track_id)
@@ -404,24 +559,19 @@ async def get_recommendations(track_id: str) -> list[TrackResult]:
         logger.warning("recommendations | preview download failed  track_id=%s", track_id)
         return []
 
-    embedding = await asyncio.to_thread(recommender.encode_audio, preview_bytes)
-    raw_recs = recommender.recommend(
-        embedding,
-        exclude_id=track_id,
-        k=settings.max_recommendations * 2,
+    _, genre_family, _ = await _detect_track_context(track)
+    source_embedding, source_metrics = await asyncio.to_thread(
+        recommender.encode_and_analyze_audio,
+        preview_bytes,
+        genre_family,
     )
-    source_lang = await _get_source_lang(track)
 
-    if source_lang:
-        recommendations = await _lastfm_recommendations(
-            track.get("artist", ""),
-            track.get("title", ""),
-            source_lang,
-            source_embedding=embedding,
-            limit=settings.max_recommendations,
-        )
-    else:
-        recommendations = await _resolve_tracks(raw_recs, limit=settings.max_recommendations)
+    recommendations = await _find_and_rank_similar_tracks(
+        source_track_info=track,
+        source_embedding=source_embedding,
+        source_metrics=source_metrics,
+        limit=settings.max_recommendations,
+    )
 
     logger.info(
         "recommendations | done  title=%r  recs=%d  total=%.3fs",

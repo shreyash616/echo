@@ -1,226 +1,137 @@
-# Echo — Setup Guide
+# Echo — Setup & Architecture Guide
 
 ## Project Structure
 
+| Path | Component | Role | 
+| ----- | ----- | ----- | 
+| `app/` | React Native (Expo) | iPhone app (`HomeScreen`, `ResultsScreen`, `SongCard`) | 
+| `backend/` | FastAPI | REST API server, ONNX + FAISS inference, self-generated audio metrics, and genre/language matching | 
+| `ml/` | PyTorch + ONNX + FAISS | Self-supervised `CnnMusicEncoder` training, raw audio harvesting, and FAISS index builder | 
+
+## 1. Self-Generated Audio Metrics & ML Architecture
+
+Echo computes all musical, emotional, and similarity metrics directly from the raw audio signal without relying on external pre-computed features:
+
+1. **Fixed-Floor Spectrogram Scaling (`ml/data/preprocess.py` & `backend/app/services/recommender.py`)**:
+
+   * Audio is converted to 128-bin mel spectrograms (`sr=22050`, `n_fft=2048`, `hop_length=512`) using a fixed `top_db = 80.0` floor mapped from `[-80 dB, 0 dB]` to `[0.0, 1.0]`.
+
+   * Unlike per-clip min-max normalization, this preserves true loudness contrast and dynamic range across both full-length tracks and 30-second previews.
+
+2. **`CnnMusicEncoder` + 16-Feature `EmotionFeatureExtractor` (`ml/models/music_encoder.py`)**:
+
+   * **Acoustic Branch**: 5 `ConvBlock` layers followed by both mean and temporal standard deviation pooling (`1024-d`) to capture both timbral texture and temporal modulation.
+
+   * **Emotion & Rhythm Branch (`16` differentiable features** $\rightarrow$ **`64-d` L2-normalized)**:
+
+     * *Energy & Dynamics*: `rms_mean`, `rms_std`, and robust 90th-to-10th percentile `dynamic_range` (via `torch.topk`).
+
+     * *Brightness & Timbre*: Normalized `centroid_mean`, `centroid_std`, `rolloff_mean`, `contrast_mean`, `contrast_std`, `hf_ratio`, and `bass_ratio`.
+
+     * *Adrenaline & Envelope*: `flux_mean`, `flux_std`, and length-normalized `energy_entropy` (divided by $\ln(T)$ so it stays invariant across variable clip lengths).
+
+     * *Rhythm, Beat & Tempo*: `onset_density`, multi-lag autocorrelation `pulse_clarity`, and `tempo_fast_ratio` (fast 125–195 BPM vs. slow 70–115 BPM pulse energy).
+
+3. **Self-Generated Per-Track Analytics (`ml/inference/audio_features.py` & `backend/app/services/recommender.py`)**:
+
+   * **BPM (`bpm`)**: Estimated via onset-strength autocorrelation with perceptual tempo weighting (`65–185 BPM`) and parabolic sub-frame interpolation.
+
+   * **Musical Key & Mode (`key`)**: Estimated by projecting mel frequencies onto the 12 semitone pitch classes (`C` through `B`) and correlating against Krumhansl-Schmuckler Major and Minor key profiles (e.g., `"A Minor"`, `"C# Major"`).
+
+   * **Energy (`energy`)**: Computed in `[0, 1]` from RMS loudness, spectral flux intensity, beat pulse clarity, and tempo.
+
+   * **Valence / Mood (`valence`)**: Computed in `[0, 1]` from Major/Minor harmonic mode polarity, spectral centroid brightness, tempo bounce, and pulse clarity.
+
+   * **Vibe Tags (`vibes`)**: Automatically derived from the track's computed acoustic and emotional dimensions (`"adrenaline"`, `"energetic"`, `"driving"`, `"soothing"`, `"dark"`, `"uplifting"`, `"melodic"`, `"bass-heavy"`, etc.).
+
+4. **Composite Similarity Scoring & Strict Genre + Language Matching (`backend/app/api/routes.py`)**:
+
+   * **Genre & Language Gate**: Detects the source song's language and canonical genre family using Deezer album genres, Last.fm artist tags, Unicode script detection (Devanagari, Gurmukhi, Tamil, Telugu, Hangul, Kana, Arabic, Cyrillic), and Deezer's `/artist/{id}/related` scene graph—avoiding statistical `langdetect` false positives on short English titles.
+
+   * **Composite Score**: Ranks genre- and language-matched candidates using:
+
+     * `65%` `CnnMusicEncoder` multi-crop neural cosine similarity,
+
+     * `15%` self-computed `(energy, valence)` proximity,
+
+     * `10%` self-computed `bpm` tempo compatibility (with double-time / half-time octave equivalence),
+
+     * `10%` self-computed `key` compatibility on the Circle of Fifths.
+
+## 2. Training & Indexing Workflows
+
+### Option A: Harvest Raw 30s Previews of Recognizable Mainstream Songs (Recommended)
+
+To train and build your FAISS index on real commercial songs while still generating 100% of the spectrograms, embeddings, and audio metrics yourself:
+
 ```
-echo/
-├── app/         React Native (Expo) — iPhone app
-├── backend/     FastAPI — REST API server
-└── ml/          Custom CNN training pipeline + FAISS index builder
+# 1. Harvest raw 30s preview audio & extract fixed-floor .npy spectrograms
+python ml/data/harvest_deezer_previews.py \
+    --output-specs ml/data/deezer_spectrograms \
+    --output-json  ml/data/deezer_catalog.json \
+    --tracks-per-query 50
+
+# 2. Train CnnMusicEncoder with emotion-preserving contrastive augmentations
+python ml/training/train.py \
+    --spec-dir ml/data/deezer_spectrograms \
+    --output   ml/checkpoints \
+    --epochs   60 \
+    --batch    256
+
+# 3. Export trained encoder to ONNX
+python ml/inference/export_onnx.py \
+    --checkpoint ml/checkpoints/best_model.pt \
+    --output     ml/inference/music_encoder.onnx
+
+# 4. Build FAISS index with multi-crop pooling & self-generated audio metrics
+python ml/inference/build_index.py \
+    --spec-dir     ml/data/deezer_spectrograms \
+    --catalog-json ml/data/deezer_catalog.json \
+    --onnx-model   ml/inference/music_encoder.onnx \
+    --output-dir   ml/inference
+
 ```
 
----
+### Option B: Train & Index on FMA Audio
 
-## 1. Get API Keys (all free)
-
-### Chromaprint — fpcalc (audio fingerprinting, open source)
-Install the `fpcalc` CLI so the backend can generate audio fingerprints:
-- **Linux:** `sudo apt install libchromaprint-tools`
-- **macOS:** `brew install chromaprint`
-- **Windows:** download from https://acoustid.org/chromaprint
-
-### AcoustID (song lookup, free & open source)
-1. Sign up at https://acoustid.org/login
-2. Register an application → copy the API key
-
-### Spotify Web API (display metadata only — not used for ML features)
-1. Go to https://developer.spotify.com/dashboard
-2. Create an app → copy Client ID and Client Secret
-
----
-
-## 2. Backend Setup
-
-```bash
-cd echo/backend
-
-# Create virtual env
-python -m venv venv
-venv\Scripts\activate          # Windows
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Configure environment
-copy .env.example .env
-# Edit .env with your AcoustID + Spotify keys
-
-# Start the API server (requires FAISS index built in step 3)
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
-
----
-
-## 3. ML Pipeline — Train the Model & Build the FAISS Index
-
-The pipeline trains a custom CNN (CnnMusicEncoder) on mel spectrograms from FMA
-audio files, exports it to ONNX, and builds a FAISS similarity index.
-No pretrained models. No Spotify features.
-
-### Step 1: Download FMA audio + metadata
-
-Download from https://github.com/mdeff/fma:
-- Audio:    `fma_large.zip`  (~93 GB, 106k tracks)
-- Metadata: `fma_metadata.zip`
-
-Extract audio to `ml/data/fma_large/` and metadata to `ml/data/fma_metadata/`.
-
-> **Note:** Both zips extract into a nested subfolder. Final paths will be:
-> - `ml/data/fma_large/fma_large/<folder>/<track>.mp3`
-> - `ml/data/fma_metadata/fma_metadata/tracks.csv`
-
-### Step 2: Install ML dependencies
-
-```bash
-cd echo
-
-# PyTorch with CUDA (RTX 3080)
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
-
-# Remaining ML deps
-pip install -r ml/requirements.txt
-```
-
-### Step 3: Preprocess audio → mel spectrograms
-
-```bash
+# 1. Preprocess FMA audio to fixed-floor mel spectrograms
 python ml/data/preprocess.py \
     --audio-dir  ml/data/fma_large/fma_large \
     --output-dir ml/data/spectrograms \
     --sr         22050
-```
 
-Output: `ml/data/spectrograms/<track_id>.npy` — one (128, T) float32 array per track.
-
-### Step 4: Train CnnMusicEncoder
-
-```bash
+# 2. Train CnnMusicEncoder
 python ml/training/train.py \
-    --spec-dir   ml/data/spectrograms \
-    --tracks-csv ml/data/fma_metadata/fma_metadata/tracks.csv \
-    --output     ml/checkpoints \
-    --epochs     60 \
-    --batch      64
-```
+    --spec-dir ml/data/spectrograms \
+    --output   ml/checkpoints \
+    --epochs   60 \
+    --batch    256
 
-Outputs:
-- `ml/checkpoints/best_model.pt`  — best checkpoint (lowest val triplet loss)
-- `ml/checkpoints/train_meta.json` — crop_frames + embedding_dim for inference
-
-Training logs stream to stdout and TensorBoard (`ml/checkpoints/tb_logs/`).
-
-### Step 5: Export to ONNX
-
-```bash
+# 3. Export to ONNX
 python ml/inference/export_onnx.py \
     --checkpoint ml/checkpoints/best_model.pt \
     --output     ml/inference/music_encoder.onnx
-```
 
-The ONNX model accepts a dynamic T axis so any clip length can be passed at inference time.
-
-### Step 6: Build FAISS similarity index
-
-```bash
+# 4. Build FAISS index (always pass --tracks-csv so titles/artists/genres are populated)
 python ml/inference/build_index.py \
     --spec-dir   ml/data/spectrograms \
     --tracks-csv ml/data/fma_metadata/fma_metadata/tracks.csv \
     --onnx-model ml/inference/music_encoder.onnx \
-    --output-dir ml/inference \
-    --batch      64
+    --output-dir ml/inference
+
 ```
 
-Outputs:
-- `ml/inference/music_index.faiss`   — vector similarity index
-- `ml/inference/track_metadata.json` — song info for results
-- `ml/inference/embeddings.npy`      — (N, 512) embeddings for debugging
+## 3. Running the Backend & Mobile App
 
----
+```
+# Start FastAPI backend
+cd backend
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
-## 4. iOS App Setup
-
-```bash
-cd echo/app
-
-# Install dependencies
+# Start Expo iOS/Android app
+cd ../app
 npm install
-
-# Install Expo CLI globally (if not already)
-npm install -g expo-cli
-
-# Start development server
 npx expo start
-```
-
-### Test on iPhone 16 Plus
-1. Install **Expo Go** from the App Store on your iPhone.
-2. Make sure your PC and iPhone are on the **same Wi-Fi network**.
-3. Scan the QR code shown in the terminal with the iPhone camera.
-4. Update `BASE_URL` in `app/src/services/api.ts` to your PC's local IP:
-   ```ts
-   const BASE_URL = 'http://192.168.x.x:8000';
-   ```
-   Find your IP: `ipconfig` → look for "IPv4 Address" under your Wi-Fi adapter.
-
----
-
-## 5. App Workflows
-
-### Tap to Identify (mic recording)
-```
-User taps record → mic captures ~10s of ambient audio
-        ↓
-POST /api/identify
-  ├── AcoustID fingerprint → "Song X by Artist Y" (for display)
-  └── librosa mel spec → CnnMusicEncoder ONNX → 512-dim embedding
-                                    ↓
-                             FAISS similarity search
-                                    ↓
-Returns: identified track (Spotify metadata) + similar song recommendations
-```
-
-### Search by Name (text search)
-```
-User types a song or artist name
-        ↓
-GET /api/search?q=...
-  → Spotify search → list of matching tracks displayed
-        ↓
-User taps a track
-        ↓
-GET /api/recommendations/{track_id}
-  → Download Spotify 30s preview MP3 (free, no extra auth)
-  → librosa mel spectrogram → CnnMusicEncoder ONNX → 512-dim embedding
-  → FAISS similarity search
-        ↓
-Returns: similar song recommendations based on the actual sound of the track
-
-Note: ~20% of Spotify tracks have no preview URL (licensing restrictions).
-For those, a 404 is returned — the user can pick a different track.
-```
-
----
-
-## 6. ML Architecture
 
 ```
-Raw audio (mic clip or Spotify 30s preview)
-         ↓
-  librosa mel spectrogram  (128 bins, 10s, 22 050 Hz)
-         ↓
-  CnnMusicEncoder (custom CNN, trained on FMA with TripletLoss)
-    Conv blocks: 1 → 32 → 64 → 128 → 256 → 512 channels
-    AdaptiveAvgPool2d → Linear projection
-         ↓
-  512-dimensional embedding (L2-normalised, unit sphere)
-         ↓
-  FAISS IndexFlatIP — cosine similarity search
-         ↓
-  Top-k similar tracks from FMA index
-```
-
-**Encoder:** CnnMusicEncoder — custom CNN trained from scratch on FMA genre labels.
-**Loss:** TripletLoss with online hard mining (same genre = closer, diff genre = farther).
-**Index:** FAISS inner-product search (= cosine similarity on L2-normalised vectors).
-**Inference format:** ONNX — no PyTorch dependency in the backend.
-**Speed:** ~50ms encode on CPU; <5ms FAISS search.

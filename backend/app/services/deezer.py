@@ -1,10 +1,12 @@
 """
 Deezer public API — no authentication required.
-Used for track search, metadata, and 30s preview audio.
+Used for track search, metadata, genre lookup, related-artist candidate discovery,
+and 30s preview audio downloads.
 Docs: https://developers.deezer.com/api
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import httpx
@@ -14,10 +16,10 @@ logger = logging.getLogger(__name__)
 
 DEEZER_BASE = "https://api.deezer.com"
 
-_cache: TTLCache = TTLCache(maxsize=512, ttl=3600)
+_cache: TTLCache = TTLCache(maxsize=1024, ttl=3600)
 
 
-def _normalize(item: dict) -> dict:
+def _normalize(item: dict, genre_override: str = "") -> dict:
     """Map a Deezer track object to the internal track dict format."""
     artist = item.get("artist", {})
     album = item.get("album", {})
@@ -28,14 +30,16 @@ def _normalize(item: dict) -> dict:
         "artist":      artist.get("name", ""),
         "artistId":    str(artist.get("id", "")),
         "album":       album.get("title", ""),
+        "albumId":     str(album.get("id", "")),
         "albumArtUrl": art,
         "previewUrl":  item.get("preview") or None,
         "durationMs":  item.get("duration", 0) * 1000,
+        "genre":       genre_override,
         "bpm":         0,
         "key":         "—",
         "energy":      0.5,
         "valence":     0.5,
-        "vibes":       [],
+        "vibes":       [genre_override.lower()] if genre_override else [],
     }
 
 
@@ -43,7 +47,6 @@ async def search_track(query: str, limit: int = 5) -> list[dict]:
     """Search Deezer for tracks. Returns normalized track dicts."""
     cache_key = f"search:{query}:{limit}"
     if cache_key in _cache:
-        logger.info("deezer | search cache hit  query=%r", query)
         return _cache[cache_key]  # type: ignore[return-value]
 
     logger.info("deezer | search  query=%r  limit=%d", query, limit)
@@ -65,7 +68,7 @@ async def search_track(query: str, limit: int = 5) -> list[dict]:
 
 
 async def get_track(deezer_id: str) -> dict | None:
-    """Fetch a single track by Deezer ID. Returns normalized dict or None."""
+    """Fetch a single track by Deezer ID, including album genre if available."""
     cache_key = f"track:{deezer_id}"
     if cache_key in _cache:
         return _cache[cache_key]  # type: ignore[return-value]
@@ -84,8 +87,174 @@ async def get_track(deezer_id: str) -> dict | None:
         return None
 
     result = _normalize(item)
+    album_id = result.get("albumId")
+    if album_id:
+        genres = await get_album_genres(album_id)
+        if genres:
+            result["genre"] = genres[0]
+            result["genres"] = genres
+
     _cache[cache_key] = result
     return result
+
+
+async def get_album_genres(album_id: str) -> list[str]:
+    """
+    Fetch genre names from Deezer's /album/{id} endpoint (e.g. ['Pop', 'Indie Pop']).
+    Free, requires no API key.
+    """
+    if not album_id:
+        return []
+    cache_key = f"album_genres:{album_id}"
+    if cache_key in _cache:
+        return _cache[cache_key]  # type: ignore[return-value]
+
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(f"{DEEZER_BASE}/album/{album_id}")
+            resp.raise_for_status()
+            data = resp.json()
+        genres_data = data.get("genres", {}).get("data", [])
+        genres = [g.get("name", "").strip() for g in genres_data if g.get("name")]
+        _cache[cache_key] = genres
+        return genres
+    except Exception as exc:
+        logger.debug("deezer | get_album_genres failed  album_id=%s  err=%s", album_id, exc)
+        return []
+
+
+async def get_related_artists(artist_id: str, limit: int = 12) -> list[dict]:
+    """
+    Fetch artists in the same genre and cultural/language scene via Deezer's
+    /artist/{id}/related endpoint.
+    """
+    if not artist_id:
+        return []
+    cache_key = f"related_artists:{artist_id}:{limit}"
+    if cache_key in _cache:
+        return _cache[cache_key]  # type: ignore[return-value]
+
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(
+                f"{DEEZER_BASE}/artist/{artist_id}/related",
+                params={"limit": limit},
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", [])
+        artists = [
+            {"id": str(a.get("id", "")), "name": a.get("name", "")}
+            for a in data
+            if a.get("id") and a.get("name")
+        ]
+        _cache[cache_key] = artists
+        return artists
+    except Exception as exc:
+        logger.debug("deezer | get_related_artists failed  artist_id=%s  err=%s", artist_id, exc)
+        return []
+
+
+async def get_artist_top_tracks(artist_id: str, limit: int = 5, genre_hint: str = "") -> list[dict]:
+    """Fetch top tracks for a Deezer artist ID (all include 30s preview URLs)."""
+    if not artist_id:
+        return []
+    cache_key = f"artist_top:{artist_id}:{limit}"
+    if cache_key in _cache:
+        return _cache[cache_key]  # type: ignore[return-value]
+
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.get(
+                f"{DEEZER_BASE}/artist/{artist_id}/top",
+                params={"limit": limit},
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", [])
+        tracks = [_normalize(t, genre_override=genre_hint) for t in data if t.get("preview")]
+        _cache[cache_key] = tracks
+        return tracks
+    except Exception as exc:
+        logger.debug("deezer | get_artist_top_tracks failed  artist_id=%s  err=%s", artist_id, exc)
+        return []
+
+
+async def get_genre_and_language_candidates(
+    track_info: dict,
+    genre_hint: str = "",
+    lang_hint: str = "",
+    limit: int = 35,
+) -> list[dict]:
+    """
+    Build a rich pool of candidate tracks that inherently share the source
+    track's genre and language/cultural scene using Deezer's artist graph and
+    targeted genre/language search:
+      1. Other tracks by the same artist (capped at 2 so results stay diverse)
+      2. Top tracks from Deezer's `/artist/{id}/related` artists (same genre & language)
+      3. Targeted genre + language search queries if additional candidates are needed
+    """
+    artist_id = str(track_info.get("artistId", ""))
+    artist_name = str(track_info.get("artist", ""))
+    source_id = str(track_info.get("id", ""))
+
+    # If artistId is missing, resolve it via a quick search
+    if not artist_id and artist_name:
+        found = await search_track(f"{track_info.get('title', '')} {artist_name}", limit=1)
+        if found:
+            artist_id = str(found[0].get("artistId", ""))
+
+    candidates: list[dict] = []
+    seen_ids: set[str] = {source_id} if source_id else set()
+    seen_keys: set[str] = {
+        f"{artist_name.lower().strip()}:{str(track_info.get('title', '')).lower().strip()}"
+    }
+
+    def _add_candidate(t: dict) -> None:
+        tid = str(t.get("id", ""))
+        key = f"{str(t.get('artist', '')).lower().strip()}:{str(t.get('title', '')).lower().strip()}"
+        if not tid or tid in seen_ids or key in seen_keys or not t.get("previewUrl"):
+            return
+        seen_ids.add(tid)
+        seen_keys.add(key)
+        if genre_hint and not t.get("genre"):
+            t = {**t, "genre": genre_hint}
+        candidates.append(t)
+
+    if artist_id:
+        own_top_task = get_artist_top_tracks(artist_id, limit=3, genre_hint=genre_hint)
+        related_task = get_related_artists(artist_id, limit=12)
+        own_top, related_artists = await asyncio.gather(own_top_task, related_task)
+
+        # Include at most 2 other tracks from the same artist
+        for t in own_top[:2]:
+            _add_candidate(t)
+
+        # Fetch top 3 tracks from each related artist concurrently
+        if related_artists:
+            rel_lists = await asyncio.gather(
+                *[
+                    get_artist_top_tracks(ra["id"], limit=3, genre_hint=genre_hint)
+                    for ra in related_artists[:12]
+                ]
+            )
+            for track_list in rel_lists:
+                for t in track_list:
+                    _add_candidate(t)
+                    if len(candidates) >= limit:
+                        break
+                if len(candidates) >= limit:
+                    break
+
+    # Supplement with genre + language search if needed
+    if len(candidates) < limit // 2:
+        query_parts = [p for p in [lang_hint, genre_hint] if p]
+        if query_parts:
+            extra = await search_track(" ".join(query_parts), limit=20)
+            for t in extra:
+                _add_candidate(t)
+                if len(candidates) >= limit:
+                    break
+
+    return candidates[:limit]
 
 
 _PREVIEW_HEADERS = {

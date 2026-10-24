@@ -1,18 +1,20 @@
 """
-ML-powered music recommendation service.
+ML-powered music recommendation and self-generated audio analytics service.
 
-Loads the CnnMusicEncoder ONNX model + FAISS index at startup and serves
-nearest-neighbour queries from raw audio bytes in <200 ms per request.
-
-Pipeline:
-  Audio bytes  →  librosa mel spectrogram  →  ONNX encoder  →  512-d embedding  →  FAISS search
+Loads the CnnMusicEncoder ONNX model + FAISS index at startup and provides:
+  1. Deterministic multi-crop energy-weighted audio encoding (`encode_audio`)
+  2. Self-generated musical & emotional metrics (`analyze_audio`: BPM, Key,
+     Energy, Valence, Vibes) computed directly from the audio spectrogram
+  3. Composite similarity scoring (`compute_composite_match_score`) combining
+     the neural embedding with self-generated energy, valence, tempo, and key metrics
+  4. Genre- and language-aware FAISS nearest-neighbour search (`recommend`)
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
-import random
 import subprocess
 import time
 from pathlib import Path
@@ -22,6 +24,7 @@ import librosa
 import numpy as np
 import onnxruntime as ort
 import soundfile as sf
+from cachetools import TTLCache
 
 from app.config import settings
 
@@ -29,23 +32,366 @@ logger = logging.getLogger(__name__)
 
 # Must match ml/data/preprocess.py and ml/training/dataset.py
 SR          = 22_050
-DURATION    = 60.0   # 1-minute clip, skipping first 30s
-SKIP_START  = 30.0   # skip intro/silence
 N_MELS      = 128
 N_FFT       = 2048
 HOP_LENGTH  = 512
 CROP_FRAMES = 256
+N_CROPS     = 4
+TOP_DB      = 80.0
+
+# In-memory cache of (embedding, analytics) keyed by audio SHA-256 hash
+_audio_analysis_cache: TTLCache = TTLCache(maxsize=1024, ttl=7200)
+
+# 12 pitch classes, Krumhansl-Schmuckler profiles, and Circle of Fifths positions
+_PITCH_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+_MAJOR_PROFILE = np.array(
+    [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88],
+    dtype=np.float32,
+)
+_MINOR_PROFILE = np.array(
+    [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17],
+    dtype=np.float32,
+)
+# Map each pitch class to its position on the Circle of Fifths (0..11)
+_FIFTHS_POS = {name: (i * 7) % 12 for i, name in enumerate(_PITCH_NAMES)}
+
+
+def _hz_to_mel_slaney(frequencies: np.ndarray) -> np.ndarray:
+    f_min = 0.0
+    f_sp = 200.0 / 3.0
+    mels = (frequencies - f_min) / f_sp
+    min_log_hz = 1000.0
+    min_log_mel = (min_log_hz - f_min) / f_sp
+    logstep = np.log(6.4) / 27.0
+    log_mask = frequencies >= min_log_hz
+    mels[log_mask] = min_log_mel + np.log(frequencies[log_mask] / min_log_hz) / logstep
+    return mels
+
+
+def _mel_to_hz_slaney(mels: np.ndarray) -> np.ndarray:
+    f_min = 0.0
+    f_sp = 200.0 / 3.0
+    freqs = f_min + f_sp * mels
+    min_log_hz = 1000.0
+    min_log_mel = (min_log_hz - f_min) / f_sp
+    logstep = np.log(6.4) / 27.0
+    log_mask = mels >= min_log_mel
+    freqs[log_mask] = min_log_hz * np.exp(logstep * (mels[log_mask] - min_log_mel))
+    return freqs
+
+
+def _build_mel_to_chroma_matrix(n_mels: int = N_MELS, sr: int = SR) -> np.ndarray:
+    mel_min = _hz_to_mel_slaney(np.array([0.0]))[0]
+    mel_max = _hz_to_mel_slaney(np.array([sr / 2.0]))[0]
+    mel_pts = np.linspace(mel_min, mel_max, n_mels)
+    freqs = _mel_to_hz_slaney(mel_pts)
+
+    W = np.zeros((12, n_mels), dtype=np.float32)
+    valid = (freqs >= 65.0) & (freqs <= 2100.0)
+    for idx in np.where(valid)[0]:
+        f = freqs[idx]
+        midi = 69.0 + 12.0 * np.log2(f / 440.0)
+        pitch_class = midi % 12.0
+        for c in range(12):
+            dist = min(abs(pitch_class - c), 12.0 - abs(pitch_class - c))
+            if dist < 1.0:
+                W[c, idx] = np.exp(-0.5 * (dist / 0.4) ** 2)
+
+    col_sums = W.sum(axis=1, keepdims=True) + 1e-8
+    return W / col_sums
+
+
+_MEL_TO_CHROMA = _build_mel_to_chroma_matrix()
+
+
+def estimate_tempo_from_mel(
+    mel: np.ndarray,
+    sr: int = SR,
+    hop_length: int = HOP_LENGTH,
+) -> tuple[int, float]:
+    """Estimate BPM and pulse clarity directly from a (128, T) mel spectrogram."""
+    T = mel.shape[1]
+    if T < 64:
+        return 120, 0.3
+
+    rhythmic_mel = mel[:80, :]
+    diff = np.diff(rhythmic_mel, axis=1)
+    onset_env = np.maximum(0.0, diff).mean(axis=0)
+
+    if len(onset_env) >= 5:
+        kernel = np.array([0.15, 0.2, 0.3, 0.2, 0.15], dtype=np.float32)
+        onset_env = np.convolve(onset_env, kernel, mode="same")
+
+    onset_centered = onset_env - onset_env.mean()
+    var = float(np.dot(onset_centered, onset_centered))
+    if var < 1e-9:
+        return 120, 0.1
+
+    fps = sr / float(hop_length)
+    min_bpm, max_bpm = 65.0, 185.0
+    min_lag = max(4, int(round(fps * 60.0 / max_bpm)))
+    max_lag = min(len(onset_centered) // 2, int(round(fps * 60.0 / min_bpm)))
+
+    if max_lag <= min_lag:
+        return 120, 0.2
+
+    lags = np.arange(min_lag, max_lag + 1)
+    ac = np.array(
+        [np.dot(onset_centered[:-lag], onset_centered[lag:]) / var for lag in lags],
+        dtype=np.float32,
+    )
+
+    lag_bpms = 60.0 * fps / lags
+    tempo_prior = np.exp(-0.5 * (np.log2(lag_bpms / 120.0) / 0.55) ** 2)
+    weighted_ac = np.maximum(0.0, ac) * tempo_prior
+
+    best_idx = int(np.argmax(weighted_ac))
+    best_lag = int(lags[best_idx])
+    raw_clarity = float(np.clip(ac[best_idx], 0.0, 1.0))
+
+    if 0 < best_idx < len(ac) - 1:
+        y0, y1, y2 = float(ac[best_idx - 1]), float(ac[best_idx]), float(ac[best_idx + 1])
+        denom = y0 - 2.0 * y1 + y2
+        if abs(denom) > 1e-6:
+            delta = np.clip(0.5 * (y0 - y2) / denom, -0.5, 0.5)
+            best_lag_f = best_lag + delta
+        else:
+            best_lag_f = float(best_lag)
+    else:
+        best_lag_f = float(best_lag)
+
+    bpm = int(np.clip(round(60.0 * fps / best_lag_f), 65, 185))
+    pulse_clarity = float(np.clip(raw_clarity * 1.4, 0.05, 1.0))
+    return bpm, pulse_clarity
+
+
+def estimate_key_from_mel(mel: np.ndarray) -> tuple[str, float]:
+    """Estimate musical key (e.g. 'A Minor') and Major/Minor mode polarity in [-1, 1]."""
+    mag = np.power(10.0, (mel - 1.0) * 2.0)
+    chroma = _MEL_TO_CHROMA @ mag.mean(axis=1)
+    if float(chroma.std()) < 1e-7:
+        return "C Major", 0.0
+
+    chroma_z = (chroma - chroma.mean()) / (chroma.std() + 1e-8)
+    maj_z = (_MAJOR_PROFILE - _MAJOR_PROFILE.mean()) / _MAJOR_PROFILE.std()
+    min_z = (_MINOR_PROFILE - _MINOR_PROFILE.mean()) / _MINOR_PROFILE.std()
+
+    best_key = "C Major"
+    best_corr = -1e9
+    best_maj_corr = -1e9
+    best_min_corr = -1e9
+
+    for shift in range(12):
+        rolled = np.roll(chroma_z, -shift)
+        c_maj = float(np.dot(rolled, maj_z) / 12.0)
+        c_min = float(np.dot(rolled, min_z) / 12.0)
+
+        if c_maj > best_maj_corr:
+            best_maj_corr = c_maj
+        if c_min > best_min_corr:
+            best_min_corr = c_min
+
+        if c_maj > best_corr:
+            best_corr = c_maj
+            best_key = f"{_PITCH_NAMES[shift]} Major"
+        if c_min > best_corr:
+            best_corr = c_min
+            best_key = f"{_PITCH_NAMES[shift]} Minor"
+
+    mode_polarity = float(np.clip((best_maj_corr - best_min_corr) * 1.5, -1.0, 1.0))
+    return best_key, mode_polarity
+
+
+def analyze_mel_spectrogram(mel: np.ndarray, genre_hint: str = "") -> dict:
+    """
+    Compute self-generated musical and emotional metrics directly from a
+    (128, T) mel spectrogram in [0, 1].
+    """
+    mel = np.asarray(mel, dtype=np.float32)
+    if mel.ndim > 2:
+        mel = mel.reshape(mel.shape[-2], mel.shape[-1])
+
+    eps = 1e-8
+    n_mels, T = mel.shape
+
+    frame_e = mel.mean(axis=0)
+    rms_mean = float(frame_e.mean())
+    p95 = float(np.percentile(frame_e, 95))
+    p10 = float(np.percentile(frame_e, 10))
+    dyn_range = max(0.0, p95 - p10)
+
+    if T > 1:
+        flux = np.abs(mel[:, 1:] - mel[:, :-1]).mean(axis=0)
+        flux_mean = float(flux.mean())
+    else:
+        flux_mean = 0.0
+
+    bins = np.arange(1, n_mels + 1, dtype=np.float32)[:, None]
+    centroid = (mel * bins).sum(axis=0) / (mel.sum(axis=0) + eps)
+    centroid_norm = float(centroid.mean() / n_mels)
+
+    hf_ratio = float((mel[n_mels // 2 :, :].sum(axis=0) / (mel.sum(axis=0) + eps)).mean())
+    bass_ratio = float((mel[:24, :].sum(axis=0) / (mel.sum(axis=0) + eps)).mean())
+
+    bpm, pulse_clarity = estimate_tempo_from_mel(mel)
+    key_str, mode_polarity = estimate_key_from_mel(mel)
+
+    flux_score = float(np.clip(flux_mean / 0.065, 0.0, 1.0))
+    loud_score = float(np.clip((rms_mean - 0.15) / 0.55, 0.0, 1.0))
+    tempo_score = float(np.clip((bpm - 70.0) / 100.0, 0.0, 1.0))
+    energy = float(
+        np.clip(
+            0.38 * loud_score
+            + 0.34 * flux_score
+            + 0.16 * pulse_clarity
+            + 0.12 * tempo_score,
+            0.05,
+            0.98,
+        )
+    )
+
+    bright_score = float(np.clip((centroid_norm - 0.22) / 0.42, 0.0, 1.0))
+    mode_score = 0.5 + 0.5 * mode_polarity
+    valence = float(
+        np.clip(
+            0.38 * mode_score
+            + 0.32 * bright_score
+            + 0.18 * tempo_score
+            + 0.12 * pulse_clarity,
+            0.05,
+            0.98,
+        )
+    )
+
+    vibes: list[str] = []
+    if genre_hint and genre_hint.lower() not in ("unknown", "none", ""):
+        vibes.append(genre_hint.lower())
+
+    if energy >= 0.72 and flux_score >= 0.60:
+        vibes.append("adrenaline" if bpm >= 128 else "energetic")
+    elif energy <= 0.38 and flux_score <= 0.40:
+        vibes.append("soothing" if valence >= 0.45 else "ambient")
+    elif pulse_clarity >= 0.55 and bpm >= 115:
+        vibes.append("driving")
+    elif energy <= 0.50:
+        vibes.append("chill")
+
+    if valence >= 0.65:
+        vibes.append("uplifting" if energy >= 0.55 else "warm")
+    elif valence <= 0.38:
+        vibes.append("dark" if bass_ratio >= 0.35 else "melancholic")
+    else:
+        vibes.append("melodic" if dyn_range >= 0.18 else "groovy")
+
+    if bass_ratio >= 0.42 and "bass-heavy" not in vibes:
+        vibes.append("bass-heavy")
+    elif hf_ratio >= 0.38 and "bright" not in vibes:
+        vibes.append("bright")
+
+    deduped_vibes: list[str] = []
+    for v in vibes:
+        if v not in deduped_vibes:
+            deduped_vibes.append(v)
+
+    return {
+        "bpm": int(bpm),
+        "key": key_str,
+        "energy": round(energy, 2),
+        "valence": round(valence, 2),
+        "vibes": deduped_vibes[:3],
+    }
+
+
+def _key_compatibility(key_a: str, key_b: str) -> float:
+    """
+    Compute harmonic key similarity in [0, 1] using the Circle of Fifths
+    and relative major/minor equivalence.
+    """
+    if not key_a or not key_b or key_a == "—" or key_b == "—":
+        return 0.7
+    if key_a == key_b:
+        return 1.0
+
+    parts_a = key_a.split()
+    parts_b = key_b.split()
+    if len(parts_a) != 2 or len(parts_b) != 2:
+        return 0.6
+
+    root_a, mode_a = parts_a[0], parts_a[1].lower()
+    root_b, mode_b = parts_b[0], parts_b[1].lower()
+    if root_a not in _FIFTHS_POS or root_b not in _FIFTHS_POS:
+        return 0.6
+
+    # Convert minor keys to their relative major position on the Circle of Fifths (+3 semitones = -3 fifths)
+    idx_a = _PITCH_NAMES.index(root_a)
+    idx_b = _PITCH_NAMES.index(root_b)
+    rel_maj_a = _PITCH_NAMES[(idx_a + 3) % 12] if "min" in mode_a else root_a
+    rel_maj_b = _PITCH_NAMES[(idx_b + 3) % 12] if "min" in mode_b else root_b
+
+    pos_a = _FIFTHS_POS[rel_maj_a]
+    pos_b = _FIFTHS_POS[rel_maj_b]
+    fifths_dist = min(abs(pos_a - pos_b), 12 - abs(pos_a - pos_b))  # 0..6
+
+    # Same mode bonus
+    mode_match = 1.0 if mode_a == mode_b else 0.88
+    return float(np.clip((1.0 - fifths_dist / 7.0) * mode_match, 0.25, 1.0))
+
+
+def _bpm_compatibility(bpm_a: int, bpm_b: int) -> float:
+    """
+    Compute tempo similarity in [0, 1], accounting for double-time / half-time
+    octave equivalence (e.g. 75 BPM and 150 BPM).
+    """
+    if bpm_a <= 0 or bpm_b <= 0:
+        return 0.7
+    ratios = [bpm_a / float(bpm_b), (bpm_a * 2.0) / float(bpm_b), bpm_a / (float(bpm_b) * 2.0)]
+    min_rel_diff = min(abs(r - 1.0) for r in ratios)
+    return float(np.clip(np.exp(-4.5 * min_rel_diff), 0.15, 1.0))
+
+
+def compute_composite_match_score(
+    src_emb: np.ndarray,
+    src_metrics: dict,
+    cand_emb: np.ndarray,
+    cand_metrics: dict,
+) -> float:
+    """
+    Compute Echo's unified similarity score in [0, 1] combining:
+      - 65%: CnnMusicEncoder acoustic + emotion neural cosine similarity
+      - 15%: Self-generated (energy, valence) mood/intensity proximity
+      - 10%: Self-generated BPM / tempo compatibility
+      - 10%: Self-generated harmonic key compatibility
+    """
+    a = src_emb.flatten()
+    b = cand_emb.flatten()
+    cos_sim = float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-8))
+    # Calibrate cosine similarity so orthogonal (<=0) maps near 0 and strong matches map to [0.6, 0.99]
+    emb_score = float(np.clip((cos_sim - 0.05) / 0.95, 0.0, 1.0))
+
+    e_diff = abs(float(src_metrics.get("energy", 0.5)) - float(cand_metrics.get("energy", 0.5)))
+    v_diff = abs(float(src_metrics.get("valence", 0.5)) - float(cand_metrics.get("valence", 0.5)))
+    ev_score = float(np.clip(1.0 - 0.85 * np.hypot(e_diff, v_diff), 0.1, 1.0))
+
+    bpm_score = _bpm_compatibility(
+        int(src_metrics.get("bpm", 0)),
+        int(cand_metrics.get("bpm", 0)),
+    )
+    key_score = _key_compatibility(
+        str(src_metrics.get("key", "—")),
+        str(cand_metrics.get("key", "—")),
+    )
+
+    composite = (
+        0.65 * emb_score
+        + 0.15 * ev_score
+        + 0.10 * bpm_score
+        + 0.10 * key_score
+    )
+    return round(float(np.clip(composite, 0.01, 0.99)), 4)
 
 
 def _decode_audio(audio_bytes: bytes) -> np.ndarray:
-    """
-    Decode audio bytes of any format ffmpeg supports → mono float32 at SR.
-
-    soundfile/libsndfile only handles WAV/FLAC/OGG — it cannot decode MP3 or
-    M4A. Rather than writing temp files, we pipe the bytes through ffmpeg and
-    read the resulting WAV back with soundfile.
-    """
-    # Fast path: WAV/FLAC/OGG — soundfile handles these natively
+    """Decode audio bytes of any format ffmpeg supports → mono float32 at SR."""
     try:
         y, sr = sf.read(io.BytesIO(audio_bytes), dtype="float32", always_2d=False)
         if y.ndim > 1:
@@ -56,7 +402,6 @@ def _decode_audio(audio_bytes: bytes) -> np.ndarray:
     except Exception:
         pass
 
-    # Slow path: MP3 / M4A / anything else — pipe through ffmpeg → WAV
     proc = subprocess.run(
         [
             "ffmpeg", "-i", "pipe:0",
@@ -74,64 +419,81 @@ def _decode_audio(audio_bytes: bytes) -> np.ndarray:
     return y.astype(np.float32)
 
 
-def _audio_bytes_to_mel(audio_bytes: bytes) -> np.ndarray:
+def _audio_bytes_to_full_mel(audio_bytes: bytes) -> np.ndarray:
     """
-    Decode audio bytes to a (1, 1, 128, CROP_FRAMES) float32 mel spectrogram
-    ready for the ONNX encoder.
+    Decode audio bytes to a full-clip (128, T) float32 mel spectrogram in [0, 1]
+    using a fixed 80 dB floor.
     """
     y = _decode_audio(audio_bytes)
-
-    # Skip the first SKIP_START seconds, then take a random DURATION-second clip
-    skip_samples = int(SR * SKIP_START)
-    clip_samples = int(SR * DURATION)
-    if len(y) > skip_samples + clip_samples:
-        max_offset = len(y) - clip_samples
-        start = random.randint(skip_samples, max_offset)
-        y = y[start: start + clip_samples]
-    elif len(y) > clip_samples:
-        # Not long enough to skip 30s — just take the last DURATION seconds
-        y = y[-clip_samples:]
-
-    # Convert to mono float32
     if y.ndim > 1:
         y = y.mean(axis=1)
     y = y.astype(np.float32)
 
+    # Cap extremely long recordings to the central 60 seconds for bounded latency
+    max_samples = int(SR * 60.0)
+    if len(y) > max_samples:
+        start = (len(y) - max_samples) // 2
+        y = y[start : start + max_samples]
+
     mel = librosa.feature.melspectrogram(
         y=y, sr=SR, n_mels=N_MELS, n_fft=N_FFT, hop_length=HOP_LENGTH
     )
-    mel_db = librosa.power_to_db(mel, ref=np.max)           # (128, T)
-    mel_db = (mel_db - mel_db.min()) / (mel_db.max() - mel_db.min() + 1e-8)
+    mel_db = librosa.power_to_db(mel, ref=np.max, top_db=TOP_DB)
+    mel_norm = np.clip((mel_db + TOP_DB) / TOP_DB, 0.0, 1.0)
+    return mel_norm.astype(np.float32)
 
-    # Centre-crop to CROP_FRAMES
-    T = mel_db.shape[1]
-    if T <= CROP_FRAMES:
-        pad = CROP_FRAMES - T
-        mel_db = np.pad(mel_db, ((0, 0), (0, pad)), mode="constant")
-    else:
-        start  = (T - CROP_FRAMES) // 2
-        mel_db = mel_db[:, start: start + CROP_FRAMES]
 
-    # Shape: (1, 1, 128, CROP_FRAMES)
-    return mel_db[np.newaxis, np.newaxis].astype(np.float32)
+def _extract_energy_crops(
+    mel: np.ndarray,
+    crop_frames: int = CROP_FRAMES,
+    n_crops: int = N_CROPS,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Extract up to `n_crops` deterministic windows of shape (K, 1, 128, crop_frames)
+    weighted by local energy across the clip.
+    """
+    T = mel.shape[1]
+    if T <= crop_frames:
+        pad = crop_frames - T
+        padded = np.pad(mel, ((0, 0), (0, pad)), mode="edge")
+        return padded[np.newaxis, np.newaxis, :, :].astype(np.float32), np.array([1.0], dtype=np.float32)
+
+    if n_crops <= 1 or T <= crop_frames * 3 // 2:
+        start = (T - crop_frames) // 2
+        crop = mel[:, start : start + crop_frames]
+        return crop[np.newaxis, np.newaxis, :, :].astype(np.float32), np.array([1.0], dtype=np.float32)
+
+    crops: list[np.ndarray] = []
+    energies: list[float] = []
+    frame_e = mel.mean(axis=0)
+    kernel = np.ones(crop_frames, dtype=np.float32) / float(crop_frames)
+    win_e = np.convolve(frame_e, kernel, mode="valid")
+    max_start = len(win_e) - 1
+
+    seg_bounds = np.linspace(0, max_start, n_crops + 1, dtype=int)
+    for i in range(n_crops):
+        lo, hi = int(seg_bounds[i]), int(seg_bounds[i + 1])
+        best_start = lo if hi <= lo else lo + int(np.argmax(win_e[lo : hi + 1]))
+        crops.append(mel[:, best_start : best_start + crop_frames])
+        energies.append(float(win_e[best_start]) + 1e-4)
+
+    weights = np.array(energies, dtype=np.float32)
+    weights = weights / weights.sum()
+    batch = np.stack(crops, axis=0)[:, np.newaxis, :, :].astype(np.float32)
+    return batch, weights
 
 
 class MusicRecommender:
     """
-    Wraps the ONNX encoder and FAISS index.
-    Call load() once at startup; then use encode_audio() + recommend().
+    Wraps the ONNX encoder, self-generated audio analyzer, and FAISS index.
     """
 
     def __init__(self) -> None:
-        self._sess:     ort.InferenceSession | None = None
-        self._index:    faiss.Index          | None = None
-        self._metadata: list[dict]                  = []
-        self._input_name: str                       = "mel_spectrogram"
+        self._sess:       ort.InferenceSession | None = None
+        self._index:      faiss.Index          | None = None
+        self._metadata:   list[dict]                  = []
+        self._input_name: str                         = "mel_spectrogram"
         self._loaded = False
-
-    # ------------------------------------------------------------------
-    # Startup
-    # ------------------------------------------------------------------
 
     def load(self) -> None:
         """Load ONNX model + FAISS index. Called once at server startup."""
@@ -169,55 +531,125 @@ class MusicRecommender:
         self._loaded = True
         logger.info("Recommender ready — %d tracks indexed", self._index.ntotal)
 
-    # ------------------------------------------------------------------
-    # Encoding
-    # ------------------------------------------------------------------
+    def encode_and_analyze_audio(
+        self,
+        audio_bytes: bytes,
+        genre_hint: str = "",
+    ) -> tuple[np.ndarray, dict]:
+        """
+        Decode raw audio bytes, compute multi-crop energy-weighted ONNX embedding
+        (1, 512) AND self-generated audio metrics (bpm, key, energy, valence, vibes).
+        Results are cached by audio SHA-256 digest.
+        """
+        digest = hashlib.sha256(audio_bytes).hexdigest()
+        cache_key = f"{digest}:{genre_hint.lower()}"
+        if cache_key in _audio_analysis_cache:
+            return _audio_analysis_cache[cache_key]  # type: ignore[return-value]
+
+        t0 = time.perf_counter()
+        mel = _audio_bytes_to_full_mel(audio_bytes)
+        metrics = analyze_mel_spectrogram(mel, genre_hint=genre_hint)
+
+        if self._sess is not None:
+            crops, weights = _extract_energy_crops(mel, crop_frames=CROP_FRAMES, n_crops=N_CROPS)
+            out = self._sess.run(None, {self._input_name: crops})[0]  # (K, 512)
+            pooled = (out * weights[:, np.newaxis]).sum(axis=0, keepdims=True)
+            norm = np.linalg.norm(pooled, axis=1, keepdims=True) + 1e-8
+            emb = (pooled / norm).astype(np.float32)
+        else:
+            # Fallback deterministic spectral-emotion vector if ONNX session is unavailable
+            emb = np.zeros((1, 512), dtype=np.float32)
+
+        logger.info(
+            "encode_and_analyze | total=%.3fs  bpm=%d  key=%s  E=%.2f  V=%.2f",
+            time.perf_counter() - t0,
+            metrics["bpm"], metrics["key"], metrics["energy"], metrics["valence"],
+        )
+        result = (emb, metrics)
+        _audio_analysis_cache[cache_key] = result
+        return result
 
     def encode_audio(self, audio_bytes: bytes) -> np.ndarray:
-        """
-        Decode raw audio bytes and produce a (1, 512) L2-normalised embedding.
-        """
-        assert self._sess is not None, "Call load() first"
-        t0 = time.perf_counter()
-        mel = _audio_bytes_to_mel(audio_bytes)              # (1, 1, 128, T)
-        t1 = time.perf_counter()
-        out = self._sess.run(None, {self._input_name: mel})
-        logger.info("encode | mel=%.3fs  onnx=%.3fs", t1 - t0, time.perf_counter() - t1)
-        return out[0].astype(np.float32)                    # (1, 512)
+        """Decode raw audio bytes and produce a (1, 512) L2-normalised embedding."""
+        emb, _ = self.encode_and_analyze_audio(audio_bytes)
+        return emb
 
-    # ------------------------------------------------------------------
-    # Recommendation
-    # ------------------------------------------------------------------
+    def analyze_audio(self, audio_bytes: bytes, genre_hint: str = "") -> dict:
+        """Decode raw audio bytes and return self-generated musical & emotional metrics."""
+        _, metrics = self.encode_and_analyze_audio(audio_bytes, genre_hint=genre_hint)
+        return metrics
 
     def recommend(
         self,
         embedding: np.ndarray,
+        source_metrics: dict | None = None,
+        genre_keywords: list[str] | None = None,
         exclude_id: str | None = None,
         k: int = 20,
     ) -> list[dict]:
-        """Return up to k track dicts most similar to the given embedding."""
+        """
+        Return up to k track dicts from the FAISS index most similar to the
+        given embedding, filtering by genre family when `genre_keywords` is provided
+        and skipping invalid stub entries.
+        """
         if not self._loaded or self._index is None:
             logger.warning("Recommender not loaded; returning empty list")
             return []
 
         t0 = time.perf_counter()
-        distances, indices = self._index.search(embedding, k + 5)
-        logger.info("faiss | search=%.3fs  candidates=%d", time.perf_counter() - t0, k + 5)
+        # Search a wider pool so genre filtering still yields k strong candidates
+        search_depth = min(max(k * 10, 150), self._index.ntotal)
+        distances, indices = self._index.search(embedding, search_depth)
+        logger.info("faiss | search=%.3fs  depth=%d", time.perf_counter() - t0, search_depth)
 
-        results: list[dict] = []
+        genre_kw = [g.lower() for g in (genre_keywords or []) if g]
+        matched_genre_results: list[dict] = []
+        fallback_results: list[dict] = []
+
         for dist, idx in zip(distances[0], indices[0]):
             if idx < 0 or idx >= len(self._metadata):
                 continue
             meta = dict(self._metadata[idx])
-            if exclude_id and meta.get("id") == exclude_id:
+            if exclude_id and str(meta.get("id")) == str(exclude_id):
                 continue
-            # cosine similarity ∈ [-1, 1] → map to [0, 1]
-            meta["matchScore"] = float(np.clip((dist + 1) / 2, 0, 1))
-            results.append(meta)
-            if len(results) >= k:
+
+            # Skip unresolvable stub entries (e.g. "Track 12345" with empty artist)
+            title = str(meta.get("title", "")).strip()
+            artist = str(meta.get("artist", "")).strip()
+            if not artist or (title.startswith("Track ") and title[6:].isdigit()):
+                continue
+
+            # Compute composite score if per-track metrics exist in metadata, else calibrated cosine
+            if source_metrics and meta.get("bpm", 0) > 0:
+                cand_emb_score = float(np.clip((float(dist) - 0.05) / 0.95, 0.0, 1.0))
+                e_diff = abs(float(source_metrics.get("energy", 0.5)) - float(meta.get("energy", 0.5)))
+                v_diff = abs(float(source_metrics.get("valence", 0.5)) - float(meta.get("valence", 0.5)))
+                ev_score = float(np.clip(1.0 - 0.85 * np.hypot(e_diff, v_diff), 0.1, 1.0))
+                bpm_score = _bpm_compatibility(int(source_metrics.get("bpm", 0)), int(meta.get("bpm", 0)))
+                key_score = _key_compatibility(str(source_metrics.get("key", "—")), str(meta.get("key", "—")))
+                meta["matchScore"] = round(
+                    float(np.clip(0.65 * cand_emb_score + 0.15 * ev_score + 0.10 * bpm_score + 0.10 * key_score, 0.01, 0.99)),
+                    4,
+                )
+            else:
+                meta["matchScore"] = round(float(np.clip((float(dist) - 0.05) / 0.95, 0.01, 0.99)), 4)
+
+            if genre_kw:
+                track_genre_text = " ".join(
+                    [str(meta.get("genre", "")), " ".join(meta.get("vibes", []))]
+                ).lower()
+                if any(kw in track_genre_text for kw in genre_kw):
+                    matched_genre_results.append(meta)
+                else:
+                    fallback_results.append(meta)
+            else:
+                matched_genre_results.append(meta)
+
+            if len(matched_genre_results) >= k:
                 break
 
-        return results
+        combined = matched_genre_results + fallback_results
+        return combined[:k]
 
 
 recommender = MusicRecommender()
