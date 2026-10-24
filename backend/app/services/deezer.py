@@ -173,9 +173,10 @@ async def search_track(query: str, limit: int = 5) -> list[dict]:
                 )
                 if it_resp.status_code == 200:
                     items = []
-                    for item in it_resp.json().get("results", []):
+                    for pos, item in enumerate(it_resp.json().get("results", [])):
                         art = (item.get("artworkUrl100") or "").replace("100x100bb", "600x600bb")
                         y, dec = _extract_year_decade(item.get("releaseDate"))
+                        it_rank = max(10000, 850000 - pos * 30000)
                         items.append({
                             "id":          f"it_{item['trackId']}",
                             "title":       item.get("trackName", ""),
@@ -194,7 +195,7 @@ async def search_track(query: str, limit: int = 5) -> list[dict]:
                             "vibes":       [item.get("primaryGenreName", "").lower()] if item.get("primaryGenreName") else [],
                             "year":        y,
                             "decade":      dec,
-                            "rank":        0,
+                            "rank":        it_rank,
                         })
                     return items
             except Exception as exc:
