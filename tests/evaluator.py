@@ -75,6 +75,24 @@ _GENRE_FAMILIES = {
 }
 
 
+_KNOWN_ARTIST_LANGS = [
+    ({"kishore kumar", "lata mangeshkar", "asha bhosle", "mohammed rafi", "mohd rafi",
+      "r.d. burman", "rd burman", "mukesh", "manna dey", "alka yagnik", "kumar sanu",
+      "udit narayan", "sonu nigam", "arijit singh", "shreya ghoshal", "sunidhi chauhan",
+      "bappi lahiri", "hemant kumar", "talat mahmood", "nazia hassan", "geeta dutt",
+      "anuradha paudwal", "jagjit singh", "pankaj udhas", "lucky ali", "pritam",
+      "amit trivedi", "vishal-shekhar", "neha kakkar", "badshah", "s.d. burman",
+      "kalyanji-anandji", "laxmikant-pyarelal", "adnan sami", "kavita krishnamurthy"}, "hi"),
+    ({"sidhu moose wala", "diljit dosanjh", "ap dhillon", "karan aujla", "shubh",
+      "amrinder gill", "gurdas maan", "bohemia", "imran khan", "jazzy b", "mankirt aulakh",
+      "panjabi mc", "sukhbir", "deep money", "gippy grewal", "honey singh"}, "pa"),
+    ({"s. p. balasubrahmanyam", "spb", "ilayaraja", "anirudh ravichander", "sid sriram",
+      "yuvan shankar raja", "d. imman", "hariharan", "k. s. chithra", "sujatha", "dhanush", "dhee"}, "ta"),
+    ({"bts", "blackpink", "twice", "stray kids", "exo", "newjeans", "seventeen", "iu", "red velvet", "bigbang"}, "ko"),
+    ({"bad bunny", "rosalía", "daddy yankee", "shakira", "j balvin", "don omar", "luis fonsi", "buena vista social club", "gloria estefan"}, "es"),
+]
+
+
 def detect_track_language(title: str, artist: str, genre: str = "", tags: list[str] | None = None) -> str:
     """Determine effective language of a recommendation without cluster archetype noise."""
     # 1. Non-Latin Unicode script
@@ -85,8 +103,14 @@ def detect_track_language(title: str, artist: str, genre: str = "", tags: list[s
                 if script in name:
                     return lang
 
-    # 2. Genre matches (strict track genre, NOT unsupervised cluster archetype names)
-    g_lower = genre.lower().strip()
+    # 2. Artist cultural scene match
+    art_lower = artist.lower()
+    for artists, lang in _KNOWN_ARTIST_LANGS:
+        if any(a in art_lower for a in artists):
+            return lang
+
+    # 3. Genre matches (strict track genre, NOT unsupervised cluster archetype names)
+    g_lower = (genre or "").lower().strip()
     for kw, lang in _GENRE_LANG_MAPPINGS:
         if kw == g_lower or f"{kw} " in g_lower or f" {kw}" in g_lower:
             return lang
