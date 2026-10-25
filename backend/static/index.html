@@ -1064,6 +1064,9 @@
             </svg>
             <span id="spotifyBtnText">Create Spotify Playlist</span>
           </button>
+          <button id="spotifySettingsBtn" class="btn btn-secondary" style="padding: 9px 12px; border-radius: 9999px; font-size: 13px;" title="Spotify App Settings & Redirect URI">
+            ⚙️
+          </button>
           <div class="discovery-control" title="Tune between strict acoustic clones and broader sonic discovery">
             <span class="discovery-label">Discovery Mode</span>
             <input type="range" id="diversitySlider" class="discovery-slider" min="0.50" max="0.95" step="0.05" value="0.72">
@@ -1077,7 +1080,7 @@
 
   <!-- Spotify Connect / Client ID Modal -->
   <div id="spotifyModal" class="modal-backdrop" style="display:none;">
-    <div class="modal-card">
+    <div class="modal-card" style="max-width: 520px;">
       <div class="modal-header">
         <div style="display:flex; align-items:center; gap:10px;">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="#1DB954"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.6 0 12 0zm5.5 17.3c-.2.4-.7.5-1.1.3-3-1.8-6.8-2.2-11.3-1.2-.5.1-.9-.2-1-.7-.1-.5.2-.9.7-1 4.9-1.1 9.1-.6 12.4 1.5.5.2.6.7.3 1.1zm1.5-3.3c-.3.4-.8.6-1.3.3-3.5-2.1-8.7-2.7-12.8-1.5-.5.1-1-.2-1.2-.7-.1-.5.2-1 .7-1.2 4.7-1.4 10.5-.7 14.5 1.7.4.3.6.9.3 1.4zm.1-3.4c-4.1-2.5-10.9-2.7-14.9-1.5-.6.2-1.3-.2-1.5-.8-.2-.6.2-1.3.8-1.5 4.6-1.4 12-1.1 16.7 1.7.6.3.8 1.1.4 1.7-.3.5-1.1.7-1.6.4z"/></svg>
@@ -1089,14 +1092,37 @@
         <button id="closeSpotifyModal" class="modal-close" title="Close">&times;</button>
       </div>
 
-      <div style="margin-bottom:16px;">
-        <label style="display:block; font-size:12px; font-weight:600; color:var(--text-muted); margin-bottom:6px;">Spotify Client ID (One-Time Setup)</label>
+      <div style="margin-bottom:14px;">
+        <label style="display:block; font-size:12px; font-weight:600; color:var(--text-muted); margin-bottom:6px;">Spotify Client ID</label>
         <input type="text" id="spotifyClientIdInput" placeholder="Paste your Spotify Client ID..." style="width:100%; box-sizing:border-box; background:rgba(255,255,255,0.06); border:1px solid var(--border); border-radius:10px; padding:10px 14px; color:#fff; font-size:13px; font-family:monospace;">
-        <p style="font-size:11px; color:var(--text-muted); margin-top:6px; line-height:1.4;">
-          Get your free Client ID from <a href="https://developer.spotify.com/dashboard" target="_blank" style="color:var(--teal); text-decoration:underline;">Spotify Developer Dashboard</a>.<br>
-          Ensure Redirect URI includes: <code id="spotifyRedirectUriDisplay" style="color:var(--accent); background:rgba(0,0,0,0.3); padding:2px 4px; border-radius:4px;"></code>
-        </p>
       </div>
+
+      <div style="margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <label style="font-size:12px; font-weight:600; color:var(--text-muted);">Active Redirect URI</label>
+          <div style="display:flex; gap:6px;">
+            <button type="button" id="selectSlashUriBtn" class="btn btn-secondary" style="font-size:11px; padding:3px 8px; border-radius:6px;" title="Use URI ending with /">With /</button>
+            <button type="button" id="selectNoSlashUriBtn" class="btn btn-secondary" style="font-size:11px; padding:3px 8px; border-radius:6px;" title="Use URI without trailing /">Without /</button>
+          </div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="spotifyRedirectUriInput" style="flex:1; box-sizing:border-box; background:rgba(255,255,255,0.06); border:1px solid var(--border); border-radius:10px; padding:10px 14px; color:#fff; font-size:13px; font-family:monospace;">
+          <button type="button" id="copyRedirectUriBtn" class="btn btn-secondary" style="font-size:12px; padding:0 14px; white-space:nowrap;">📋 Copy</button>
+        </div>
+
+        <div style="margin-top:10px; padding:12px; border-radius:8px; background:rgba(245, 158, 11, 0.08); border:1px solid rgba(245, 158, 11, 0.25);">
+          <div style="font-size:11.5px; font-weight:700; color:#fbbf24; margin-bottom:4px;">⚠️ Fix "redirect_uri: Not matching configuration":</div>
+          <div style="font-size:11px; color:var(--text-muted); line-height:1.45;">
+            In <a href="https://developer.spotify.com/dashboard" target="_blank" style="color:var(--teal); text-decoration:underline; font-weight:600;">Spotify Developer Dashboard</a> ➔ your App ➔ <b>Settings</b> ➔ <b>Redirect URIs</b>:<br>
+            Click <b>Add</b>, paste <b>both</b> of these URIs, and click <b>Save</b> at bottom:
+            <ul style="margin:6px 0 2px 18px; padding:0; color:#fff; font-family:monospace; font-size:11px; line-height:1.6;">
+              <li id="uriWithSlash"></li>
+              <li id="uriWithoutSlash"></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <button id="authSpotifyBtn" class="btn-spotify" style="width:100%; justify-content:center; padding:12px;">
         <span>Log in with Spotify & Create Playlist</span>
       </button>
@@ -1612,13 +1638,29 @@
 
     // Spotify Playlist Integration
     let spotifyClientId = "";
+    let spotifyConfiguredRedirectUri = "";
 
     // Fetch backend config if available
     fetch('/api/config').then(r => r.json()).then(cfg => {
-      if (cfg && cfg.spotify_client_id) {
-        spotifyClientId = cfg.spotify_client_id;
+      if (cfg) {
+        if (cfg.spotify_client_id) spotifyClientId = cfg.spotify_client_id;
+        if (cfg.spotify_redirect_uri) spotifyConfiguredRedirectUri = cfg.spotify_redirect_uri;
       }
     }).catch(() => {});
+
+    function getEffectiveRedirectUri() {
+      if (spotifyConfiguredRedirectUri && spotifyConfiguredRedirectUri.trim()) {
+        return spotifyConfiguredRedirectUri.trim();
+      }
+      const saved = localStorage.getItem('spotify_redirect_uri');
+      if (saved && saved.trim()) {
+        return saved.trim();
+      }
+      let uri = window.location.origin + window.location.pathname;
+      uri = uri.replace(/\/index\.html$/, '/');
+      if (!uri.endsWith('/')) uri += '/';
+      return uri;
+    }
 
     // Cryptographic helpers for PKCE (RFC 7636)
     function generateRandomString(length) {
@@ -1637,7 +1679,8 @@
         .replace(/\//g, '_');
     }
 
-    async function initiateSpotifyAuth(clientId) {
+    async function initiateSpotifyAuth(clientId, targetUri) {
+      const redirectUri = targetUri || getEffectiveRedirectUri();
       const seedTitle = currentHeroTrack ? currentHeroTrack.title : 'Echo Mix';
       localStorage.setItem('pending_spotify_playlist', JSON.stringify({
         seed: seedTitle,
@@ -1648,9 +1691,9 @@
       const challenge = await generateCodeChallenge(verifier);
       localStorage.setItem('spotify_code_verifier', verifier);
       localStorage.setItem('spotify_client_id', clientId);
+      localStorage.setItem('spotify_used_redirect_uri', redirectUri);
 
       const scopes = 'playlist-modify-public playlist-modify-private';
-      const redirectUri = window.location.origin + window.location.pathname;
       const params = new URLSearchParams({
         client_id: clientId,
         response_type: 'code',
@@ -1660,7 +1703,33 @@
         code_challenge: challenge,
       });
 
-      window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;
+      const authUrl = `https://accounts.spotify.com/authorize?${params.toString()}`;
+      try {
+        if (window.self !== window.top) {
+          window.top.location.href = authUrl;
+          return;
+        }
+      } catch (e) {}
+      window.location.href = authUrl;
+    }
+
+    function openSpotifySetupModal() {
+      const activeClientId = spotifyClientId || localStorage.getItem('spotify_client_id') || '';
+      spotifyClientIdInput.value = activeClientId;
+
+      const activeUri = localStorage.getItem('spotify_redirect_uri') || getEffectiveRedirectUri();
+      spotifyRedirectUriInput.value = activeUri;
+
+      const baseUri = (window.location.origin + window.location.pathname).replace(/\/index\.html$/, '');
+      const withSlash = baseUri.endsWith('/') ? baseUri : baseUri + '/';
+      const withoutSlash = baseUri.endsWith('/') ? baseUri.slice(0, -1) : baseUri;
+
+      const elSlash = document.getElementById('uriWithSlash');
+      const elNoSlash = document.getElementById('uriWithoutSlash');
+      if (elSlash) elSlash.textContent = withSlash;
+      if (elNoSlash) elNoSlash.textContent = withoutSlash;
+
+      spotifyModal.style.display = 'flex';
     }
 
     // Check Spotify OAuth Redirect Callback (?code=... or ?error=...)
@@ -1672,13 +1741,15 @@
       if (authError) {
         showToast("Spotify Auth Error: " + authError);
         window.history.replaceState({}, document.title, window.location.pathname);
+        localStorage.removeItem('spotify_auth_confirmed');
+        openSpotifySetupModal();
         return;
       }
 
       if (code) {
         const codeVerifier = localStorage.getItem('spotify_code_verifier');
         const clientId = spotifyClientId || localStorage.getItem('spotify_client_id');
-        const redirectUri = window.location.origin + window.location.pathname;
+        const redirectUri = localStorage.getItem('spotify_used_redirect_uri') || getEffectiveRedirectUri();
         window.history.replaceState({}, document.title, window.location.pathname);
 
         if (codeVerifier && clientId) {
@@ -1710,6 +1781,7 @@
               }
             } else {
               showToast("Spotify Auth Failed: " + (tokenData.error_description || tokenData.error || "Unknown"));
+              openSpotifySetupModal();
             }
           } catch (e) {
             console.error("Token exchange failed:", e);
@@ -1720,16 +1792,54 @@
     });
 
     const createSpotifyPlaylistBtn = document.getElementById('createSpotifyPlaylistBtn');
+    const spotifySettingsBtn = document.getElementById('spotifySettingsBtn');
     const spotifyBtnText = document.getElementById('spotifyBtnText');
     const spotifyModal = document.getElementById('spotifyModal');
     const closeSpotifyModal = document.getElementById('closeSpotifyModal');
     const spotifyClientIdInput = document.getElementById('spotifyClientIdInput');
-    const spotifyRedirectUriDisplay = document.getElementById('spotifyRedirectUriDisplay');
+    const spotifyRedirectUriInput = document.getElementById('spotifyRedirectUriInput');
+    const copyRedirectUriBtn = document.getElementById('copyRedirectUriBtn');
+    const selectSlashUriBtn = document.getElementById('selectSlashUriBtn');
+    const selectNoSlashUriBtn = document.getElementById('selectNoSlashUriBtn');
     const authSpotifyBtn = document.getElementById('authSpotifyBtn');
 
-    const redirectUri = window.location.origin + window.location.pathname;
-    if (spotifyRedirectUriDisplay) {
-      spotifyRedirectUriDisplay.textContent = redirectUri;
+    if (spotifySettingsBtn) {
+      spotifySettingsBtn.addEventListener('click', () => {
+        openSpotifySetupModal();
+      });
+    }
+
+    if (copyRedirectUriBtn) {
+      copyRedirectUriBtn.addEventListener('click', () => {
+        const uri = spotifyRedirectUriInput.value.trim();
+        navigator.clipboard.writeText(uri).then(() => {
+          showToast("📋 Redirect URI copied to clipboard!");
+        }).catch(() => {
+          spotifyRedirectUriInput.select();
+          document.execCommand('copy');
+          showToast("📋 Redirect URI copied!");
+        });
+      });
+    }
+
+    if (selectSlashUriBtn) {
+      selectSlashUriBtn.addEventListener('click', () => {
+        const baseUri = (window.location.origin + window.location.pathname).replace(/\/index\.html$/, '');
+        const withSlash = baseUri.endsWith('/') ? baseUri : baseUri + '/';
+        spotifyRedirectUriInput.value = withSlash;
+        localStorage.setItem('spotify_redirect_uri', withSlash);
+        showToast("Set Redirect URI with /");
+      });
+    }
+
+    if (selectNoSlashUriBtn) {
+      selectNoSlashUriBtn.addEventListener('click', () => {
+        const baseUri = (window.location.origin + window.location.pathname).replace(/\/index\.html$/, '');
+        const withoutSlash = baseUri.endsWith('/') ? baseUri.slice(0, -1) : baseUri;
+        spotifyRedirectUriInput.value = withoutSlash;
+        localStorage.setItem('spotify_redirect_uri', withoutSlash);
+        showToast("Set Redirect URI without /");
+      });
     }
 
     createSpotifyPlaylistBtn.addEventListener('click', async () => {
@@ -1745,11 +1855,13 @@
         await executeCreateSpotifyPlaylist(token, seedTitle, currentRecommendationsList);
       } else {
         const savedClientId = spotifyClientId || localStorage.getItem('spotify_client_id');
-        if (savedClientId) {
-          await initiateSpotifyAuth(savedClientId);
+        const configuredUri = localStorage.getItem('spotify_redirect_uri') || getEffectiveRedirectUri();
+        const hasConfirmed = localStorage.getItem('spotify_auth_confirmed');
+
+        if (savedClientId && hasConfirmed) {
+          await initiateSpotifyAuth(savedClientId, configuredUri);
         } else {
-          spotifyModal.style.display = 'flex';
-          spotifyClientIdInput.value = localStorage.getItem('spotify_client_id') || '';
+          openSpotifySetupModal();
         }
       }
     });
@@ -1764,13 +1876,16 @@
 
     authSpotifyBtn.addEventListener('click', async () => {
       const clientId = spotifyClientIdInput.value.trim();
+      const redirectUri = spotifyRedirectUriInput.value.trim() || getEffectiveRedirectUri();
       if (!clientId) {
         alert("Please enter your Spotify Client ID");
         return;
       }
       localStorage.setItem('spotify_client_id', clientId);
+      localStorage.setItem('spotify_redirect_uri', redirectUri);
+      localStorage.setItem('spotify_auth_confirmed', 'true');
       spotifyModal.style.display = 'none';
-      await initiateSpotifyAuth(clientId);
+      await initiateSpotifyAuth(clientId, redirectUri);
     });
 
     async function executeCreateSpotifyPlaylist(token, seedTitle, tracks) {

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
 
     # Spotify Developer App (for 1-click playlist creation) — https://developer.spotify.com/dashboard
     spotify_client_id: str = ""
+    spotify_redirect_uri: str = ""
 
     # ML model paths
     onnx_model_path: str = "../ml/inference/music_encoder.onnx"

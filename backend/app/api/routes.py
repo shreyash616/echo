@@ -693,6 +693,7 @@ async def _find_and_rank_similar_tracks(
 async def get_client_config() -> dict:
     return {
         "spotify_client_id": settings.spotify_client_id,
+        "spotify_redirect_uri": settings.spotify_redirect_uri,
     }
 
 
