@@ -7,7 +7,8 @@ repo_id = "shreyash616/echo-backend"
 files_to_upload = [
     ("backend/app/services/deezer.py", "app/services/deezer.py"),
     ("backend/app/services/recommender.py", "app/services/recommender.py"),
-    ("backend/app/services/routes.py" if os.path.exists("backend/app/services/routes.py") else "backend/app/api/routes.py", "app/api/routes.py"),
+    ("backend/app/services/audio_recognition.py", "app/services/audio_recognition.py"),
+    ("backend/app/api/routes.py", "app/api/routes.py"),
     ("backend/app/services/lyrics.py", "app/services/lyrics.py"),
     ("backend/static/index.html", "static/index.html"),
 ]
