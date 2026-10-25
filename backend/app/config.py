@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     # Last.fm API — https://www.last.fm/api/account/create (free)
     lastfm_api_key: str = ""
 
+    # Spotify Developer App (for 1-click playlist creation) — https://developer.spotify.com/dashboard
+    spotify_client_id: str = ""
+
     # ML model paths
     onnx_model_path: str = "../ml/inference/music_encoder.onnx"
     faiss_index_path: str = "../ml/inference/music_index.faiss"

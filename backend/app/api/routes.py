@@ -689,6 +689,13 @@ async def _find_and_rank_similar_tracks(
     return ranked_tracks[:limit]
 
 
+@router.get("/config")
+async def get_client_config() -> dict:
+    return {
+        "spotify_client_id": settings.spotify_client_id,
+    }
+
+
 @router.get("/health")
 async def health() -> dict:
     return {"status": "ok", "recommender_loaded": recommender._loaded}

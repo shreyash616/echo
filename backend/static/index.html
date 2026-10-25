@@ -606,27 +606,33 @@
       flex-wrap: wrap;
     }
 
-    .btn-playlist {
-      background: linear-gradient(135deg, rgba(139, 92, 246, 0.22), rgba(20, 184, 166, 0.22));
-      border: 1px solid rgba(139, 92, 246, 0.45);
-      color: #fff;
-      font-weight: 600;
+    .btn-spotify {
+      background: #1DB954;
+      color: #000;
+      border: none;
+      font-weight: 700;
       font-size: 13px;
-      padding: 7px 15px;
+      padding: 8px 18px;
       border-radius: 9999px;
       display: inline-flex;
       align-items: center;
-      gap: 7px;
+      gap: 8px;
       cursor: pointer;
-      transition: all 0.2s ease;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
       font-family: inherit;
+      box-shadow: 0 4px 14px rgba(29, 185, 84, 0.35);
     }
 
-    .btn-playlist:hover {
-      background: linear-gradient(135deg, rgba(139, 92, 246, 0.4), rgba(20, 184, 166, 0.35));
-      border-color: var(--accent);
-      transform: translateY(-1px);
-      box-shadow: 0 4px 14px rgba(139, 92, 246, 0.25);
+    .btn-spotify:hover {
+      background: #1ed760;
+      transform: translateY(-1px) scale(1.02);
+      box-shadow: 0 6px 20px rgba(29, 185, 84, 0.5);
+    }
+
+    .btn-spotify:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
     }
 
     /* Modal Styling */
@@ -1052,15 +1058,11 @@
           <span class="badge" id="neuralBadge">Neural + MMR Diversity Reranked</span>
         </div>
         <div class="header-controls">
-          <button id="createPlaylistBtn" class="btn-playlist" title="Create a playlist from these recommendations">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 15V6"></path>
-              <path d="M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"></path>
-              <path d="M12 12H3"></path>
-              <path d="M16 6H3"></path>
-              <path d="M12 18H3"></path>
+          <button id="createSpotifyPlaylistBtn" class="btn-spotify" title="Create this playlist on Spotify">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="#000">
+              <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.6 0 12 0zm5.5 17.3c-.2.4-.7.5-1.1.3-3-1.8-6.8-2.2-11.3-1.2-.5.1-.9-.2-1-.7-.1-.5.2-.9.7-1 4.9-1.1 9.1-.6 12.4 1.5.5.2.6.7.3 1.1zm1.5-3.3c-.3.4-.8.6-1.3.3-3.5-2.1-8.7-2.7-12.8-1.5-.5.1-1-.2-1.2-.7-.1-.5.2-1 .7-1.2 4.7-1.4 10.5-.7 14.5 1.7.4.3.6.9.3 1.4zm.1-3.4c-4.1-2.5-10.9-2.7-14.9-1.5-.6.2-1.3-.2-1.5-.8-.2-.6.2-1.3.8-1.5 4.6-1.4 12-1.1 16.7 1.7.6.3.8 1.1.4 1.7-.3.5-1.1.7-1.6.4z"/>
             </svg>
-            <span>Create Playlist</span>
+            <span id="spotifyBtnText">Create Spotify Playlist</span>
           </button>
           <div class="discovery-control" title="Tune between strict acoustic clones and broader sonic discovery">
             <span class="discovery-label">Discovery Mode</span>
@@ -1073,57 +1075,38 @@
     </div>
   </div>
 
-  <!-- Playlist Modal -->
-  <div id="playlistModal" class="modal-backdrop" style="display:none;">
+  <!-- Spotify Connect / Client ID Modal -->
+  <div id="spotifyModal" class="modal-backdrop" style="display:none;">
     <div class="modal-card">
       <div class="modal-header">
         <div style="display:flex; align-items:center; gap:10px;">
-          <span style="font-size:24px;">🎧</span>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="#1DB954"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.6 0 12 0zm5.5 17.3c-.2.4-.7.5-1.1.3-3-1.8-6.8-2.2-11.3-1.2-.5.1-.9-.2-1-.7-.1-.5.2-.9.7-1 4.9-1.1 9.1-.6 12.4 1.5.5.2.6.7.3 1.1zm1.5-3.3c-.3.4-.8.6-1.3.3-3.5-2.1-8.7-2.7-12.8-1.5-.5.1-1-.2-1.2-.7-.1-.5.2-1 .7-1.2 4.7-1.4 10.5-.7 14.5 1.7.4.3.6.9.3 1.4zm.1-3.4c-4.1-2.5-10.9-2.7-14.9-1.5-.6.2-1.3-.2-1.5-.8-.2-.6.2-1.3.8-1.5 4.6-1.4 12-1.1 16.7 1.7.6.3.8 1.1.4 1.7-.3.5-1.1.7-1.6.4z"/></svg>
           <div>
-            <h3 id="playlistModalTitle" style="font-size:17px; font-weight:700;">Echo Playlist Mix</h3>
-            <p id="playlistModalSub" style="font-size:12px; color:var(--text-muted);">20 recommended tracks</p>
+            <h3 style="font-size:16px; font-weight:700;">Create Spotify Playlist</h3>
+            <p style="font-size:12px; color:var(--text-muted);">Authorize Echo to create this playlist in your Spotify account</p>
           </div>
         </div>
-        <button id="closePlaylistModal" class="modal-close" title="Close">&times;</button>
+        <button id="closeSpotifyModal" class="modal-close" title="Close">&times;</button>
       </div>
 
-      <div class="modal-actions-grid">
-        <button id="modalPlayAllBtn" class="modal-action-btn primary">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-          <div>
-            <strong>Play All Previews</strong>
-            <span>Listen continuously back-to-back</span>
-          </div>
-        </button>
-
-        <button id="modalSpotifyBtn" class="modal-action-btn">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="#1DB954"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.6 0 12 0zm5.5 17.3c-.2.4-.7.5-1.1.3-3-1.8-6.8-2.2-11.3-1.2-.5.1-.9-.2-1-.7-.1-.5.2-.9.7-1 4.9-1.1 9.1-.6 12.4 1.5.5.2.6.7.3 1.1zm1.5-3.3c-.3.4-.8.6-1.3.3-3.5-2.1-8.7-2.7-12.8-1.5-.5.1-1-.2-1.2-.7-.1-.5.2-1 .7-1.2 4.7-1.4 10.5-.7 14.5 1.7.4.3.6.9.3 1.4zm.1-3.4c-4.1-2.5-10.9-2.7-14.9-1.5-.6.2-1.3-.2-1.5-.8-.2-.6.2-1.3.8-1.5 4.6-1.4 12-1.1 16.7 1.7.6.3.8 1.1.4 1.7-.3.5-1.1.7-1.6.4z"/></svg>
-          <div>
-            <strong>Open in Spotify</strong>
-            <span>Explore full mix on Spotify</span>
-          </div>
-        </button>
-
-        <button id="modalCopyBtn" class="modal-action-btn">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-          <div>
-            <strong>Copy Tracklist</strong>
-            <span>For Soundiiz, TuneMyMusic or notes</span>
-          </div>
-        </button>
-
-        <button id="modalM3uBtn" class="modal-action-btn">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-          <div>
-            <strong>Download .M3U File</strong>
-            <span>Open in VLC, Apple Music, or iTunes</span>
-          </div>
-        </button>
+      <div style="margin-bottom:16px;">
+        <label style="display:block; font-size:12px; font-weight:600; color:var(--text-muted); margin-bottom:6px;">Spotify Client ID (One-Time Setup)</label>
+        <input type="text" id="spotifyClientIdInput" placeholder="Paste your Spotify Client ID..." style="width:100%; box-sizing:border-box; background:rgba(255,255,255,0.06); border:1px solid var(--border); border-radius:10px; padding:10px 14px; color:#fff; font-size:13px; font-family:monospace;">
+        <p style="font-size:11px; color:var(--text-muted); margin-top:6px; line-height:1.4;">
+          Get your free Client ID from <a href="https://developer.spotify.com/dashboard" target="_blank" style="color:var(--teal); text-decoration:underline;">Spotify Developer Dashboard</a>.<br>
+          Add Redirect URI: <code id="spotifyRedirectUriDisplay" style="color:var(--accent); background:rgba(0,0,0,0.3); padding:2px 4px; border-radius:4px;"></code>
+        </p>
       </div>
+      <button id="authSpotifyBtn" class="btn-spotify" style="width:100%; justify-content:center; padding:12px;">
+        <span>Log in with Spotify & Create Playlist</span>
+      </button>
 
-      <div style="margin-top:16px;">
-        <h4 style="font-size:12px; font-weight:700; text-transform:uppercase; color:var(--text-muted); margin-bottom:8px; letter-spacing:0.5px;">Tracks in this Mix</h4>
-        <div id="playlistTracksList" class="modal-track-list"></div>
+      <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--border); text-align:center;">
+        <p style="font-size:12px; color:var(--text-muted); margin-bottom:8px;">Instant zero-setup option:</p>
+        <button id="quickSpotifyExportBtn" class="btn btn-secondary" style="font-size:12px; padding:7px 16px; border-radius:9999px;">
+          📋 Copy All Tracks & Open Spotify
+        </button>
+        <p style="font-size:11px; color:var(--text-dim); margin-top:5px;">Copies all 20 track links — just hit New Playlist + Ctrl+V in Spotify</p>
       </div>
     </div>
   </div>
@@ -1606,149 +1589,204 @@
       }, 2500);
     }
 
-    const createPlaylistBtn = document.getElementById('createPlaylistBtn');
-    const playlistModal = document.getElementById('playlistModal');
-    const closePlaylistModal = document.getElementById('closePlaylistModal');
+    // Spotify Playlist Integration
+    let spotifyClientId = "";
 
-    createPlaylistBtn.addEventListener('click', () => {
-      if (!currentRecommendationsList || currentRecommendationsList.length === 0) {
-        showToast("No recommendations loaded yet!");
-        return;
+    // Fetch backend config if available
+    fetch('/api/config').then(r => r.json()).then(cfg => {
+      if (cfg && cfg.spotify_client_id) {
+        spotifyClientId = cfg.spotify_client_id;
       }
-      openPlaylistModal();
-    });
+    }).catch(() => {});
 
-    closePlaylistModal.addEventListener('click', () => {
-      playlistModal.style.display = 'none';
-    });
-
-    playlistModal.addEventListener('click', (e) => {
-      if (e.target === playlistModal) {
-        playlistModal.style.display = 'none';
+    // Check Spotify OAuth Redirect Callback in URL hash
+    window.addEventListener('load', async () => {
+      const hash = window.location.hash.substring(1);
+      if (hash && hash.includes('access_token')) {
+        const params = new URLSearchParams(hash);
+        const token = params.get('access_token');
+        if (token) {
+          localStorage.setItem('spotify_token', token);
+          window.location.hash = '';
+          const pending = localStorage.getItem('pending_spotify_playlist');
+          if (pending) {
+            try {
+              const data = JSON.parse(pending);
+              localStorage.removeItem('pending_spotify_playlist');
+              showToast("🔑 Connected to Spotify! Creating playlist...");
+              await executeCreateSpotifyPlaylist(token, data.seed, data.tracks);
+            } catch (e) {
+              console.error(e);
+            }
+          }
+        }
       }
     });
 
-    function openPlaylistModal() {
-      const seedTitle = currentHeroTrack ? currentHeroTrack.title : 'Echo Seed';
-      document.getElementById('playlistModalTitle').textContent = `Echo Mix: ${seedTitle}`;
-      document.getElementById('playlistModalSub').textContent = `${currentRecommendationsList.length} recommended tracks sorted by acoustic match`;
+    const createSpotifyPlaylistBtn = document.getElementById('createSpotifyPlaylistBtn');
+    const spotifyBtnText = document.getElementById('spotifyBtnText');
+    const spotifyModal = document.getElementById('spotifyModal');
+    const closeSpotifyModal = document.getElementById('closeSpotifyModal');
+    const spotifyClientIdInput = document.getElementById('spotifyClientIdInput');
+    const spotifyRedirectUriDisplay = document.getElementById('spotifyRedirectUriDisplay');
+    const authSpotifyBtn = document.getElementById('authSpotifyBtn');
+    const quickSpotifyExportBtn = document.getElementById('quickSpotifyExportBtn');
 
-      const listEl = document.getElementById('playlistTracksList');
-      listEl.innerHTML = '';
-      currentRecommendationsList.forEach((t, i) => {
-        const item = document.createElement('div');
-        item.className = 'modal-track-item';
-        const pct = (t.matchScore !== undefined && t.matchScore !== null) ? Math.round(t.matchScore * 100) : '--';
-        item.innerHTML = `
-          <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding-right:8px;">
-            <strong style="color:var(--text-muted); font-size:11px; margin-right:6px;">#${i + 1}</strong>
-            ${t.title} <span style="color:var(--text-muted);">— ${t.artist}</span>
-          </span>
-          <span style="font-weight:700; color:var(--teal); font-size:11px;">${pct}%</span>
-        `;
-        listEl.appendChild(item);
-      });
-
-      playlistModal.style.display = 'flex';
+    const redirectUri = window.location.origin + window.location.pathname;
+    if (spotifyRedirectUriDisplay) {
+      spotifyRedirectUriDisplay.textContent = redirectUri;
     }
 
-    // Modal Action: Copy Tracklist
-    document.getElementById('modalCopyBtn').addEventListener('click', () => {
-      const seedName = currentHeroTrack ? `${currentHeroTrack.title} by ${currentHeroTrack.artist}` : 'Echo Seed';
-      let text = `Echo Acoustic Playlist — Seed: ${seedName}\n\n`;
-      currentRecommendationsList.forEach((t, i) => {
-        const pct = (t.matchScore !== undefined && t.matchScore !== null) ? ` (${Math.round(t.matchScore * 100)}% match)` : '';
-        text += `${i + 1}. ${t.artist} - ${t.title}${pct}\n`;
+    createSpotifyPlaylistBtn.addEventListener('click', async () => {
+      if (!currentRecommendationsList || currentRecommendationsList.length === 0) {
+        showToast("Search or identify a song first!");
+        return;
+      }
+
+      const token = localStorage.getItem('spotify_token');
+      const seedTitle = currentHeroTrack ? currentHeroTrack.title : 'Echo Mix';
+
+      if (token) {
+        await executeCreateSpotifyPlaylist(token, seedTitle, currentRecommendationsList);
+      } else {
+        const savedClientId = spotifyClientId || localStorage.getItem('spotify_client_id');
+        if (savedClientId) {
+          initiateSpotifyAuth(savedClientId);
+        } else {
+          spotifyModal.style.display = 'flex';
+          spotifyClientIdInput.value = localStorage.getItem('spotify_client_id') || '';
+        }
+      }
+    });
+
+    closeSpotifyModal.addEventListener('click', () => {
+      spotifyModal.style.display = 'none';
+    });
+
+    spotifyModal.addEventListener('click', (e) => {
+      if (e.target === spotifyModal) spotifyModal.style.display = 'none';
+    });
+
+    authSpotifyBtn.addEventListener('click', () => {
+      const clientId = spotifyClientIdInput.value.trim();
+      if (!clientId) {
+        alert("Please enter your Spotify Client ID");
+        return;
+      }
+      localStorage.setItem('spotify_client_id', clientId);
+      spotifyModal.style.display = 'none';
+      initiateSpotifyAuth(clientId);
+    });
+
+    function initiateSpotifyAuth(clientId) {
+      const seedTitle = currentHeroTrack ? currentHeroTrack.title : 'Echo Mix';
+      localStorage.setItem('pending_spotify_playlist', JSON.stringify({
+        seed: seedTitle,
+        tracks: currentRecommendationsList.map(t => ({ title: t.title, artist: t.artist }))
+      }));
+      const scopes = 'playlist-modify-public playlist-modify-private';
+      const authUrl = `https://accounts.spotify.com/authorize?client_id=${encodeURIComponent(clientId)}&response_type=token&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scopes)}`;
+      window.location.href = authUrl;
+    }
+
+    async function executeCreateSpotifyPlaylist(token, seedTitle, tracks) {
+      createSpotifyPlaylistBtn.disabled = true;
+      spotifyBtnText.textContent = "Creating in Spotify...";
+      showToast("⏳ Creating Spotify playlist...");
+
+      try {
+        // 1. Get current Spotify user
+        const meRes = await fetch('https://api.spotify.com/v1/me', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (meRes.status === 401) {
+          localStorage.removeItem('spotify_token');
+          showToast("Session expired, reconnecting...");
+          createSpotifyPlaylistBtn.disabled = false;
+          spotifyBtnText.textContent = "Create Spotify Playlist";
+          const cid = spotifyClientId || localStorage.getItem('spotify_client_id');
+          if (cid) initiateSpotifyAuth(cid);
+          else spotifyModal.style.display = 'flex';
+          return;
+        }
+        const me = await meRes.json();
+
+        // 2. Create the playlist in the user's account
+        const playlistName = `Echo: ${seedTitle} Mix`;
+        const createRes = await fetch(`https://api.spotify.com/v1/users/${me.id}/playlists`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            name: playlistName,
+            description: `Acoustic and emotional discovery mix generated by Echo AI from "${seedTitle}". Zero collaborative filtering.`,
+            public: true
+          })
+        });
+        const playlist = await createRes.json();
+
+        // 3. Search Spotify track URIs for each track concurrently
+        const searchPromises = tracks.map(async (t) => {
+          try {
+            const cleanTitle = t.title.replace(/\(.*?\)|\.?/g, '').trim();
+            const cleanArtist = t.artist.replace(/feat\..*/i, '').trim();
+            const q = encodeURIComponent(`track:${cleanTitle} artist:${cleanArtist}`);
+            const sRes = await fetch(`https://api.spotify.com/v1/search?q=${q}&type=track&limit=1`, {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (sRes.ok) {
+              const sData = await sRes.json();
+              const items = sData.tracks ? sData.tracks.items : [];
+              if (items.length > 0) return items[0].uri;
+            }
+          } catch (e) {
+            console.warn("Spotify search failed for", t.title, e);
+          }
+          return null;
+        });
+
+        const trackUris = (await Promise.all(searchPromises)).filter(Boolean);
+
+        // 4. Add tracks to playlist
+        if (trackUris.length > 0) {
+          await fetch(`https://api.spotify.com/v1/playlists/${playlist.id}/tracks`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ uris: trackUris })
+          });
+        }
+
+        // 5. Open newly created playlist in Spotify
+        showToast("🎉 Playlist created in Spotify! Opening...");
+        if (playlist.external_urls && playlist.external_urls.spotify) {
+          window.open(playlist.external_urls.spotify, '_blank');
+        }
+      } catch (err) {
+        console.error("Create playlist error:", err);
+        showToast("Error creating playlist: " + err.message);
+      } finally {
+        createSpotifyPlaylistBtn.disabled = false;
+        spotifyBtnText.textContent = "Create Spotify Playlist";
+      }
+    }
+
+    quickSpotifyExportBtn.addEventListener('click', () => {
+      spotifyModal.style.display = 'none';
+      let text = "";
+      currentRecommendationsList.forEach(t => {
+        text += `${t.artist} - ${t.title}\n`;
       });
       navigator.clipboard.writeText(text).then(() => {
-        showToast("📋 Tracklist copied to clipboard!");
+        showToast("📋 20 tracks copied! Opening Spotify...");
+        window.open('https://open.spotify.com', '_blank');
       }).catch(() => {
-        showToast("Tracklist copied!");
+        window.open('https://open.spotify.com', '_blank');
       });
-    });
-
-    // Modal Action: Download .M3U Playlist
-    document.getElementById('modalM3uBtn').addEventListener('click', () => {
-      let m3u = "#EXTM3U\n";
-      currentRecommendationsList.forEach((t) => {
-        const url = t.previewUrl || '';
-        m3u += `#EXTINF:30,${t.artist} - ${t.title}\n${url}\n`;
-      });
-      const blob = new Blob([m3u], { type: 'audio/x-mpegurl' });
-      const a = document.createElement('a');
-      const cleanSeed = (currentHeroTrack && currentHeroTrack.title ? currentHeroTrack.title : 'Echo')
-        .replace(/[^a-zA-Z0-9]/g, '_');
-      a.href = URL.createObjectURL(blob);
-      a.download = `echo_playlist_${cleanSeed}.m3u`;
-      a.click();
-      showToast("💾 .M3U Playlist downloaded!");
-    });
-
-    // Modal Action: Open in Spotify
-    document.getElementById('modalSpotifyBtn').addEventListener('click', () => {
-      if (!currentRecommendationsList || currentRecommendationsList.length === 0) return;
-      const topArtists = [...new Set(currentRecommendationsList.slice(0, 3).map(t => t.artist))].join(' ');
-      const seedTitle = currentHeroTrack ? currentHeroTrack.title : '';
-      const url = `https://open.spotify.com/search/${encodeURIComponent(seedTitle + ' ' + topArtists)}`;
-      window.open(url, '_blank');
-      showToast("🎧 Opening in Spotify...");
-    });
-
-    // Modal Action: Play All Continuous Previews
-    document.getElementById('modalPlayAllBtn').addEventListener('click', () => {
-      playlistModal.style.display = 'none';
-      continuousQueue = currentRecommendationsList.filter(t => t.previewUrl);
-      if (continuousQueue.length === 0) {
-        showToast("No playable previews available in this mix.");
-        return;
-      }
-      continuousIndex = 0;
-      playContinuousTrack(continuousIndex);
-    });
-
-    function playContinuousTrack(idx) {
-      if (idx < 0 || idx >= continuousQueue.length) {
-        showToast("🏁 Playlist playback finished!");
-        if (currentlyPlayingBtn) {
-          currentlyPlayingBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>';
-          currentlyPlayingBtn.style.background = '';
-          currentlyPlayingBtn = null;
-        }
-        return;
-      }
-      const track = continuousQueue[idx];
-      audioPlayer.src = track.previewUrl;
-      audioPlayer.play().catch(e => console.log("Playback error:", e));
-
-      const allCards = document.querySelectorAll('.rec-card');
-      if (allCards[idx]) {
-        const btn = allCards[idx].querySelector('.rec-play-btn');
-        if (currentlyPlayingBtn && currentlyPlayingBtn !== btn) {
-          currentlyPlayingBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>';
-          currentlyPlayingBtn.style.background = '';
-        }
-        currentlyPlayingBtn = btn;
-        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>';
-        btn.style.background = 'var(--accent)';
-      }
-
-      showToast(`▶️ Playing #${idx + 1}: ${track.title}`);
-    }
-
-    // Auto-advance continuous playlist
-    audioPlayer.addEventListener('ended', () => {
-      if (continuousIndex >= 0 && continuousIndex < continuousQueue.length - 1) {
-        continuousIndex++;
-        playContinuousTrack(continuousIndex);
-      } else if (continuousIndex >= 0) {
-        continuousIndex = -1;
-        showToast("🏁 Playlist completed!");
-        if (currentlyPlayingBtn) {
-          currentlyPlayingBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>';
-          currentlyPlayingBtn.style.background = '';
-          currentlyPlayingBtn = null;
-        }
-      }
     });
   </script>
 </body>
