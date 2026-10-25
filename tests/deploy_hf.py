@@ -5,6 +5,7 @@ api = HfApi()
 repo_id = "shreyash616/echo-backend"
 
 files_to_upload = [
+    ("backend/app/config.py", "app/config.py"),
     ("backend/app/services/deezer.py", "app/services/deezer.py"),
     ("backend/app/services/recommender.py", "app/services/recommender.py"),
     ("backend/app/services/audio_recognition.py", "app/services/audio_recognition.py"),
