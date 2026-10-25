@@ -551,13 +551,43 @@ def _instrument_similarity(insts_a: list[str], insts_b: list[str]) -> float:
     return float(np.clip(0.4 + 0.6 * jaccard, 0.2, 1.0))
 
 
-def _order_similarity(order_a: list[str], order_b: list[str]) -> float:
-    if not order_a or not order_b:
-        return 0.7
-    first_match = 1.0 if order_a[0] == order_b[0] else 0.55
-    common = set(order_a) & set(order_b)
-    overlap = len(common) / max(1, len(set(order_a) | set(order_b)))
-    return 0.5 * first_match + 0.5 * overlap
+def _instrument_complementation_similarity(src_m: dict, cand_m: dict) -> float:
+    """
+    Computes Instrumental Complementation & Arrangement Synergy:
+      Measures how the instruments complement each other across frequency bands and roles:
+        - Rhythm section synergy (Drums & Bass / 808 low-end groove lock)
+        - Harmonic arrangement balance (Guitars/Strings vs Synths/Keys frequency slotting)
+        - Dynamic subdivision pacing interplay
+    """
+    try:
+        inst_a = set(src_m.get("instruments", []))
+        inst_b = set(cand_m.get("instruments", []))
+
+        # Rhythm section complementation (drums & bass lock)
+        rhythm_a = bool({"Drums & Percussion", "Bass & 808"} & inst_a)
+        rhythm_b = bool({"Drums & Percussion", "Bass & 808"} & inst_b)
+
+        # Melodic texture complementation (keys & guitars balance)
+        melodic_a = bool({"Synthesizer & Keys", "Guitar & Strings"} & inst_a)
+        melodic_b = bool({"Synthesizer & Keys", "Guitar & Strings"} & inst_b)
+
+        # Arrangement role lock
+        role_balance = 1.0 if (rhythm_a == rhythm_b and melodic_a == melodic_b) else 0.70
+
+        # Shared instrument interplay (Jaccard similarity)
+        common = inst_a & inst_b
+        union = inst_a | inst_b
+        overlap = len(common) / max(1, len(union))
+
+        # Subdivision pacing synergy (groove compatibility)
+        pace_a = str(src_m.get("instrumentPace", ""))
+        pace_b = str(cand_m.get("instrumentPace", ""))
+        pace_synergy = 1.0 if pace_a == pace_b else 0.75
+
+        score = 0.45 * role_balance + 0.35 * overlap + 0.20 * pace_synergy
+        return float(np.clip(score, 0.25, 1.0))
+    except Exception:
+        return 0.80
 
 
 def _pace_similarity(pace_a: str, pace_b: str) -> float:
@@ -799,6 +829,11 @@ def compute_match_reasons(
     if theme_s and theme_c and theme_s == theme_c and theme_s != "Chill & Atmospheric":
         reasons.append(f"Shared Emotion ({theme_s})")
 
+    # 9. Instrumental Complementation & Synergy
+    s_comp = _instrument_complementation_similarity(src_metrics, cand_metrics)
+    if s_comp >= 0.88:
+        reasons.append("Complementary Instrument Synergy")
+
     return reasons[:3]
 
 
@@ -834,17 +869,16 @@ def compute_composite_match_score(
     cand_metrics: dict,
 ) -> float:
     """
-    10-Dimensional Structural & Lyrical Human Intent Composite Matching Score
-    (Recalibrated with Principal ML & Stereophonic Experts):
+    10-Dimensional Structural & Lyrical Human Intent Composite Matching Score:
       - 512-d neural embedding similarity (timbral & acoustic manifold) [22%]
-      - Lyrical Human Intent & Emotional Theme [20%]
-      - Mood & Energy dynamic range alignment [12%]
-      - Vocal presence, formant & complementation groove [11%]
+      - Lyrical Human Intent & Emotional Theme [17%]
+      - Mood & Energy dynamic range alignment [13%]
+      - Vocal presence, formant & complementation groove [13%]
       - Harmonic Key (with Modal Interchange) & BPM compatibility [10%]
       - Instruments used overlap [9%]
       - Instrumental pace & subdivision [6%]
       - Stereophonic spatial staging & mastering dynamics [4%]
-      - Arrangement progression & order of entry [3%]
+      - Instrumental complementation & arrangement synergy [3%]
       - Era & release decade compatibility [3%]
       - Dynamic Affine Re-normalization for missing lyrics / instrumentals
       - Multiplied by Antagonistic Emotional Veto Gate Multiplier
@@ -863,10 +897,7 @@ def compute_composite_match_score(
         src_metrics.get("instruments", []),
         cand_metrics.get("instruments", []),
     )
-    s_order = _order_similarity(
-        src_metrics.get("instrumentOrder", []),
-        cand_metrics.get("instrumentOrder", []),
-    )
+    s_complement = _instrument_complementation_similarity(src_metrics, cand_metrics)
     s_pace = _pace_similarity(
         src_metrics.get("instrumentPace", ""),
         cand_metrics.get("instrumentPace", ""),
@@ -887,11 +918,20 @@ def compute_composite_match_score(
 
     has_lyrics = bool(theme_a and theme_b and theme_a != "Instrumental" and theme_b != "Instrumental")
     if has_lyrics:
-        w_neural, w_lyric, w_mood, w_vocal, w_harmonic = 0.22, 0.20, 0.12, 0.11, 0.10
-        w_inst, w_pace, w_spatial, w_order, w_era = 0.09, 0.06, 0.04, 0.03, 0.03
+        w_neural, w_lyric, w_mood, w_vocal, w_harmonic = 0.22, 0.17, 0.13, 0.13, 0.10
+        w_inst, w_pace, w_spatial, w_complement, w_era = 0.09, 0.06, 0.04, 0.03, 0.03
     else:
-        w_neural, w_lyric, w_mood, w_vocal, w_harmonic = 0.275, 0.0, 0.15, 0.1375, 0.125
-        w_inst, w_pace, w_spatial, w_order, w_era = 0.1125, 0.075, 0.05, 0.0375, 0.0375
+        norm_factor = 1.0 / 0.83
+        w_neural = 0.22 * norm_factor
+        w_lyric = 0.0
+        w_mood = 0.13 * norm_factor
+        w_vocal = 0.13 * norm_factor
+        w_harmonic = 0.10 * norm_factor
+        w_inst = 0.09 * norm_factor
+        w_pace = 0.06 * norm_factor
+        w_spatial = 0.04 * norm_factor
+        w_complement = 0.03 * norm_factor
+        w_era = 0.03 * norm_factor
 
     total = (
         w_neural * s_neural
@@ -902,7 +942,7 @@ def compute_composite_match_score(
         + w_inst * s_inst
         + w_pace * s_pace
         + w_spatial * s_spatial
-        + w_order * s_order
+        + w_complement * s_complement
         + w_era * s_era
     ) * clash_mult
     return round(float(np.clip(total, 0.05, 0.99)), 4)
@@ -928,17 +968,18 @@ def _decode_audio_stereo(audio_bytes: bytes) -> tuple[np.ndarray, dict]:
     # Step A: Attempt soundfile stereo read
     try:
         y, sr = sf.read(io.BytesIO(audio_bytes), dtype="float32", always_2d=True)
-        if sr != SR:
-            y = librosa.resample(y.T, orig_sr=sr, target_sr=SR).T
-        if y.shape[1] >= 2:
-            L, R = y[:, 0], y[:, 1]
-        else:
-            L, R = y[:, 0], y[:, 0]
+        if len(y) > 0:
+            if sr != SR:
+                y = librosa.resample(y.T, orig_sr=sr, target_sr=SR).T
+            if y.shape[1] >= 2:
+                L, R = y[:, 0], y[:, 1]
+            else:
+                L, R = y[:, 0], y[:, 0]
     except Exception:
         pass
 
     # Step B: ffmpeg stereo fallback
-    if L is None or R is None:
+    if L is None or R is None or len(L) < SR:
         try:
             proc = subprocess.run(
                 [
@@ -949,26 +990,37 @@ def _decode_audio_stereo(audio_bytes: bytes) -> tuple[np.ndarray, dict]:
                 ],
                 input=audio_bytes,
                 capture_output=True,
+                timeout=10,
             )
-            if proc.returncode == 0:
+            if proc.returncode == 0 and len(proc.stdout) > 44:
                 y, _ = sf.read(io.BytesIO(proc.stdout), dtype="float32", always_2d=True)
-                if y.shape[1] >= 2:
-                    L, R = y[:, 0], y[:, 1]
-                else:
-                    L, R = y[:, 0], y[:, 0]
+                if len(y) > 0:
+                    if y.shape[1] >= 2:
+                        L, R = y[:, 0], y[:, 1]
+                    else:
+                        L, R = y[:, 0], y[:, 0]
             else:
                 mono_proc = subprocess.run(
                     ["ffmpeg", "-i", "pipe:0", "-f", "wav", "-ar", str(SR), "-ac", "1", "-loglevel", "error", "pipe:1"],
-                    input=audio_bytes, capture_output=True,
+                    input=audio_bytes, capture_output=True, timeout=10,
                 )
-                if mono_proc.returncode != 0:
-                    raise RuntimeError("ffmpeg audio decode failed")
-                m_sig, _ = sf.read(io.BytesIO(mono_proc.stdout), dtype="float32", always_2d=False)
-                L, R = m_sig, m_sig
+                if mono_proc.returncode == 0 and len(mono_proc.stdout) > 44:
+                    m_sig, _ = sf.read(io.BytesIO(mono_proc.stdout), dtype="float32", always_2d=False)
+                    if len(m_sig) > 0:
+                        L, R = m_sig, m_sig
         except Exception as exc:
             logger.warning("Audio stereo decode fallback failed: %s", exc)
-            L = np.zeros(SR * 5, dtype=np.float32)
-            R = np.zeros(SR * 5, dtype=np.float32)
+
+    if L is None or R is None or len(L) == 0:
+        L = np.zeros(SR * 5, dtype=np.float32)
+        R = np.zeros(SR * 5, dtype=np.float32)
+
+    # Ensure audio length is at least 3 seconds so spectral transforms succeed
+    min_samples = int(SR * 3.0)
+    if len(L) < min_samples:
+        pad_len = min_samples - len(L)
+        L = np.pad(L, (0, pad_len), mode="constant")
+        R = np.pad(R, (0, pad_len), mode="constant")
 
     L = np.ascontiguousarray(L, dtype=np.float32)
     R = np.ascontiguousarray(R, dtype=np.float32)
@@ -1286,7 +1338,7 @@ class MusicRecommender:
 
                 s_spatial = _stereo_dynamics_similarity(source_metrics, meta)
                 s_inst = _instrument_similarity(source_metrics.get("instruments", []), meta.get("instruments", []))
-                s_order = _order_similarity(source_metrics.get("instrumentOrder", []), meta.get("instrumentOrder", []))
+                s_complement = _instrument_complementation_similarity(source_metrics, meta)
                 s_pace = _pace_similarity(source_metrics.get("instrumentPace", ""), meta.get("instrumentPace", ""))
                 s_vocal = _vocal_similarity(source_metrics, meta)
                 s_key = _key_compatibility(str(source_metrics.get("key", "—")), str(meta.get("key", "—")))
@@ -1297,11 +1349,20 @@ class MusicRecommender:
 
                 has_lyrics = bool(theme_a and theme_b and theme_a != "Instrumental" and theme_b != "Instrumental")
                 if has_lyrics:
-                    w_neural, w_lyric, w_mood, w_vocal, w_harmonic = 0.22, 0.20, 0.12, 0.11, 0.10
-                    w_inst, w_pace, w_spatial, w_order, w_era = 0.09, 0.06, 0.04, 0.03, 0.03
+                    w_neural, w_lyric, w_mood, w_vocal, w_harmonic = 0.22, 0.17, 0.13, 0.13, 0.10
+                    w_inst, w_pace, w_spatial, w_complement, w_era = 0.09, 0.06, 0.04, 0.03, 0.03
                 else:
-                    w_neural, w_lyric, w_mood, w_vocal, w_harmonic = 0.275, 0.0, 0.15, 0.1375, 0.125
-                    w_inst, w_pace, w_spatial, w_order, w_era = 0.1125, 0.075, 0.05, 0.0375, 0.0375
+                    norm_factor = 1.0 / 0.83
+                    w_neural = 0.22 * norm_factor
+                    w_lyric = 0.0
+                    w_mood = 0.13 * norm_factor
+                    w_vocal = 0.13 * norm_factor
+                    w_harmonic = 0.10 * norm_factor
+                    w_inst = 0.09 * norm_factor
+                    w_pace = 0.06 * norm_factor
+                    w_spatial = 0.04 * norm_factor
+                    w_complement = 0.03 * norm_factor
+                    w_era = 0.03 * norm_factor
 
                 comp_score = (
                     w_neural * cand_emb_score
@@ -1312,7 +1373,7 @@ class MusicRecommender:
                     + w_inst * s_inst
                     + w_pace * s_pace
                     + w_spatial * s_spatial
-                    + w_order * s_order
+                    + w_complement * s_complement
                     + w_era * s_era
                 ) * clash_mult
                 meta["matchScore"] = round(float(np.clip(comp_score, 0.05, 0.99)), 4)

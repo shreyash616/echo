@@ -11,6 +11,7 @@ Requires: fpcalc (Chromaprint CLI) installed and on PATH.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import subprocess
 import tempfile
@@ -18,6 +19,8 @@ import tempfile
 import httpx
 
 from app.config import settings
+
+logger = logging.getLogger("echo.acoustid")
 
 ACOUSTID_API_URL = "https://api.acoustid.org/v2/lookup"
 
@@ -27,11 +30,29 @@ class AcoustIDRecognizer:
 
     def _fingerprint(self, audio_bytes: bytes) -> tuple[str, int]:
         """
-        Write audio to a temp file, run fpcalc, return (fingerprint, duration_seconds).
-        Raises RuntimeError if fpcalc is not installed or the audio cannot be decoded.
+        Transcode audio to WAV if needed, run fpcalc, return (fingerprint, duration_seconds).
+        Raises RuntimeError/FileNotFoundError if fpcalc is not installed or audio cannot be decoded.
         """
-        with tempfile.NamedTemporaryFile(suffix=".m4a", delete=False) as f:
-            f.write(audio_bytes)
+        wav_bytes = audio_bytes
+        try:
+            ffmpeg_proc = subprocess.run(
+                [
+                    "ffmpeg", "-i", "pipe:0",
+                    "-f", "wav", "-ar", "16000", "-ac", "1",
+                    "-loglevel", "error",
+                    "pipe:1",
+                ],
+                input=audio_bytes,
+                capture_output=True,
+                timeout=10,
+            )
+            if ffmpeg_proc.returncode == 0 and len(ffmpeg_proc.stdout) > 44:
+                wav_bytes = ffmpeg_proc.stdout
+        except Exception as e:
+            logger.debug("ffmpeg pre-transcode skipped: %s", e)
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            f.write(wav_bytes)
             tmp_path = f.name
 
         try:
@@ -52,24 +73,40 @@ class AcoustIDRecognizer:
             fingerprint = lines[1]
             return fingerprint, duration
         finally:
-            os.unlink(tmp_path)
+            if os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
     async def recognize(self, audio_bytes: bytes) -> dict:
-        """Fingerprint audio bytes and query the AcoustID API. Returns raw JSON."""
-        fingerprint, duration = await asyncio.to_thread(self._fingerprint, audio_bytes)
+        """Fingerprint audio bytes and query the AcoustID API. Returns raw JSON or error dict."""
+        if not settings.acoustid_api_key:
+            logger.info("AcoustID skipped: acoustid_api_key is empty")
+            return {"status": "skipped"}
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                ACOUSTID_API_URL,
-                data={
-                    "client": settings.acoustid_api_key,
-                    "fingerprint": fingerprint,
-                    "duration": duration,
-                    "meta": "recordings",
-                },
-            )
-            resp.raise_for_status()
-            return resp.json()
+        try:
+            fingerprint, duration = await asyncio.to_thread(self._fingerprint, audio_bytes)
+        except Exception as exc:
+            logger.warning("Chromaprint fingerprinting skipped/failed: %s", exc)
+            return {"status": "error", "error": str(exc)}
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    ACOUSTID_API_URL,
+                    data={
+                        "client": settings.acoustid_api_key,
+                        "fingerprint": fingerprint,
+                        "duration": duration,
+                        "meta": "recordings",
+                    },
+                )
+                resp.raise_for_status()
+                return resp.json()
+        except Exception as exc:
+            logger.warning("AcoustID lookup failed: %s", exc)
+            return {"status": "error", "error": str(exc)}
 
     def parse_result(self, raw: dict) -> dict | None:
         """
