@@ -538,10 +538,25 @@
 
     .hero-stats {
       display: flex;
-      gap: 18px;
+      flex-wrap: wrap;
+      gap: 10px;
       font-size: 13px;
       font-family: 'JetBrains Mono', monospace;
       color: var(--text-dim);
+      margin-top: 6px;
+      margin-bottom: 8px;
+    }
+
+    .stat-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      font-size: 12px;
+      color: #e5e7eb;
     }
 
     .hero-actions {
@@ -1016,15 +1031,12 @@
           <div class="hero-tagline">Identified Acoustic Source</div>
           <h2 id="heroTitle" class="hero-title">Song Title</h2>
           <div id="heroArtist" class="hero-artist">Artist Name</div>
+          <div id="heroVibes" class="vibe-pills" style="margin-bottom: 12px;"></div>
           <!-- Structural Acoustic Breakdown -->
           <div class="structural-breakdown" id="heroStructure">
             <div class="struct-row">
               <span class="struct-label">🎸 Instruments</span>
               <div id="heroInstruments" class="struct-badges"></div>
-            </div>
-            <div class="struct-row">
-              <span class="struct-label">🎤 Vocals</span>
-              <span id="heroVocals" class="struct-val">--</span>
             </div>
             <div class="struct-row" id="heroSoundstageRow" style="display:none;">
               <span class="struct-label">🎧 Soundstage</span>
@@ -1036,8 +1048,11 @@
             </div>
           </div>
 
-          <div class="hero-stats">
-            <span id="statEra" style="display:none; color:var(--teal); font-weight:700; font-size:13px; letter-spacing:0.5px;"></span>
+          <div class="hero-stats" id="heroStats">
+            <span id="statBpm" class="stat-pill" style="display:none;"></span>
+            <span id="statKey" class="stat-pill" style="display:none;"></span>
+            <span id="statEnergy" class="stat-pill" style="display:none;"></span>
+            <span id="statEra" class="stat-pill" style="display:none; color:var(--teal); font-weight:700;"></span>
           </div>
           <div class="hero-actions">
             <button id="heroPlayBtn" class="btn btn-play">
@@ -1413,6 +1428,8 @@
     }
 
     async function sendAudioToBackend(blob) {
+      heroCard.style.display = 'none';
+      recsSection.style.display = 'none';
       showLoader("Fingerprinting & neural encoding...");
       try {
         const formData = new FormData();
@@ -1450,13 +1467,9 @@
       searchDropdown.style.display = 'none';
       searchInput.value = `${song.title} - ${song.artist}`;
 
-      // Instant optimistic rendering for immediate user feedback
-      heroCard.style.display = 'block';
-      document.getElementById('heroTitle').textContent = song.title || 'Selected Track';
-      document.getElementById('heroArtist').textContent = song.artist || 'Unknown Artist';
-      document.getElementById('heroArt').src = song.albumArtUrl || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300';
+      // Reset / hide previous hero card and recommendations to prevent flashing stale data
+      heroCard.style.display = 'none';
       recsSection.style.display = 'none';
-      heroCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
       showLoader(`Analyzing acoustic dimensions & matching candidates for "${song.title}"...`);
       try {
@@ -1490,39 +1503,87 @@
       currentHeroTrack = hero;
       const trackList = Array.isArray(recs) ? recs : (recs && recs.recommendations ? recs.recommendations : []);
 
-      // Hero Card
-      heroCard.style.display = 'block';
+      // Hero Card Header & Art
       document.getElementById('heroTitle').textContent = hero.title || 'Unknown Title';
       document.getElementById('heroArtist').textContent = hero.artist || 'Unknown Artist';
       document.getElementById('heroArt').src = hero.albumArtUrl || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=300';
+
+      // Hero Vibe Badges
+      const vibesEl = document.getElementById('heroVibes');
+      if (vibesEl) {
+        vibesEl.innerHTML = '';
+        const vList = (hero.vibes && hero.vibes.length) ? hero.vibes : [];
+        vList.forEach(v => {
+          const pill = document.createElement('span');
+          pill.className = 'vibe-pill';
+          pill.textContent = `🌊 ${v}`;
+          vibesEl.appendChild(pill);
+        });
+      }
+
+      // Hero Acoustic Stats (BPM, Key, Energy, Era)
+      const statBpm = document.getElementById('statBpm');
+      if (statBpm) {
+        if (hero.felt_bpm || hero.bpm) {
+          statBpm.textContent = hero.felt_bpm ? `🎵 ${hero.bpm} BPM (Felt ${hero.felt_bpm})` : `🎵 ${hero.bpm} BPM`;
+          statBpm.style.display = 'inline-flex';
+        } else {
+          statBpm.style.display = 'none';
+        }
+      }
+
+      const statKey = document.getElementById('statKey');
+      if (statKey) {
+        if (hero.key && hero.key !== '—') {
+          const camelotPart = hero.camelotKey ? ` (${hero.camelotKey})` : '';
+          statKey.textContent = `🎹 ${hero.key}${camelotPart}`;
+          statKey.style.display = 'inline-flex';
+        } else {
+          statKey.style.display = 'none';
+        }
+      }
+
+      const statEnergy = document.getElementById('statEnergy');
+      if (statEnergy) {
+        if (hero.energy !== undefined && hero.energy !== null) {
+          statEnergy.textContent = `⚡ ${Math.round(hero.energy * 100)}% Energy`;
+          statEnergy.style.display = 'inline-flex';
+        } else {
+          statEnergy.style.display = 'none';
+        }
+      }
+
       const eraEl = document.getElementById('statEra');
-      const decadeVal = hero.decade || (hero.year ? `${Math.floor(hero.year / 10) * 10}s` : '');
-      if (decadeVal) {
-        eraEl.textContent = `📅 (${decadeVal})`;
-        eraEl.style.display = 'inline-block';
-      } else {
-        eraEl.style.display = 'none';
+      if (eraEl) {
+        const decadeVal = hero.decade || (hero.year ? `${Math.floor(hero.year / 10) * 10}s` : '');
+        if (decadeVal) {
+          eraEl.textContent = `📅 (${decadeVal})`;
+          eraEl.style.display = 'inline-flex';
+        } else {
+          eraEl.style.display = 'none';
+        }
       }
 
       document.getElementById('heroSpotifyBtn').href = `https://open.spotify.com/search/${encodeURIComponent(hero.title + ' ' + hero.artist)}`;
       heroPlayBtn.onclick = () => togglePlay(hero.previewUrl, heroPlayBtn);
 
-      // Populate Structural Acoustic Breakdown (Instruments & Vocals)
+      // Populate Structural Acoustic Breakdown (Instruments)
       const instEl = document.getElementById('heroInstruments');
       instEl.innerHTML = '';
-      const instList = (hero.instruments && hero.instruments.length) ? hero.instruments : ['Drums & Percussion', 'Synthesizer & Keys'];
-      instList.forEach(inst => {
+      const instList = (hero.instruments && hero.instruments.length) ? hero.instruments : [];
+      if (instList.length === 0) {
         const badge = document.createElement('span');
         badge.className = 'struct-badge';
-        badge.textContent = inst;
+        badge.textContent = 'Harmonic & Rhythmic Body';
         instEl.appendChild(badge);
-      });
-
-      const vocalsEl = document.getElementById('heroVocals');
-      const vPres = hero.vocalPresence !== undefined ? Math.round(hero.vocalPresence * 100) : 75;
-      const vPat = hero.vocalPattern || 'Dynamic Melodic Phrasing';
-      const vComp = hero.vocalComplementation || 'In-The-Pocket Groove (Vocals Lock to Beat)';
-      vocalsEl.textContent = `${vPres}% Presence • ${vPat} • ${vComp}`;
+      } else {
+        instList.forEach(inst => {
+          const badge = document.createElement('span');
+          badge.className = 'struct-badge';
+          badge.textContent = inst;
+          instEl.appendChild(badge);
+        });
+      }
 
       const stageRow = document.getElementById('heroSoundstageRow');
       const stageEl = document.getElementById('heroSoundstage');
@@ -1542,7 +1603,8 @@
         intentRow.style.display = 'none';
       }
 
-      // Recs Section
+      // Display Hero Card & Recommendations with actual data
+      heroCard.style.display = 'block';
       recsSection.style.display = 'block';
       renderRecCardsOnly(trackList);
 
@@ -1573,14 +1635,13 @@
           : Math.max(70, 96 - idx * 2);
 
         const instSnippet = (track.instruments || []).slice(0, 2).join(' • ');
-        const vocalSnippet = (track.vocalPattern || '').split('(')[0].trim();
         const recDecade = track.decade || (track.year ? `${Math.floor(track.year / 10) * 10}s` : '');
         const langBadge = (track.languageAffinity !== null && track.languageAffinity !== undefined && track.languageAffinity < 0.99)
           ? `<span class="rec-tag" style="background: rgba(45,212,191,0.15); border-color: rgba(45,212,191,0.3); color: #2dd4bf;">🌐 Feel Cross-Language</span>`
           : '';
         const vibeTags = (track.vibes || []).slice(0, 1).map(v => `<span class="rec-tag" style="background: rgba(139,92,246,0.15); border-color: rgba(139,92,246,0.3); color: #c4b5fd;">🌊 ${v}</span>`).join('');
         const reasonsHtml = (track.matchReasons || [])
-          .filter(r => !r.toLowerCase().includes('bpm') && !r.toLowerCase().includes('camelot') && !r.toLowerCase().includes('key'))
+          .filter(r => !r.toLowerCase().includes('bpm') && !r.toLowerCase().includes('camelot') && !r.toLowerCase().includes('key') && !r.toLowerCase().includes('vocal'))
           .map(r => `<span class="reason-badge">✨ ${r}</span>`).join('');
 
         card.innerHTML = `
@@ -1594,7 +1655,6 @@
               ${langBadge}
               ${recDecade ? `<span class="rec-tag">📅 (${recDecade})</span>` : ''}
               ${instSnippet ? `<span class="rec-tag">🎸 ${instSnippet}</span>` : ''}
-              ${vocalSnippet ? `<span class="rec-tag">🎤 ${vocalSnippet}</span>` : ''}
             </div>
             ${reasonsHtml ? `<div class="rec-reasons">${reasonsHtml}</div>` : ''}
           </div>
