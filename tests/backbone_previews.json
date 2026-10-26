@@ -1,0 +1,65 @@
+[
+  {
+    "id": "simple_man",
+    "title": "Simple Man",
+    "artist": "Lynyrd Skynyrd",
+    "matched_title": "Simple Man",
+    "matched_artist": "Lynyrd Skynyrd",
+    "preview_url": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/43/3c/47/433c475a-c6e2-600a-c056-dfdf8003fddf/mzaf_15232046890087309380.plus.aac.p.m4a",
+    "local_path": "tests/previews/simple_man.m4a"
+  },
+  {
+    "id": "start_me_up",
+    "title": "Start Me Up",
+    "artist": "The Rolling Stones",
+    "matched_title": "Start Me Up",
+    "matched_artist": "The Rolling Stones",
+    "preview_url": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/fe/5f/97/fe5f9751-21e6-662e-601c-cbdcb9733d52/mzaf_14530716341270119799.plus.aac.p.m4a",
+    "local_path": "tests/previews/start_me_up.m4a"
+  },
+  {
+    "id": "rooster",
+    "title": "Rooster",
+    "artist": "Alice in Chains",
+    "matched_title": "Rooster",
+    "matched_artist": "Alice In Chains",
+    "preview_url": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/14/d6/76/14d6768a-feda-4317-fdb2-d15754317160/mzaf_18229668378833917078.plus.aac.p.m4a",
+    "local_path": "tests/previews/rooster.m4a"
+  },
+  {
+    "id": "levee",
+    "title": "When the Levee Breaks",
+    "artist": "Led Zeppelin",
+    "matched_title": "When the Levee Breaks",
+    "matched_artist": "Led Zeppelin",
+    "preview_url": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/36/f6/4c/36f64ce4-774b-6b20-64b4-1bbae290b301/mzaf_8305817511144618937.plus.aac.p.m4a",
+    "local_path": "tests/previews/levee.m4a"
+  },
+  {
+    "id": "townes",
+    "title": "Waiting Around to Die",
+    "artist": "Townes Van Zandt",
+    "matched_title": "Waiting Around to Die",
+    "matched_artist": "Townes Van Zandt",
+    "preview_url": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/5d/58/f2/5d58f2a4-d1b4-aff1-4d39-b3b79192aae1/mzaf_18410427169251403537.plus.aac.p.m4a",
+    "local_path": "tests/previews/townes.m4a"
+  },
+  {
+    "id": "boyfriend",
+    "title": "Boyfriend",
+    "artist": "Karan Aujla",
+    "matched_title": "Boyfriend",
+    "matched_artist": "Karan Aujla & Ikky",
+    "preview_url": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview211/v4/64/5b/2b/645b2b11-1249-3ff3-e3af-c02189159868/mzaf_17613725717610713218.plus.aac.p.m4a",
+    "local_path": "tests/previews/boyfriend.m4a"
+  },
+  {
+    "id": "peaches",
+    "title": "Peaches",
+    "artist": "Justin Bieber",
+    "matched_title": "Peaches (feat. Daniel Caesar & GIV\u0112ON)",
+    "matched_artist": "Justin Bieber",
+    "preview_url": "https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview221/v4/c9/6d/b1/c96db138-df15-d3d1-ef9d-98ef9d350960/mzaf_9411021956242812289.plus.aac.p.m4a",
+    "local_path": "tests/previews/peaches.m4a"
+  }
+]

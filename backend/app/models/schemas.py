@@ -16,10 +16,9 @@ class TrackResult(BaseModel):
     felt_bpm: int | None = None
     key: str = "—"
     camelotKey: str | None = None
+    theme: str | None = None
     modeMinorProb: float | None = None
     brightness: float | None = None
-    buildScore: float | None = None
-    loudnessRange: float | None = None
     stereoWidth: float = 0.5
     phaseCorrelation: float = 0.95
     crestFactor: float = 10.0

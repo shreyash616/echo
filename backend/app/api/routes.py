@@ -19,10 +19,10 @@ from app.services.deezer import (
     fetch_preview_audio,
     _extract_year_decade,
 )
-from app.services.lastfm import get_artist_tags
 from app.services.recommender import (
     recommender,
     to_camelot_key,
+    make_track_key,
 )
 from app.audio.features import language_from_meta
 from app.services.language_affinity import language_affinity
@@ -30,7 +30,7 @@ from app.services.language_affinity import language_affinity
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
 
-# Concurrency limiter for preview downloads + ONNX encoding
+# Concurrency limiter for preview downloads
 _ENCODE_SEM = asyncio.Semaphore(8)
 
 
@@ -56,6 +56,11 @@ def _normalize_title_for_key(title: str) -> str:
 
 
 def _to_track(meta: dict) -> TrackResult:
+    raw_k = meta.get("key")
+    if raw_k and raw_k != "—" and ":" in str(raw_k):
+        track_key = str(raw_k)
+    else:
+        track_key = make_track_key(str(meta.get("artist", "")), str(meta.get("title", "")))
     return TrackResult(
         id=str(meta.get("id", "")),
         title=str(meta.get("title", "")),
@@ -66,14 +71,13 @@ def _to_track(meta: dict) -> TrackResult:
         durationMs=int(meta.get("durationMs", 0)),
         matchScore=meta.get("matchScore"),
         vibes=list(meta.get("vibes", [])),
+        theme=str(meta["theme"]) if meta.get("theme") else None,
         bpm=int(meta.get("bpm", 0)),
         felt_bpm=int(meta["felt_bpm"]) if meta.get("felt_bpm") else None,
-        key=str(meta.get("key", "—")),
-        camelotKey=str(meta.get("camelotKey")) if meta.get("camelotKey") else to_camelot_key(str(meta.get("key", "—"))),
+        key=str(track_key or "—"),
+        camelotKey=str(meta.get("camelotKey")) if meta.get("camelotKey") else None,
         modeMinorProb=float(meta["modeMinorProb"]) if meta.get("modeMinorProb") is not None else None,
         brightness=float(meta["brightness"]) if meta.get("brightness") is not None else None,
-        buildScore=float(meta["buildScore"]) if meta.get("buildScore") is not None else None,
-        loudnessRange=float(meta["loudnessRange"]) if meta.get("loudnessRange") is not None else None,
         stereoWidth=float(meta.get("stereoWidth", 0.5)),
         phaseCorrelation=float(meta.get("phaseCorrelation", 0.95)),
         crestFactor=float(meta.get("crestFactor", 10.0)),
@@ -227,12 +231,9 @@ async def _detect_track_context(track_info: dict) -> tuple[str | None, str, list
     album_id = str(track_info.get("albumId", ""))
     artist_name = _primary_artist_name(str(track_info.get("artist", "")))
 
-    album_task = get_album_genres(album_id) if album_id and not track_info.get("genres") else asyncio.sleep(0, result=[])
-    lastfm_task = get_artist_tags(artist_name) if artist_name else asyncio.sleep(0, result=[])
-    album_genres, artist_tags = await asyncio.gather(album_task, lastfm_task)
-
-    raw_tags.extend(album_genres)
-    raw_tags.extend(artist_tags)
+    if album_id and not track_info.get("genres"):
+        album_genres = await get_album_genres(album_id)
+        raw_tags.extend(album_genres)
 
     # 1. Language detection (tags first, then non-Latin script fallback)
     lang = _detect_language_from_tags(raw_tags) or _detect_script_language(
@@ -329,7 +330,6 @@ async def _find_and_rank_similar_tracks(
     limit: int = 10,
     diversity_lambda: float = 0.70,
     cross_language_max: int = 6,
-    min_language_affinity: float = 0.50,
 ) -> list[TrackResult]:
     """
     Step 11.7 unified recommendation pipeline:
@@ -435,7 +435,6 @@ async def identify(audio: UploadFile = File(...)) -> IdentifyResponse:
             source_metrics=source_metrics,
             limit=settings.max_recommendations,
             cross_language_max=6,
-            min_language_affinity=0.50,
         )
     else:
         # Build an identified_track representation for the raw mic sound analysis
@@ -496,59 +495,136 @@ async def search(
     return SearchResponse(results=results, recommendations=[])
 
 
+_describe_futures: dict[str, asyncio.Future] = {}
+_describe_lock = asyncio.Lock()
+
+
+async def _resolve_and_describe_track(track_id: str, key: str | None = None) -> dict:
+    """
+    Resolve track metadata and descriptors. If not in catalogue or extra_records,
+    downloads preview once and shares an in-flight Future so /track and /recommendations
+    do not re-describe concurrently (Section 12.5).
+    """
+    rec = recommender.get_track_record(track_id=track_id, key=key)
+    if rec is not None:
+        return rec
+
+    dedup_key = key or str(track_id)
+    is_initiator = False
+
+    async with _describe_lock:
+        rec = recommender.get_track_record(track_id=track_id, key=key)
+        if rec is not None:
+            return rec
+
+        if dedup_key in _describe_futures:
+            future = _describe_futures[dedup_key]
+        else:
+            loop = asyncio.get_running_loop()
+            future = loop.create_future()
+            _describe_futures[dedup_key] = future
+            is_initiator = True
+
+    if not is_initiator:
+        return await future
+
+    try:
+        # 1. Fetch Deezer track info
+        track = await get_track(track_id)
+        if not track:
+            raise HTTPException(404, f"Track {track_id} not found")
+
+        # 2. If Deezer preview is missing (geo-filtered), try iTunes US search fallback
+        if not track.get("previewUrl"):
+            query = f"{track.get('artist', '')} {track.get('title', '')}".strip()
+            client = _get_http_client()
+            try:
+                it_resp = await client.get(
+                    "https://itunes.apple.com/search",
+                    params={"term": query, "entity": "song", "limit": 1, "country": "US"},
+                )
+                if it_resp.status_code == 200:
+                    it_res = it_resp.json().get("results", [])
+                    if it_res and it_res[0].get("previewUrl"):
+                        track["previewUrl"] = it_res[0]["previewUrl"]
+                        if not track.get("itunes_id"):
+                            track["itunes_id"] = str(it_res[0]["trackId"])
+            except Exception as exc:
+                logger.debug("iTunes preview resolution failed: %s", exc)
+
+        # 3. Audio description
+        _, _, desc = await _enrich_single_track_with_own_metrics(track)
+        record = {**track, **desc}
+        norm_key = key or make_track_key(str(track.get("artist", "")), str(track.get("title", "")))
+        record["key"] = norm_key
+        record["id"] = str(track.get("id", track_id))
+
+        # 4. Save to in-memory cache and persistent ml/data/extra_records.jsonl
+        recommender._extra_records[str(track_id)] = record
+        recommender._extra_records[norm_key] = record
+        if record.get("clap_vector") and recommender._side_index is not None:
+            cvec = np.array([record["clap_vector"]], dtype=np.float32)
+            recommender._side_index.add(cvec)
+
+        try:
+            recommender._extra_records_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(recommender._extra_records_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record) + "\n")
+        except Exception as exc:
+            logger.warning("Could not persist extra record: %s", exc)
+
+        future.set_result(record)
+        return record
+    except Exception as exc:
+        if not future.done():
+            future.set_exception(exc)
+        raise exc
+    finally:
+        async with _describe_lock:
+            _describe_futures.pop(dedup_key, None)
+
+
 @router.get("/track/{track_id}", response_model=TrackResult)
-async def get_track_detail(track_id: str) -> TrackResult:
+async def get_track_detail(
+    track_id: str,
+    key: str | None = Query(None, description="Canonical artist:title key"),
+) -> TrackResult:
     """
-    Fetch track details and enrich with self-generated audio analytics if preview is available.
+    Fetch track details. Checks in-catalogue and extra_records first.
+    If unknown, describes once with in-flight lock sharing (Section 12.5).
     """
-    if track_id in recommender._track_id_map:
-        return _to_track(recommender._metadata[recommender._track_id_map[track_id]])
-    track = await get_track(track_id)
-    if not track:
-        raise HTTPException(404, f"Track {track_id} not found")
-    enriched, _, _ = await _enrich_single_track_with_own_metrics(track)
-    return enriched
+    rec = recommender.get_track_record(track_id=track_id, key=key)
+    if rec is not None:
+        return _to_track(rec)
+    rec = await _resolve_and_describe_track(track_id=track_id, key=key)
+    return _to_track(rec)
 
 
 @router.get("/recommendations/{track_id}", response_model=list[TrackResult])
 async def get_recommendations(
     track_id: str,
+    key: str | None = Query(None, description="Canonical artist:title key"),
     diversity: float = Query(0.70, ge=0.0, le=1.0, description="MMR trade-off: 1.0=pure match, 0.5=high discovery"),
     cross_language_max: int = Query(6, ge=0, le=20, description="Maximum cross-language tracks allowed in final slate"),
-    min_language_affinity: float = Query(0.50, ge=0.0, le=1.0, description="Minimum language affinity score required"),
 ) -> list[TrackResult]:
     """
-    Step 11.7 Serving Path:
-    If track_id is in catalogue, recommend directly in < 300 ms.
-    If cold seed, fetch preview, describe in ~2s, and recommend.
+    Step 11.7 / 12.5 Serving Path:
+    If track_id or key is in catalogue or extra_records, recommend directly in < 300 ms.
+    If cold seed, resolve/describe once with in-flight deduplication, and recommend.
     """
     t0 = time.perf_counter()
-    logger.info("recommendations | track_id=%s diversity=%.2f", track_id, diversity)
+    logger.info("recommendations | track_id=%s key=%s diversity=%.2f", track_id, key, diversity)
 
-    # 1. Fast in-catalogue lookup
-    if track_id in recommender._track_id_map:
-        seed_meta = recommender._metadata[recommender._track_id_map[track_id]]
-        recs = await asyncio.to_thread(
-            recommender.recommend,
-            seed=seed_meta,
-            k=settings.max_recommendations,
-            cross_language_max=cross_language_max,
-            diversity=diversity,
-        )
-        logger.info("recommendations | in-catalogue hit track_id=%s  elapsed=%.3fs", track_id, time.perf_counter() - t0)
-        return [_to_track(r) for r in recs]
-
-    # 2. Cold seed path
-    track = await get_track(track_id)
-    if not track:
-        raise HTTPException(404, f"Track {track_id} not found")
+    seed_rec = recommender.get_track_record(track_id=track_id, key=key)
+    if seed_rec is None:
+        seed_rec = await _resolve_and_describe_track(track_id=track_id, key=key)
 
     recs = await asyncio.to_thread(
         recommender.recommend,
-        seed=track,
+        seed=seed_rec,
         k=settings.max_recommendations,
         cross_language_max=cross_language_max,
         diversity=diversity,
     )
-    logger.info("recommendations | cold seed track_id=%s  elapsed=%.3fs", track_id, time.perf_counter() - t0)
+    logger.info("recommendations | track_id=%s key=%s elapsed=%.3fs", track_id, key, time.perf_counter() - t0)
     return [_to_track(r) for r in recs]

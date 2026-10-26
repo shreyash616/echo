@@ -1,15 +1,13 @@
+from __future__ import annotations
+
 """
 Recommendation Quality Evaluator for 1,000-Song Benchmark Suite.
-Computes multi-dimensional acoustic, linguistic, chronological, and genre metrics.
-"""
-"""
 Legacy Evaluator for Echo Recommendations.
 
 NOTE: This legacy benchmark measures language purity, era MAE, and genre tag precision,
 NOT acoustic/emotional feel. See tests/feel_benchmark.py and VISION_ALIGNMENT.md for the
 canonical feel benchmark and acceptance test.
 """
-from __future__ import annotations
 
 import unicodedata
 from dataclasses import dataclass, field

@@ -15,7 +15,6 @@ class Settings(BaseSettings):
     spotify_redirect_uri: str = ""
 
     # ML model paths
-    onnx_model_path: str = "../ml/inference/music_encoder.onnx"
     faiss_index_path: str = "../ml/inference/music_index.faiss"
     track_metadata_path: str = "../ml/inference/track_metadata.json"
 

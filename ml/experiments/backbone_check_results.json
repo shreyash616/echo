@@ -1,0 +1,100 @@
+{
+  "results": {
+    "laion_clap_official": {
+      "name": "laion_clap_official",
+      "total_passed": 5,
+      "out_of": 7,
+      "checks": {
+        "(a) text_pairwise_max_lt_0.95": {
+          "passed": true,
+          "value": 0.8031805157661438
+        },
+        "(b) townes_top_anchor_sparse_folk": {
+          "passed": true,
+          "top_anchor": "Folk story"
+        },
+        "(c) boyfriend_top_anchor_trap_bounce": {
+          "passed": true,
+          "top_anchor": "Bright pop bounce"
+        },
+        "(d) simple_man_top_anchor_slow_heavy": {
+          "passed": false,
+          "top_anchor": "Raw and driving"
+        },
+        "(e) cos(Simple Man, Rooster) > cos(Simple Man, Peaches)": {
+          "passed": true,
+          "cos_rooster": 0.7246428728103638,
+          "cos_peaches": 0.3071557879447937
+        },
+        "(f) cos(Townes, Rooster) > cos(Townes, Boyfriend)": {
+          "passed": true,
+          "cos_rooster": 0.5888555645942688,
+          "cos_boyfriend": 0.4050518572330475
+        },
+        "(g) cos(Simple Man, Rooster) > cos(Simple Man, Start Me Up)": {
+          "passed": false,
+          "cos_rooster": 0.7246428728103638,
+          "cos_start_me_up": 0.7716702222824097
+        }
+      },
+      "audio_pairwise": {
+        "cos(Simple Man, Rooster)": 0.7246428728103638,
+        "cos(Simple Man, Levee)": 0.7785653471946716,
+        "cos(Simple Man, Start Me Up)": 0.7716702222824097,
+        "cos(Simple Man, Peaches)": 0.3071557879447937,
+        "cos(Boyfriend, Peaches)": 0.7238233089447021,
+        "cos(Townes, Rooster)": 0.5888555645942688,
+        "cos(Townes, Boyfriend)": 0.4050518572330475
+      }
+    },
+    "msclap_2023": {
+      "name": "msclap_2023",
+      "total_passed": 4,
+      "out_of": 7,
+      "checks": {
+        "(a) text_pairwise_max_lt_0.95": {
+          "passed": true,
+          "value": 0.8362948894500732
+        },
+        "(b) townes_top_anchor_sparse_folk": {
+          "passed": false,
+          "top_anchor": "Laid-back and sunny"
+        },
+        "(c) boyfriend_top_anchor_trap_bounce": {
+          "passed": true,
+          "top_anchor": "Lean-back trap bounce"
+        },
+        "(d) simple_man_top_anchor_slow_heavy": {
+          "passed": false,
+          "top_anchor": "Psychedelic and driving"
+        },
+        "(e) cos(Simple Man, Rooster) > cos(Simple Man, Peaches)": {
+          "passed": true,
+          "cos_rooster": 0.8443251252174377,
+          "cos_peaches": 0.5936955809593201
+        },
+        "(f) cos(Townes, Rooster) > cos(Townes, Boyfriend)": {
+          "passed": true,
+          "cos_rooster": 0.7522756457328796,
+          "cos_boyfriend": 0.5599666237831116
+        },
+        "(g) cos(Simple Man, Rooster) > cos(Simple Man, Start Me Up)": {
+          "passed": false,
+          "cos_rooster": 0.8443251252174377,
+          "cos_start_me_up": 0.9162156581878662
+        }
+      },
+      "audio_pairwise": {
+        "cos(Simple Man, Rooster)": 0.8443251252174377,
+        "cos(Simple Man, Levee)": 0.9069414734840393,
+        "cos(Simple Man, Start Me Up)": 0.9162156581878662,
+        "cos(Simple Man, Peaches)": 0.5936955809593201,
+        "cos(Boyfriend, Peaches)": 0.8718073964118958,
+        "cos(Townes, Rooster)": 0.7522756457328796,
+        "cos(Townes, Boyfriend)": 0.5599666237831116
+      }
+    }
+  },
+  "winner": "laion_clap_official",
+  "decision_rule": "Backbone with more passes among (a)-(g); tie goes to LAION"
+}

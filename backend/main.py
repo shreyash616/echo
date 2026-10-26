@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Starting Echo backend…")
-    recommender.load()  # Load ONNX + FAISS index once at startup
+    recommender.load()  # Load CLAP + FAISS index once at startup
     yield
     logger.info("Shutting down Echo backend.")
 
