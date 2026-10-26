@@ -7,9 +7,7 @@ on:
       - main
     paths:
       - "backend/**"
-      - "ml/inference/music_encoder.onnx"
-      - "ml/inference/music_index.faiss"
-      - "ml/inference/track_metadata.json"
+      - "ml/inference/**"
 
 jobs:
   deploy-backend:

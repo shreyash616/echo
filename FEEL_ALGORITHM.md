@@ -986,5 +986,10 @@ discussing; not before.
 
 ## Progress
 
+- 2026-10-26: Gate G4 evaluated at commit `f20d72c642203050883d42f1560a924327aa4eaa`. Step 11.8 complete. Adapter trained with InfoNCE on playlist co-occurrence (adapter.npz). Coordinate ascent weight search (search_weights.py) run over TUNE seeds (step 0.02, obj=0.0978, recall@20=0.1111, MRR=0.1111, Neg@10=0.0222) and rerank weights written to ml/inference/rerank_weights.json. Language affinity PMI computed and blended 50/50 with Base Table v2 into ml/inference/language_affinity.json. HOLDOUT split read once at Gate G4: Recall@20: 0.0000, MRR: 0.0000, Neg@10: 0.0000.
+- 2026-10-26: Gate G3 passed. Step 11.7 serving path verified. Serving latency: in-catalogue 4.24 ms (p95 budget < 300 ms), cold seed 3.15 s (budget < 4 s). Unified online recommendation path connects directly to FAISS ANN + Section 11.7 reranker with supply-scaled cross-language budget. Full test suite 12/12 green (test_features_golden 10/10 green to 1e-3, test_no_gates green, test_no_benchmark_leakage green).
+- 2026-10-26: Gate G2 verified. Steps 11.4 and 11.6 index build complete. 167/169 benchmark titles resolvable with verified 30s previews via search_track fallback. Harvester (harvest_v2.py) with 8-worker parallel DSP and CLAP feature extraction verified at 2.0s per track. build_index_v2.py generates music_index.faiss, track_metadata.json, anchors.json, track_id_map.json.
+- 2026-10-26: Gate G1 evaluated. Step 11.3 CLAP Decision Experiment complete (clap_sanity_results.json). Overall pairwise win rate: 0.4991 (269/539). Decision rule applied: win rate < 0.55. Frozen CLAP representation collapses music into [0.97, 0.995] and fails to separate feel from genre/scene without DSP. Proceeding to 11.4 catalogue harvest and 11.6 index build. Reranking will ship with DSP feel descriptors.
+- 2026-10-26: Gate G0 passed. 11.2 complete. Golden test suite 10/10 green against expected.json to 1e-3, test_no_benchmark_leakage green, test_no_gates green. Legacy octave heuristics, cultural rules, and gates deleted.
 - 2026-10-26: design written; live recall@20 at `d8cb36e` is 0/11 on the owner's 11 targets. No
   section 11 step started.

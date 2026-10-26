@@ -1,0 +1,1 @@
+Archived as part of FEEL_ALGORITHM.md section 11.2. The 11.7M ResNet CnnMusicEncoder trained with same-track-crop positives learned recording identity rather than feel. Replaced by frozen LAION CLAP (laion/larger_clap_music) backbone with learned linear adapter.

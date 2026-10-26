@@ -1,0 +1,282 @@
+[
+  {
+    "seed": {"title": "Simple Man", "artist": "Lynyrd Skynyrd", "language": "en"},
+    "split": "tune",
+    "positives": [
+      {"title": "When the Levee Breaks", "artist": "Led Zeppelin", "source": "owner"},
+      {"title": "Stairway to Heaven", "artist": "Led Zeppelin", "source": "owner"},
+      {"title": "Rooster", "artist": "Alice in Chains", "source": "owner"},
+      {"title": "Since I've Been Loving You", "artist": "Led Zeppelin", "source": "panel"},
+      {"title": "Tuesday's Gone", "artist": "Lynyrd Skynyrd", "source": "panel"},
+      {"title": "Comfortably Numb", "artist": "Pink Floyd", "source": "panel"},
+      {"title": "The Thrill Is Gone", "artist": "B.B. King", "source": "panel"},
+      {"title": "Brothers in Arms", "artist": "Dire Straits", "source": "panel"},
+      {"title": "Fade to Black", "artist": "Metallica", "source": "panel"},
+      {"title": "Black", "artist": "Pearl Jam", "source": "panel"},
+      {"title": "Creep", "artist": "Radiohead", "source": "panel"},
+      {"title": "Like a Stone", "artist": "Audioslave", "source": "panel"},
+      {"title": "Hurt", "artist": "Johnny Cash", "source": "panel"},
+      {"title": "Ohne Dich", "artist": "Rammstein", "source": "panel"},
+      {"title": "Lamento Boliviano", "artist": "Los Enanitos Verdes", "source": "panel"}
+    ],
+    "negatives": [
+      {"title": "Free Bird", "artist": "Lynyrd Skynyrd"},
+      {"title": "Sweet Home Alabama", "artist": "Lynyrd Skynyrd"},
+      {"title": "Start Me Up", "artist": "The Rolling Stones"},
+      {"title": "Sharp Dressed Man", "artist": "ZZ Top"},
+      {"title": "I Don't Want to Miss a Thing", "artist": "Aerosmith"},
+      {"title": "Enter Sandman", "artist": "Metallica"},
+      {"title": "Knockin' on Heaven's Door", "artist": "Guns N' Roses"},
+      {"title": "Let It Be", "artist": "The Beatles"},
+      {"title": "Every Breath You Take", "artist": "The Police"},
+      {"title": "Don't Stop Believin'", "artist": "Journey"},
+      {"title": "Smoke on the Water", "artist": "Deep Purple"}
+    ],
+    "near_misses": []
+  },
+  {
+    "seed": {"title": "Waiting Around to Die", "artist": "Townes Van Zandt", "language": "en"},
+    "split": "tune",
+    "positives": [
+      {"title": "Black", "artist": "Danger Mouse", "source": "owner"},
+      {"title": "No Surprises", "artist": "Radiohead", "source": "owner"},
+      {"title": "Me Gustas Tu", "artist": "Manu Chao", "source": "owner"},
+      {"title": "Rising Sun Blues", "artist": "Doc Watson", "source": "panel"},
+      {"title": "Los Ejes de Mi Carreta", "artist": "Atahualpa Yupanqui", "source": "panel"},
+      {"title": "Tous les garcons et les filles", "artist": "Francoise Hardy", "source": "panel"},
+      {"title": "Clandestino", "artist": "Manu Chao", "source": "panel"},
+      {"title": "Tum Itna Jo Muskura Rahe Ho", "artist": "Jagjit Singh", "source": "panel"},
+      {"title": "Con Toda Palabra", "artist": "Lhasa de Sela", "source": "panel"},
+      {"title": "Sodade", "artist": "Cesaria Evora", "source": "panel"},
+      {"title": "Something on Your Mind", "artist": "Karen Dalton", "source": "panel"},
+      {"title": "Place to Be", "artist": "Nick Drake", "source": "panel"},
+      {"title": "Between the Bars", "artist": "Elliott Smith", "source": "panel"},
+      {"title": "The Stranger Song", "artist": "Leonard Cohen", "source": "panel"},
+      {"title": "Too Many Birds", "artist": "Bill Callahan", "source": "panel"}
+    ],
+    "near_misses": [
+      {"title": "Shake the Frost", "artist": "Tyler Childers", "note": "texture right and stance wrong"}
+    ],
+    "negatives": [
+      {"title": "Don't Take the Girl", "artist": "Tim McGraw"},
+      {"title": "Need You Now", "artist": "Lady A"},
+      {"title": "I Don't Want to Miss a Thing", "artist": "Aerosmith"},
+      {"title": "Someone Like You", "artist": "Adele"},
+      {"title": "Photograph", "artist": "Ed Sheeran"},
+      {"title": "Let Her Go", "artist": "Passenger"},
+      {"title": "Tum Hi Ho", "artist": "Arijit Singh"}
+    ]
+  },
+  {
+    "seed": {"title": "Bang Data", "artist": "Bang Data", "language": "es"},
+    "split": "tune",
+    "positives": [
+      {"title": "Tidal Wave", "artist": "Thee Oh Sees", "source": "owner"},
+      {"title": "The Witch", "artist": "The Sonics", "source": "panel"},
+      {"title": "Demolicion", "artist": "Los Saicos", "source": "panel"},
+      {"title": "Les Cactus", "artist": "Jacques Dutronc", "source": "panel"},
+      {"title": "A Minha Menina", "artist": "Os Mutantes", "source": "panel"},
+      {"title": "Jet Generation", "artist": "Guitar Wolf", "source": "panel"},
+      {"title": "Smokin' Billy", "artist": "Thee Michelle Gun Elephant", "source": "panel"},
+      {"title": "Mr. P. Mosh", "artist": "Plastilina Mosh", "source": "panel"},
+      {"title": "Mas", "artist": "Kinky", "source": "panel"},
+      {"title": "Fuego", "artist": "Bomba Estereo", "source": "panel"},
+      {"title": "Kumbia Dark", "artist": "Kumbia Queers", "source": "panel"},
+      {"title": "Girlfriend", "artist": "Ty Segall", "source": "panel"},
+      {"title": "Afrique Victime", "artist": "Mdou Moctar", "source": "panel"}
+    ],
+    "negatives": [
+      {"title": "All the Small Things", "artist": "blink-182"},
+      {"title": "American Idiot", "artist": "Green Day"},
+      {"title": "The Pretender", "artist": "Foo Fighters"},
+      {"title": "Enter Sandman", "artist": "Metallica"},
+      {"title": "Sex on Fire", "artist": "Kings of Leon"},
+      {"title": "Believer", "artist": "Imagine Dragons"},
+      {"title": "Thunderstruck", "artist": "AC/DC"},
+      {"title": "Figure It Out", "artist": "Royal Blood"},
+      {"title": "How You Remind Me", "artist": "Nickelback"},
+      {"title": "Centuries", "artist": "Fall Out Boy"},
+      {"title": "Tom Sawyer", "artist": "Rush"}
+    ],
+    "near_misses": []
+  },
+  {
+    "seed": {"title": "Boyfriend", "artist": "Karan Aujla", "language": "pa"},
+    "split": "tune",
+    "positives": [
+      {"title": "Antidote", "artist": "Karan Aujla", "source": "owner"},
+      {"title": "For A Reason", "artist": "Karan Aujla", "source": "owner"},
+      {"title": "Baller", "artist": "Shubh", "source": "owner"},
+      {"title": "Roll With Me", "artist": "Sukha", "source": "owner"},
+      {"title": "Maan Meri Jaan", "artist": "King", "source": "panel"},
+      {"title": "Mood", "artist": "24kGoldn", "source": "panel"},
+      {"title": "Peaches", "artist": "Justin Bieber", "source": "panel"},
+      {"title": "Sunflower", "artist": "Post Malone", "source": "panel"},
+      {"title": "First Class", "artist": "Jack Harlow", "source": "panel"},
+      {"title": "Hawai", "artist": "Maluma", "source": "panel"},
+      {"title": "All I Wanna Do", "artist": "Jay Park", "source": "panel"},
+      {"title": "Last Last", "artist": "Burna Boy", "source": "panel"},
+      {"title": "Location", "artist": "Khalid", "source": "panel"},
+      {"title": "Taste", "artist": "Tyga", "source": "panel"},
+      {"title": "Yonaguni", "artist": "Bad Bunny", "source": "panel"},
+      {"title": "Fall", "artist": "Davido", "source": "panel"},
+      {"title": "Softly", "artist": "Karan Aujla", "source": "panel"},
+      {"title": "Admirin' You", "artist": "Karan Aujla", "source": "panel"},
+      {"title": "Wavy", "artist": "Karan Aujla", "source": "panel"},
+      {"title": "Lover", "artist": "Diljit Dosanjh", "source": "panel"},
+      {"title": "Tere Te", "artist": "AP Dhillon", "source": "panel"},
+      {"title": "Still Rollin", "artist": "Shubh", "source": "panel"},
+      {"title": "Summer High", "artist": "AP Dhillon", "source": "panel"},
+      {"title": "Dil Dardeh", "artist": "Sukha", "source": "panel"}
+    ],
+    "negatives": [
+      {"title": "Tauba Tauba", "artist": "Karan Aujla"},
+      {"title": "Chitta Kurta", "artist": "Karan Aujla"},
+      {"title": "Bachke Bachke", "artist": "Karan Aujla"},
+      {"title": "Elevated", "artist": "Shubh"},
+      {"title": "Excuses", "artist": "AP Dhillon"},
+      {"title": "295", "artist": "Sidhu Moose Wala"},
+      {"title": "G.O.A.T.", "artist": "Diljit Dosanjh"},
+      {"title": "Millionaire", "artist": "Yo Yo Honey Singh"},
+      {"title": "Gur Nalo Ishq Mitha", "artist": "Yo Yo Honey Singh"}
+    ],
+    "near_misses": [],
+    "scene_test": {
+      "inside_negatives": [
+        {"title": "Tauba Tauba", "artist": "Karan Aujla"},
+        {"title": "Chitta Kurta", "artist": "Karan Aujla"},
+        {"title": "Bachke Bachke", "artist": "Karan Aujla"},
+        {"title": "Elevated", "artist": "Shubh"},
+        {"title": "Excuses", "artist": "AP Dhillon"},
+        {"title": "295", "artist": "Sidhu Moose Wala"},
+        {"title": "G.O.A.T.", "artist": "Diljit Dosanjh"},
+        {"title": "Millionaire", "artist": "Yo Yo Honey Singh"},
+        {"title": "Gur Nalo Ishq Mitha", "artist": "Yo Yo Honey Singh"}
+      ],
+      "outside_positives": [
+        {"title": "Maan Meri Jaan", "artist": "King"},
+        {"title": "Mood", "artist": "24kGoldn"},
+        {"title": "Peaches", "artist": "Justin Bieber"},
+        {"title": "Sunflower", "artist": "Post Malone"},
+        {"title": "First Class", "artist": "Jack Harlow"},
+        {"title": "Hawai", "artist": "Maluma"},
+        {"title": "All I Wanna Do", "artist": "Jay Park"},
+        {"title": "Last Last", "artist": "Burna Boy"},
+        {"title": "Location", "artist": "Khalid"},
+        {"title": "Taste", "artist": "Tyga"},
+        {"title": "Yonaguni", "artist": "Bad Bunny"},
+        {"title": "Fall", "artist": "Davido"}
+      ]
+    }
+  },
+  {
+    "seed": {"title": "Hurt", "artist": "Johnny Cash", "language": "en"},
+    "split": "tune",
+    "positives": [
+      {"title": "Mad World", "artist": "Gary Jules", "source": "panel"},
+      {"title": "The Night We Met", "artist": "Lord Huron", "source": "panel"},
+      {"title": "Ne Me Quitte Pas", "artist": "Jacques Brel", "source": "panel"}
+    ],
+    "negatives": [],
+    "near_misses": []
+  },
+  {
+    "seed": {"title": "Tum Hi Ho", "artist": "Arijit Singh", "language": "hi"},
+    "split": "tune",
+    "positives": [
+      {"title": "All of Me", "artist": "John Legend", "source": "panel"},
+      {"title": "Channa Mereya", "artist": "Arijit Singh", "source": "panel"},
+      {"title": "Je Te Laisserai Des Mots", "artist": "Patrick Watson", "source": "panel"}
+    ],
+    "negatives": [],
+    "near_misses": []
+  },
+  {
+    "seed": {"title": "Mask Off", "artist": "Future", "language": "en"},
+    "split": "tune",
+    "positives": [
+      {"title": "XO Tour Llif3", "artist": "Lil Uzi Vert", "source": "panel"},
+      {"title": "Goosebumps", "artist": "Travis Scott", "source": "panel"},
+      {"title": "Brown Munde", "artist": "AP Dhillon", "source": "panel"}
+    ],
+    "negatives": [],
+    "near_misses": []
+  },
+  {
+    "seed": {"title": "Get Lucky", "artist": "Daft Punk", "language": "en"},
+    "split": "tune",
+    "positives": [
+      {"title": "Treasure", "artist": "Bruno Mars", "source": "panel"},
+      {"title": "September", "artist": "Earth, Wind & Fire", "source": "panel"},
+      {"title": "Plastic Love", "artist": "Mariya Takeuchi", "source": "panel"}
+    ],
+    "negatives": [],
+    "near_misses": []
+  },
+  {
+    "seed": {"title": "Tomboy", "artist": "HYUKOH", "language": "ko"},
+    "split": "tune",
+    "positives": [
+      {"title": "Chamber of Reflection", "artist": "Mac DeMarco", "source": "panel"},
+      {"title": "Ode to Viceroy", "artist": "Mac DeMarco", "source": "panel"}
+    ],
+    "negatives": [],
+    "near_misses": []
+  },
+  {
+    "seed": {"title": "Seven Nation Army", "artist": "The White Stripes", "language": "en"},
+    "split": "holdout",
+    "positives": [
+      {"title": "Song 2", "artist": "Blur", "source": "panel"},
+      {"title": "Are You Gonna Be My Girl", "artist": "Jet", "source": "panel"}
+    ],
+    "negatives": [
+      {"title": "Pumped Up Kicks", "artist": "Foster the People"}
+    ],
+    "near_misses": []
+  },
+  {
+    "seed": {"title": "Teardrop", "artist": "Massive Attack", "language": "en"},
+    "split": "holdout",
+    "positives": [
+      {"title": "Glory Box", "artist": "Portishead", "source": "panel"},
+      {"title": "Breathe Me", "artist": "Sia", "source": "panel"},
+      {"title": "Lovely", "artist": "Billie Eilish", "source": "panel"}
+    ],
+    "negatives": [],
+    "near_misses": []
+  },
+  {
+    "seed": {"title": "Skinny Love", "artist": "Bon Iver", "language": "en"},
+    "split": "holdout",
+    "positives": [
+      {"title": "Flightless Bird, American Mouth", "artist": "Iron & Wine", "source": "panel"},
+      {"title": "Youth", "artist": "Daughter", "source": "panel"},
+      {"title": "Poison Tree", "artist": "Grouper", "source": "panel"}
+    ],
+    "negatives": [],
+    "near_misses": []
+  },
+  {
+    "seed": {"title": "Nothing Else Matters", "artist": "Metallica", "language": "en"},
+    "split": "holdout",
+    "positives": [
+      {"title": "November Rain", "artist": "Guns N' Roses", "source": "panel"},
+      {"title": "Wind of Change", "artist": "Scorpions", "source": "panel"},
+      {"title": "Still Loving You", "artist": "Scorpions", "source": "panel"}
+    ],
+    "negatives": [],
+    "near_misses": []
+  },
+  {
+    "seed": {"title": "Video Games", "artist": "Lana Del Rey", "language": "en"},
+    "split": "holdout",
+    "positives": [
+      {"title": "Apocalypse", "artist": "Cigarettes After Sex", "source": "panel"},
+      {"title": "Fade Into You", "artist": "Mazzy Star", "source": "panel"},
+      {"title": "Space Song", "artist": "Beach House", "source": "panel"}
+    ],
+    "negatives": [],
+    "near_misses": []
+  }
+]

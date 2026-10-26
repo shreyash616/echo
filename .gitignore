@@ -21,6 +21,8 @@
 /ml/data/deezer_spectrograms
 /ml/data/deezer_catalog.json
 /ml/data/embeddings.npy
+/ml/data/previews
+/ml/experiments/cache
 /ml/checkpoints
 
 # ml/inference artifacts are tracked via Git LFS — do not ignore them

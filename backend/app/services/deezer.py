@@ -48,7 +48,7 @@ def _extract_year_decade(date_str: str | None) -> tuple[int | None, str | None]:
     return None, None
 
 
-def _normalize(item: dict, genre_override: str = "") -> dict:
+def _normalize(item: dict) -> dict:
     """Map a Deezer track object to the internal track dict format."""
     artist = item.get("artist", {})
     album = item.get("album", {})
@@ -65,12 +65,12 @@ def _normalize(item: dict, genre_override: str = "") -> dict:
         "albumArtUrl": art,
         "previewUrl":  item.get("preview") or None,
         "durationMs":  item.get("duration", 0) * 1000,
-        "genre":       genre_override,
+        "genre":       "",
         "bpm":         0,
         "key":         "—",
         "energy":      0.5,
         "valence":     0.5,
-        "vibes":       [genre_override.lower()] if genre_override else [],
+        "vibes":       [],
         "year":        year,
         "decade":      decade,
         "rank":        int(item.get("rank", 0)),
@@ -431,7 +431,7 @@ async def get_artist_top_tracks(artist_id: str, limit: int = 5, genre_hint: str 
         )
         resp.raise_for_status()
         data = resp.json().get("data", [])
-        tracks = [_normalize(t, genre_override=genre_hint) for t in data if t.get("preview")]
+        tracks = [_normalize(t) for t in data if t.get("preview")]
         _cache[cache_key] = tracks
         return tracks
     except Exception as exc:

@@ -17,7 +17,6 @@ COPY . .
 
 # ML artifact paths — populated at startup by startup.sh
 RUN mkdir -p /app/ml/inference
-ENV ONNX_MODEL_PATH=/app/ml/inference/music_encoder.onnx
 ENV FAISS_INDEX_PATH=/app/ml/inference/music_index.faiss
 ENV TRACK_METADATA_PATH=/app/ml/inference/track_metadata.json
 

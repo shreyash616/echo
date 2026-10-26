@@ -37,6 +37,20 @@ class TrackResult(BaseModel):
     year: int | None = None
     decade: str | None = None
     matchReasons: list[str] = []
+    # 11.5 Feel descriptors
+    darkness: float | None = None
+    grit: float | None = None
+    pulse_rate: float | None = None
+    kick_class: str | None = None
+    restraint_bucket: str | None = None
+    intimacy: float | None = None
+    mode_polarity: float | None = None
+    mode_undefined: bool | None = None
+    changes_per_bar: float | None = None
+    loop_bars: int | None = None
+    riff_flag: bool | None = None
+    language: str | None = None
+    language_conf: float | None = None
 
 
 class IdentifyResponse(BaseModel):

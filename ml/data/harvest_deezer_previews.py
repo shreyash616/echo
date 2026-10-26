@@ -60,12 +60,18 @@ def _get_ffmpeg_cmd() -> str:
     return "ffmpeg"
 
 # Curated multi-genre & multi-language seed queries to build a diverse mainstream catalog (Phase 4.2)
-DEFAULT_SEED_QUERIES: list[tuple[str, str]] = [
-    # Benchmark Target & Canonical Feel Artist Seeds
-    ("Led Zeppelin", "rock"), ("Alice in Chains", "grunge"), ("Radiohead", "alternative"),
-    ("Manu Chao", "latin"), ("Thee Oh Sees", "garage"), ("Shubh", "punjabi"),
-    ("Sukha", "punjabi"), ("Danger Mouse", "alternative"), ("Townes Van Zandt", "folk"),
-    ("Bang Data", "latin"), ("Karan Aujla", "punjabi"), ("Lynyrd Skynyrd", "rock"),
+def _load_artist_seeds() -> list[tuple[str, str]]:
+    p = Path(__file__).parent / "harvest_seed_artists.json"
+    if p.exists():
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                artists = json.load(f)
+            return [(a, "seed") for a in artists]
+        except Exception:
+            pass
+    return []
+
+DEFAULT_SEED_QUERIES: list[tuple[str, str]] = _load_artist_seeds() + [
     # Rock / Grunge / Blues-Rock / Southern Rock
     ("classic rock", "rock"), ("southern rock", "rock"), ("blues rock", "rock"),
     ("grunge", "grunge"), ("garage rock", "rock"), ("psych rock", "psych"),
@@ -88,9 +94,9 @@ DEFAULT_SEED_QUERIES: list[tuple[str, str]] = [
     ("reggaeton hits", "latin"), ("afrobeats", "afrobeats"), ("french pop", "french"),
     # South Asian (Hindi / Punjabi / Tamil / Telugu / Ghazal / Sufi)
     ("bollywood hits", "hindi"), ("bollywood 70s", "hindi"), ("hindi indie", "hindi"),
-    ("ghazal", "hindi"), ("sufi", "hindi"), ("arijit singh", "hindi"),
-    ("pritam bollywood", "hindi"), ("punjabi hits", "punjabi"), ("diljit dosanjh", "punjabi"),
-    ("ap dhillon", "punjabi"), ("tamil hits", "tamil"), ("tamil 90s", "tamil"),
+    ("ghazal", "hindi"), ("sufi", "hindi"), ("hindi romantic", "hindi"),
+    ("pritam bollywood", "hindi"), ("punjabi hits", "punjabi"), ("punjabi pop", "punjabi"),
+    ("punjabi trap", "punjabi"), ("tamil hits", "tamil"), ("tamil 90s", "tamil"),
     ("anirudh ravichander", "tamil"), ("telugu hits", "telugu"),
     # East Asian
     ("k-pop hits", "k-pop"), ("k-indie", "k-pop"), ("j-pop anime", "j-pop"),

@@ -1,0 +1,14 @@
+{
+  "clap_cosine": 0.0,
+  "s_tempo": 0.2,
+  "s_pulse": 0.07,
+  "s_groove": 0.15,
+  "s_dark": 0.13,
+  "s_grit": 0.13,
+  "s_vocal": 0.12,
+  "s_intimacy": 0.07,
+  "s_restraint": 0.04,
+  "s_harm": 0.03,
+  "s_mode": 0.03,
+  "s_language": 0.03
+}

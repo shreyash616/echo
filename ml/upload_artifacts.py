@@ -9,16 +9,17 @@ import os
 from pathlib import Path
 from huggingface_hub import HfApi
 
-token = os.environ.get("HF_TOKEN")
-if not token:
-    raise SystemExit("HF_TOKEN environment variable is not set.")
+token = os.environ.get("HF_TOKEN") or None
 
 REPO_ID = "shreyash616/echo-ml-artifacts"
 ARTIFACTS = [
-    "ml/inference/music_encoder.onnx",
     "ml/inference/music_index.faiss",
     "ml/inference/track_metadata.json",
-    "ml/inference/archetypes.json",
+    "ml/inference/track_id_map.json",
+    "ml/inference/anchors.json",
+    "ml/inference/rerank_weights.json",
+    "ml/inference/language_affinity.json",
+    "ml/inference/adapter.npz",
 ]
 
 api = HfApi(token=token)
