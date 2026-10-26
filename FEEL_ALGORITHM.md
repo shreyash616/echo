@@ -1256,6 +1256,8 @@ Run these in a browser against the Space after each gate; if any fails, the gate
 
 ## Progress
 
+- 2026-10-27: Step R2 completed. Dead code deleted: `music_encoder.onnx`, `archetypes.json`, `ml/inference/build_index.py`. Removed `onnx_model_path`, `min_language_affinity`, `buildScore`, `loudnessRange`, and Last.fm calls from backend routes and schemas. Canonical key indexing (`artist:title`) implemented across recommender and routes. In-flight cold describe deduplication implemented to share futures between concurrent `/track` and `/recommendations` calls. `tests/test_live_api.py` timing benchmark passed: in-catalogue lookup p95 = 24.62 ms (< 300 ms target) over 20 calls; `/api/track/{id}` returned in 3.08 ms without re-describing.
+- 2026-10-27: Step R1 completed. Backbone check evaluated via `ml/experiments/backbone_check.py` on 7 previews: official LAION CLAP passed 5 of 7 checks (tie/win goes to LAION per 12.1); msclap passed 4 of 7; HF port was degenerate. Replaced transformers CLAP with official LAION CLAP in `backend/app/services/recommender.py`. Anchors regenerated into `ml/inference/anchors.json` (pairwise max cosine dropped from 0.9998 to 0.8032; spread [-0.043, 0.803]). Mandatory load-time assertions added and verified. `theme_prompts.json` created with 10 canonical themes. Section 12.6 weights committed.
 - 2026-10-27: first section 11 attempt measured (section 12.0). Live recall@20 on the owner's 11
   targets: 0/11. Catalogue: 20 rows. Live overlap across four seeds: 16 to 19 of 20. Backbone
   check (local, 7 previews, checks (a) to (g)): LAION official loader + music checkpoint 7/7 and
