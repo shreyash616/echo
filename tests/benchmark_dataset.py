@@ -2,6 +2,10 @@
 1,000-Song Benchmark Test Dataset for Music Recommendation Quality.
 Stratified across 10 languages, 7 eras, and 12 canonical genres.
 Each entry specifies strict expected criteria and prohibited contamination sets.
+
+NOTE: This legacy benchmark measures language purity, era MAE, and genre tag precision,
+NOT acoustic/emotional feel. See tests/feel_benchmark.py and VISION_ALIGNMENT.md for the
+canonical feel benchmark and acceptance test.
 """
 from __future__ import annotations
 

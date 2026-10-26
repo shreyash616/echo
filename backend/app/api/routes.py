@@ -29,6 +29,7 @@ from app.services.recommender import (
     compute_match_reasons,
 )
 from app.services.lyrics import fetch_lyrics, classify_lyrical_intent
+from app.services.language_affinity import language_affinity
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
@@ -63,6 +64,27 @@ _CULTURAL_ARTIST_RULES: list[tuple[set[str], str, str, list[str]]] = [
 ]
 
 
+import httpx
+
+_http_client: httpx.AsyncClient | None = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.AsyncClient(timeout=6.0, limits=httpx.Limits(max_keepalive_connections=10, max_connections=20))
+    return _http_client
+
+
+def _normalize_title_for_key(title: str) -> str:
+    """Normalize track title for deduplication (strip parens, feat, brackets, collapse space)."""
+    t = re.sub(r"\(.*?\)", "", title)
+    t = re.sub(r"\[.*?\]", "", t)
+    t = re.split(r"\s+-\s+|\s+feat\.|\s+ft\.|\s+with\s+", t, flags=re.IGNORECASE)[0]
+    t = re.sub(r"\s+", " ", t).strip().lower()
+    return t
+
+
 def _to_track(meta: dict) -> TrackResult:
     return TrackResult(
         id=str(meta.get("id", "")),
@@ -75,8 +97,13 @@ def _to_track(meta: dict) -> TrackResult:
         matchScore=meta.get("matchScore"),
         vibes=list(meta.get("vibes", [])),
         bpm=int(meta.get("bpm", 0)),
+        felt_bpm=int(meta["felt_bpm"]) if meta.get("felt_bpm") else None,
         key=str(meta.get("key", "—")),
         camelotKey=str(meta.get("camelotKey")) if meta.get("camelotKey") else to_camelot_key(str(meta.get("key", "—"))),
+        modeMinorProb=float(meta["modeMinorProb"]) if meta.get("modeMinorProb") is not None else None,
+        brightness=float(meta["brightness"]) if meta.get("brightness") is not None else None,
+        buildScore=float(meta["buildScore"]) if meta.get("buildScore") is not None else None,
+        loudnessRange=float(meta["loudnessRange"]) if meta.get("loudnessRange") is not None else None,
         stereoWidth=float(meta.get("stereoWidth", 0.5)),
         phaseCorrelation=float(meta.get("phaseCorrelation", 0.95)),
         crestFactor=float(meta.get("crestFactor", 10.0)),
@@ -84,6 +111,7 @@ def _to_track(meta: dict) -> TrackResult:
         lyricalIntent=str(meta.get("lyricalIntent") or meta.get("emotionalTheme", "Chill & Atmospheric")),
         energy=float(meta.get("energy", 0.5)),
         valence=float(meta.get("valence", 0.5)),
+        languageAffinity=float(meta["languageAffinity"]) if meta.get("languageAffinity") is not None else None,
         instruments=list(meta.get("instruments", [])),
         instrumentOrder=list(meta.get("instrumentOrder", [])),
         instrumentPace=str(meta.get("instrumentPace", "Steady Mid-Tempo")),
@@ -249,14 +277,13 @@ async def _detect_track_context(track_info: dict) -> tuple[str | None, str, list
     )
     if needs_itunes_genre or not track_info.get("year") or is_classic_artist_post2000:
         try:
-            import httpx
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                query = f"{artist_name} {track_info.get('title', '')}".strip()
-                it_resp = await client.get(
-                    "https://itunes.apple.com/search",
-                    params={"term": query, "entity": "song", "limit": 1},
-                )
-                if it_resp.status_code == 200:
+            client = _get_http_client()
+            query = f"{artist_name} {track_info.get('title', '')}".strip()
+            it_resp = await client.get(
+                "https://itunes.apple.com/search",
+                params={"term": query, "entity": "song", "limit": 1},
+            )
+            if it_resp.status_code == 200:
                     it_items = it_resp.json().get("results", [])
                     if it_items:
                         it_genre = str(it_items[0].get("primaryGenreName", "")).lower()
@@ -327,8 +354,13 @@ async def _enrich_single_track_with_own_metrics(
     enriched = {
         **track_meta,
         "bpm":                  metrics["bpm"],
+        "felt_bpm":             metrics.get("felt_bpm"),
         "key":                  metrics["key"],
         "camelotKey":           to_camelot_key(str(metrics.get("key", "—"))),
+        "modeMinorProb":        metrics.get("modeMinorProb"),
+        "brightness":           metrics.get("brightness"),
+        "buildScore":           metrics.get("buildScore"),
+        "loudnessRange":        metrics.get("loudnessRange"),
         "energy":               metrics["energy"],
         "valence":              metrics["valence"],
         "vibes":                metrics["vibes"],
@@ -350,40 +382,52 @@ def _apply_mmr(
     limit: int = 10,
     diversity_lambda: float = 0.72,
     max_per_artist: int = 2,
+    max_cross_language: int = 6,
+    min_affinity: float = 0.50,
 ) -> list[TrackResult]:
     """
-    Maximal Marginal Relevance (MMR) Reranker with Artist Frequency Capping:
-      Selects an ordered slate balancing acoustic query relevance against
-      pairwise candidate similarity to prevent catalog redundancy:
-        MMR(c) = lambda * Rel(q, c) - (1 - lambda) * max_{s in S} Sim(c, s)
-      - lambda = 0.72: SOTA MIR balance between fidelity and catalog discovery
-      - max_per_artist = 2: Prevents any single artist from dominating recommendations
+    Maximal Marginal Relevance (MMR) Reranker with Artist Frequency Capping
+    and Language Affinity Budgeting (VISION_ALIGNMENT.md Task 3.3).
     """
     if not candidates:
         return []
 
-    # If lambda is pure relevance (>= 0.98), greedy rank with artist cap
+    # Drop candidates strictly below min_affinity threshold
+    filtered_cands = [
+        c for c in candidates
+        if c[0].languageAffinity is None or c[0].languageAffinity >= min_affinity
+    ]
+    if not filtered_cands:
+        filtered_cands = candidates
+
+    # If lambda is pure relevance (>= 0.98), greedy rank with artist cap & cross-language budget
     if diversity_lambda >= 0.98:
         selected_pure: list[TrackResult] = []
         artist_counts: dict[str, int] = {}
-        for track, _, _ in sorted(candidates, key=lambda x: x[1], reverse=True):
+        cross_lang_cnt = 0
+        for track, _, _ in sorted(filtered_cands, key=lambda x: x[1], reverse=True):
             art = _primary_artist_name(track.artist).lower()
+            is_cross = bool(track.languageAffinity is not None and track.languageAffinity < 1.0)
             if artist_counts.get(art, 0) < max_per_artist:
-                selected_pure.append(track)
-                artist_counts[art] = artist_counts.get(art, 0) + 1
-                if len(selected_pure) >= limit:
-                    break
+                if not (is_cross and cross_lang_cnt >= max_cross_language):
+                    selected_pure.append(track)
+                    artist_counts[art] = artist_counts.get(art, 0) + 1
+                    if is_cross:
+                        cross_lang_cnt += 1
+                    if len(selected_pure) >= limit:
+                        break
         if len(selected_pure) < limit:
-            for track, _, _ in sorted(candidates, key=lambda x: x[1], reverse=True):
+            for track, _, _ in sorted(filtered_cands, key=lambda x: x[1], reverse=True):
                 if track not in selected_pure:
                     selected_pure.append(track)
                     if len(selected_pure) >= limit:
                         break
         return selected_pure
 
-    remaining = list(candidates)
+    remaining = list(filtered_cands)
     selected: list[tuple[TrackResult, float, np.ndarray | None]] = []
     artist_counts: dict[str, int] = {}
+    cross_lang_count = 0
 
     # 1. Start with the highest-scoring candidate as anchor
     first_pick = max(remaining, key=lambda x: x[1])
@@ -391,8 +435,10 @@ def _apply_mmr(
     remaining.remove(first_pick)
     first_art = _primary_artist_name(first_pick[0].artist).lower()
     artist_counts[first_art] = artist_counts.get(first_art, 0) + 1
+    if first_pick[0].languageAffinity is not None and first_pick[0].languageAffinity < 1.0:
+        cross_lang_count += 1
 
-    # 2. Greedy iterative selection via MMR
+    # 2. Greedy iterative selection via MMR with cross-language budget
     while len(selected) < limit and remaining:
         best_cand: tuple[TrackResult, float, np.ndarray | None] | None = None
         best_mmr_score = -float("inf")
@@ -401,6 +447,8 @@ def _apply_mmr(
             cand_track, cand_score, cand_emb = cand
             cand_art = _primary_artist_name(cand_track.artist).lower()
             is_capped = artist_counts.get(cand_art, 0) >= max_per_artist
+            is_cross = bool(cand_track.languageAffinity is not None and cand_track.languageAffinity < 1.0)
+            is_cross_capped = is_cross and cross_lang_count >= max_cross_language
 
             # Maximum similarity with any already-selected track
             max_sim = 0.0
@@ -425,6 +473,8 @@ def _apply_mmr(
             mmr_val = (diversity_lambda * cand_score) - ((1.0 - diversity_lambda) * max_sim)
             if is_capped:
                 mmr_val -= 0.35  # Discourage exceeding artist cap
+            if is_cross_capped:
+                mmr_val -= 0.40  # Discourage exceeding cross-language quota
 
             if mmr_val > best_mmr_score:
                 best_mmr_score = mmr_val
@@ -437,6 +487,8 @@ def _apply_mmr(
         remaining.remove(best_cand)
         sel_art = _primary_artist_name(best_cand[0].artist).lower()
         artist_counts[sel_art] = artist_counts.get(sel_art, 0) + 1
+        if best_cand[0].languageAffinity is not None and best_cand[0].languageAffinity < 1.0:
+            cross_lang_count += 1
 
     # Sort the final diverse MMR slate in strictly descending order of matchScore for monotonic presentation
     return sorted([item[0] for item in selected], key=lambda t: t.matchScore or 0.0, reverse=True)
@@ -448,23 +500,26 @@ async def _find_and_rank_similar_tracks(
     source_metrics: dict,
     limit: int,
     diversity_lambda: float = 0.72,
+    cross_language_max: int = 6,
+    min_language_affinity: float = 0.50,
 ) -> list[TrackResult]:
     """
     Unified recommendation pipeline that:
       1. Identifies the source song's language and genre family.
-      2. Collects genre- and language-matched candidate songs from:
+      2. Collects candidate songs from:
          - Deezer's artist/genre neighborhood (`get_genre_and_language_candidates`)
          - Last.fm similar tracks (`get_similar_tracks`)
-         - FAISS index neighbors (`recommender.recommend`) filtered by genre
-      3. Enforces genre & language matching so recommendations stay within the
-         source song's language and musical style.
+         - FAISS index neighbors (`recommender.recommend`)
+      3. Computes soft language affinity without hard metadata walls.
       4. Encodes every candidate's 30s audio preview using our own `CnnMusicEncoder`
-         and computes our own self-generated metrics (`bpm`, `key`, `energy`,
-         `valence`, `vibes`).
+         and computes our own self-generated metrics (`bpm`, `felt_bpm`, `key`,
+         `modeMinorProb`, `brightness`, `buildScore`, `energy`, `valence`, `vibes`).
       5. Ranks all candidates by `compute_composite_match_score` with MMR
          diversity reranking (avoiding catalog monotony and capping artist repetition).
     """
     source_lang, genre_family, genre_keywords = await _detect_track_context(source_track_info)
+    if source_lang and "language" not in source_metrics:
+        source_metrics["language"] = source_lang
     lang_hint = _LANG_SEARCH_HINT.get(source_lang, "") if source_lang else ""
 
     primary_artist = _primary_artist_name(str(source_track_info.get("artist", "")))
@@ -526,19 +581,31 @@ async def _find_and_rank_similar_tracks(
     resolved_external = await asyncio.gather(*[_resolve_query(q) for q in external_queries[:16]])
 
     # Merge and deduplicate candidate pool
+    norm_source_title = _normalize_title_for_key(source_title)
+    norm_source_artist = _primary_artist_name(primary_artist).lower().strip()
     seen_ids: set[str] = {source_id} if source_id else set()
-    seen_keys: set[str] = {f"{primary_artist.lower()}:{source_title.lower().strip()}"}
+    seen_keys: set[str] = {f"{norm_source_artist}:{norm_source_title}"}
     merged_candidates: list[dict] = []
 
-    for cand in direct_faiss_cands + deezer_cands + [r for r in resolved_external if r is not None]:
+    # Balance candidate pool across sources: Deezer artist neighborhood, FAISS acoustic neighbors, and external resolved
+    pool_ordered: list[dict] = []
+    pool_ordered.extend(deezer_cands[:25])
+    pool_ordered.extend(direct_faiss_cands[:15])
+    pool_ordered.extend([r for r in resolved_external if r is not None][:15])
+    pool_ordered.extend(deezer_cands[25:])
+    pool_ordered.extend(direct_faiss_cands[15:])
+
+    for cand in pool_ordered:
         cid = str(cand.get("id", ""))
-        ckey = f"{_primary_artist_name(str(cand.get('artist', ''))).lower()}:{str(cand.get('title', '')).lower().strip()}"
+        cand_norm_artist = _primary_artist_name(str(cand.get("artist", ""))).lower().strip()
+        cand_norm_title = _normalize_title_for_key(str(cand.get("title", "")))
+        ckey = f"{cand_norm_artist}:{cand_norm_title}"
         if not cid or cid in seen_ids or ckey in seen_keys or not cand.get("previewUrl"):
             continue
         seen_ids.add(cid)
         seen_keys.add(ckey)
         merged_candidates.append(cand)
-        if len(merged_candidates) >= 30:
+        if len(merged_candidates) >= 45:
             break
 
     if not merged_candidates:
@@ -565,17 +632,8 @@ async def _find_and_rank_similar_tracks(
             cand_tag_lang = _detect_language_from_tags(cand_tags)
             cand_lang = cand_tag_lang or cand_script_lang
 
-            # Step 2: Strict language barrier
-            # - If source is non-English, candidate MUST match source_lang
-            # - If source is English, reject non-English tracks
-            if source_lang:
-                if cand_lang and cand_lang != source_lang:
-                    return None
-                if not cand.get("_trusted_scene") and cand_lang != source_lang:
-                    return None
-            else:
-                if cand_lang is not None:
-                    return None
+            # Step 2: Soft language affinity (no hard metadata barrier)
+            s_affinity = language_affinity(source_lang or "en", cand_lang or "en")
 
             # Step 3: Genre compatibility
             cand_genre_family, _ = _detect_genre_family(cand_tags)
@@ -586,21 +644,27 @@ async def _find_and_rank_similar_tracks(
                 or any(kw in " ".join(cand_tags).lower() for kw in genre_keywords)
             )
 
-            # Step 4: Fast path for FAISS candidates that already passed language barrier
-            if cand.get("matchScore") is not None and cand.get("bpm", 0) > 0:
-                score = float(cand["matchScore"])
-                src_year = source_metrics.get("year") or source_track_info.get("year")
-                cand_year = cand.get("year")
-                s_era = _era_similarity(src_year, cand_year)
-                if s_era < 0.5:
-                    score = round(max(0.05, score * s_era * 1.5), 4)
-
+            # Step 4: Fast path for pre-analyzed candidates (must have verified feel metrics)
+            if cand.get("matchScore") is not None and cand.get("felt_bpm") is not None and cand.get("modeMinorProb") is not None:
+                cand_emb = recommender.get_embedding(cand.get("_idx", -1))
                 cand_copy = dict(cand)
+                cand_copy["language"] = cand_lang or cand.get("language")
+                cand_copy["languageAffinity"] = s_affinity
+                if cand_emb is not None and source_metrics:
+                    score = compute_composite_match_score(
+                        source_embedding,
+                        source_metrics,
+                        cand_emb,
+                        cand_copy,
+                        genre_matched=genre_matched,
+                    )
+                else:
+                    score = float(cand.get("matchScore", 0.5))
+
                 cand_copy["matchScore"] = score
                 cand_copy["camelotKey"] = cand_copy.get("camelotKey") or to_camelot_key(str(cand_copy.get("key", "—")))
                 if source_metrics:
                     cand_copy["matchReasons"] = compute_match_reasons(source_metrics, cand_copy)
-                cand_emb = recommender.get_embedding(cand.get("_idx", -1))
                 return _to_track(cand_copy), score, genre_matched, cand_emb
 
             # Step 5: External audio preview download + ML encoding + structural analysis
@@ -618,6 +682,8 @@ async def _find_and_rank_similar_tracks(
                     cand_metrics["year"] = cand["year"]
                 if cand.get("decade"):
                     cand_metrics["decade"] = cand["decade"]
+                cand_metrics["language"] = cand_lang
+                cand_metrics["languageAffinity"] = s_affinity
 
                 cand_lyrics = await fetch_lyrics(cand_artist, cand_title)
                 cand_intent = classify_lyrical_intent(
@@ -630,9 +696,8 @@ async def _find_and_rank_similar_tracks(
                     source_metrics,
                     cand_emb,
                     cand_metrics,
+                    genre_matched=genre_matched,
                 )
-                if genre_matched:
-                    score = round(min(0.99, score + 0.03), 4)
 
                 reasons = compute_match_reasons(source_metrics, cand_metrics)
 
@@ -640,12 +705,18 @@ async def _find_and_rank_similar_tracks(
                     **cand,
                     "matchScore":           score,
                     "bpm":                  cand_metrics["bpm"],
+                    "felt_bpm":             cand_metrics.get("felt_bpm"),
                     "key":                  cand_metrics["key"],
                     "camelotKey":           to_camelot_key(str(cand_metrics.get("key", "—"))),
+                    "modeMinorProb":        cand_metrics.get("modeMinorProb"),
+                    "brightness":           cand_metrics.get("brightness"),
+                    "buildScore":           cand_metrics.get("buildScore"),
+                    "loudnessRange":        cand_metrics.get("loudnessRange"),
                     "energy":               cand_metrics["energy"],
                     "valence":              cand_metrics["valence"],
                     "vibes":                cand_metrics["vibes"],
                     "lyricalIntent":        cand_intent,
+                    "languageAffinity":      s_affinity,
                     "instruments":          cand_metrics.get("instruments", []),
                     "instrumentOrder":      cand_metrics.get("instrumentOrder", []),
                     "instrumentPace":       cand_metrics.get("instrumentPace", "Steady Mid-Tempo"),
@@ -658,32 +729,37 @@ async def _find_and_rank_similar_tracks(
                 }
                 return _to_track(enriched), score, genre_matched, cand_emb
         except Exception as exc:
-            logger.debug("evaluate_candidate failed for %r: %s", cand.get("title"), exc)
+            logger.warning("evaluate_candidate failed for %r: %s", cand.get("title"), exc)
             return None
 
-    evaluated = await asyncio.gather(*[_evaluate_candidate(c) for c in merged_candidates])
+    tasks = [asyncio.create_task(_evaluate_candidate(c)) for c in merged_candidates]
+    if tasks:
+        done, pending = await asyncio.wait(tasks, timeout=14.0)
+        for t in pending:
+            t.cancel()
+        evaluated = [t.result() for t in done if not t.cancelled() and not t.exception()]
+    else:
+        evaluated = []
     valid = [item for item in evaluated if item is not None]
 
-    # Partition candidates by genre match
-    genre_strict = [(item[0], item[1], item[3]) for item in valid if item[2]]
-    other_valid = [(item[0], item[1], item[3]) for item in valid if not item[2]]
-
-    # Prioritize genre-matched candidates; supplement with other valid if needed
-    candidate_pool = genre_strict if len(genre_strict) >= limit else (genre_strict + other_valid)
+    # Full candidate pool without genre-exclusive gate (composite score incorporates genre affinity + soft language)
+    candidate_pool = [(item[0], item[1], item[3]) for item in valid]
 
     ranked_tracks = _apply_mmr(
         candidate_pool,
         limit=limit,
         diversity_lambda=diversity_lambda,
         max_per_artist=2,
+        max_cross_language=cross_language_max,
+        min_affinity=min_language_affinity,
     )
 
     if not ranked_tracks and faiss_raw:
         ranked_tracks = [_to_track(m) for m in faiss_raw[:limit]]
 
     logger.info(
-        "rank_similar | evaluated=%d/%d  genre_strict=%d  ranked=%d  diversity=%.2f",
-        len(valid), len(merged_candidates), len(genre_strict), len(ranked_tracks), diversity_lambda,
+        "rank_similar | evaluated=%d/%d  valid=%d  ranked=%d  diversity=%.2f",
+        len(valid), len(merged_candidates), len(candidate_pool), len(ranked_tracks), diversity_lambda,
     )
     ranked_tracks.sort(key=lambda t: t.matchScore or 0.0, reverse=True)
     return ranked_tracks[:limit]
@@ -787,6 +863,8 @@ async def identify(audio: UploadFile = File(...)) -> IdentifyResponse:
             source_embedding=source_embedding,
             source_metrics=source_metrics,
             limit=settings.max_recommendations,
+            cross_language_max=6,
+            min_language_affinity=0.50,
         )
     else:
         # Build an identified_track representation for the raw mic sound analysis
@@ -874,11 +952,13 @@ async def get_track_detail(track_id: str) -> TrackResult:
 async def get_recommendations(
     track_id: str,
     diversity: float = Query(0.72, ge=0.0, le=1.0, description="MMR trade-off: 1.0=pure match, 0.5=high discovery"),
+    cross_language_max: int = Query(6, ge=0, le=20, description="Maximum cross-language tracks allowed in final slate"),
+    min_language_affinity: float = Query(0.50, ge=0.0, le=1.0, description="Minimum language affinity score required"),
 ) -> list[TrackResult]:
     """
     Download the selected track's 30s preview, compute its embedding + self-generated
-    metrics, and return genre- and language-matched songs ranked by our own ML
-    and audio metrics, reranked via Maximal Marginal Relevance (MMR).
+    metrics, and return feel-aligned songs ranked by our own ML and audio metrics,
+    reranked via Maximal Marginal Relevance (MMR).
     """
     t0 = time.perf_counter()
     logger.info("recommendations | track_id=%s diversity=%.2f", track_id, diversity)
@@ -919,6 +999,8 @@ async def get_recommendations(
         source_metrics=source_metrics,
         limit=settings.max_recommendations,
         diversity_lambda=diversity,
+        cross_language_max=cross_language_max,
+        min_language_affinity=min_language_affinity,
     )
 
     if not recommendations and recommender._metadata:

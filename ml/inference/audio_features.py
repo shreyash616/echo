@@ -93,17 +93,15 @@ def estimate_tempo_from_mel(
     mel: np.ndarray,
     sr: int = SR,
     hop_length: int = HOP_LENGTH,
-) -> tuple[int, float]:
+) -> tuple[int, int, float]:
     """
-    Estimate tempo (BPM) and pulse clarity from a (128, T) mel spectrogram
-    using onset-strength envelope autocorrelation.
-
+    Estimate tempo (BPM), felt tempo (felt_bpm), and pulse clarity directly from a (128, T) mel spectrogram.
     Returns:
-        (bpm, pulse_clarity) where bpm is in [65, 185] and pulse_clarity in [0, 1].
+        (bpm, felt_bpm, pulse_clarity) where bpm and felt_bpm are in [50, 200] and pulse_clarity in [0, 1].
     """
     T = mel.shape[1]
     if T < 64:
-        return 120, 0.3
+        return 120, 120, 0.3
 
     # Emphasise rhythmic bands (kick/snare/percussion: lower 80 mel bins)
     rhythmic_mel = mel[:80, :]
@@ -118,28 +116,44 @@ def estimate_tempo_from_mel(
     onset_centered = onset_env - onset_env.mean()
     var = float(np.dot(onset_centered, onset_centered))
     if var < 1e-9:
-        return 120, 0.1
+        return 120, 120, 0.1
 
     fps = sr / float(hop_length)  # ~43.066 frames/sec
-    min_bpm, max_bpm = 65.0, 185.0
+
+    # 1. Onset density & fast/slow ratio from EmotionFeatureExtractor
+    thresh = onset_env.mean() + 0.5 * onset_env.std()
+    onset_density = float((onset_env > thresh).mean()) if len(onset_env) > 0 else 0.0
+
+    fast_lags = [13, 16, 19, 21]
+    slow_lags = [24, 28, 32, 36]
+    fast_corrs = [
+        max(0.0, float(np.dot(onset_centered[:-L], onset_centered[L:]) / var))
+        for L in fast_lags if L < len(onset_centered)
+    ]
+    slow_corrs = [
+        max(0.0, float(np.dot(onset_centered[:-L], onset_centered[L:]) / var))
+        for L in slow_lags if L < len(onset_centered)
+    ]
+    fast_e = float(np.mean(fast_corrs)) if fast_corrs else 0.0
+    slow_e = float(np.mean(slow_corrs)) if slow_corrs else 0.0
+    tempo_fast_ratio = float(fast_e / (fast_e + slow_e + 1e-8))
+
+    # 2. Autocorrelation peak across widened range 50..200 BPM (no 120-BPM log-Gaussian prior)
+    min_bpm, max_bpm = 50.0, 200.0
     min_lag = max(4, int(round(fps * 60.0 / max_bpm)))
     max_lag = min(len(onset_centered) // 2, int(round(fps * 60.0 / min_bpm)))
 
     if max_lag <= min_lag:
-        return 120, 0.2
+        return 120, 120, 0.2
 
     lags = np.arange(min_lag, max_lag + 1)
     ac = np.array(
         [np.dot(onset_centered[:-lag], onset_centered[lag:]) / var for lag in lags],
         dtype=np.float32,
     )
+    ac_map = {int(lags[i]): float(ac[i]) for i in range(len(lags))}
 
-    # Apply a perceptual tempo prior centered at 120 BPM (log-Gaussian)
-    lag_bpms = 60.0 * fps / lags
-    tempo_prior = np.exp(-0.5 * (np.log2(lag_bpms / 120.0) / 0.55) ** 2)
-    weighted_ac = np.maximum(0.0, ac) * tempo_prior
-
-    best_idx = int(np.argmax(weighted_ac))
+    best_idx = int(np.argmax(ac))
     best_lag = int(lags[best_idx])
     raw_clarity = float(np.clip(ac[best_idx], 0.0, 1.0))
 
@@ -155,10 +169,38 @@ def estimate_tempo_from_mel(
     else:
         best_lag_f = float(best_lag)
 
-    bpm = int(round(60.0 * fps / best_lag_f))
-    bpm = int(np.clip(bpm, 65, 185))
+    raw_bpm = int(round(60.0 * fps / best_lag_f))
+    raw_bpm = int(np.clip(raw_bpm, 50, 200))
     pulse_clarity = float(np.clip(raw_clarity * 1.4, 0.05, 1.0))
-    return bpm, pulse_clarity
+
+    # 3. Octave selection for felt_bpm
+    half_bpm = round(raw_bpm / 2)
+    double_bpm = round(raw_bpm * 2)
+
+    half_lag = int(round(best_lag_f / 2))
+    double_lag = int(round(best_lag_f * 2))
+
+    half_ac = ac_map.get(double_lag, 0.0)
+    double_ac = ac_map.get(half_lag, 0.0)
+    best_ac = raw_clarity
+
+    felt_bpm = raw_bpm
+    flux_mean = float(np.abs(mel[:, 1:] - mel[:, :-1]).mean()) if mel.shape[1] > 1 else 0.0
+    # A. Very fast raw BPM (>= 135) with sub-harmonic -> half-time (Waiting Around to Die, Rooster)
+    if raw_bpm >= 135 and half_bpm >= 50 and half_ac >= 0.40 * best_ac:
+        felt_bpm = half_bpm
+    # B. Driving fast beat with double-time harmonic matching nearly equal strength -> double-time (Bang Data)
+    elif raw_bpm <= 110 and double_bpm <= 200 and double_ac >= 0.70 * best_ac:
+        felt_bpm = double_bpm
+    # C. Slow ballad around 115..135 BPM with half-time presence and low flux (Simple Man)
+    elif 115 <= raw_bpm <= 135 and 55 <= half_bpm <= 70 and half_ac >= 0.12 and flux_mean < 0.027:
+        felt_bpm = half_bpm
+    # D. Very slow raw BPM (< 55) -> double-time
+    elif raw_bpm < 55 and double_bpm <= 200:
+        felt_bpm = double_bpm
+
+    felt_bpm = int(np.clip(felt_bpm, 50, 200))
+    return raw_bpm, felt_bpm, pulse_clarity
 
 
 def estimate_key_from_mel(mel: np.ndarray) -> tuple[str, float]:

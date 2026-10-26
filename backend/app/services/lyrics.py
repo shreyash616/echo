@@ -14,6 +14,19 @@ logger = logging.getLogger(__name__)
 
 _lyrics_cache: TTLCache = TTLCache(maxsize=1024, ttl=86400)
 
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None or _client.is_closed:
+        _client = httpx.AsyncClient(
+            headers={"User-Agent": "Echo/1.0 (https://github.com/shreyash616/echo)"},
+            timeout=2.5,
+            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
+        )
+    return _client
+
 _THEME_KEYWORDS: dict[str, list[str]] = {
     "Romantic & Devotional": [
         "love", "pyaar", "ishq", "mohabbat", "dil", "rab ne", "together", "baby", "darling",
@@ -72,13 +85,13 @@ async def fetch_lyrics(artist: str, title: str) -> str:
 
     try:
         url = f"https://lrclib.net/api/get?artist_name={urllib.parse.quote(clean_artist)}&track_name={urllib.parse.quote(clean_title)}"
-        async with httpx.AsyncClient(timeout=2.5) as client:
-            resp = await client.get(url, headers={"User-Agent": "Echo/1.0 (https://github.com/shreyash616/echo)"})
-            if resp.status_code == 200:
-                data = resp.json()
-                lyrics = data.get("plainLyrics") or data.get("syncedLyrics") or ""
-                _lyrics_cache[cache_key] = lyrics
-                return lyrics
+        client = _get_client()
+        resp = await client.get(url)
+        if resp.status_code == 200:
+            data = resp.json()
+            lyrics = data.get("plainLyrics") or data.get("syncedLyrics") or ""
+            _lyrics_cache[cache_key] = lyrics
+            return lyrics
     except Exception as exc:
         logger.debug("Lyrics fetch skipped for %s - %s: %s", clean_artist, clean_title, exc)
 

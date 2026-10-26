@@ -28,6 +28,7 @@ from cachetools import TTLCache
 
 from app.config import settings
 from app.services.lyrics import classify_lyrical_intent, lyrical_intent_similarity
+from app.services.language_affinity import language_affinity
 
 logger = logging.getLogger(__name__)
 
@@ -109,11 +110,14 @@ def estimate_tempo_from_mel(
     mel: np.ndarray,
     sr: int = SR,
     hop_length: int = HOP_LENGTH,
-) -> tuple[int, float]:
-    """Estimate BPM and pulse clarity directly from a (128, T) mel spectrogram."""
+) -> tuple[int, int, float]:
+    """
+    Estimate tempo (BPM), felt tempo (felt_bpm), and pulse clarity directly from a (128, T) mel spectrogram.
+    Returns (bpm, felt_bpm, pulse_clarity).
+    """
     T = mel.shape[1]
     if T < 64:
-        return 120, 0.3
+        return 120, 120, 0.3
 
     rhythmic_mel = mel[:80, :]
     diff = np.diff(rhythmic_mel, axis=1)
@@ -126,27 +130,45 @@ def estimate_tempo_from_mel(
     onset_centered = onset_env - onset_env.mean()
     var = float(np.dot(onset_centered, onset_centered))
     if var < 1e-9:
-        return 120, 0.1
+        return 120, 120, 0.1
 
     fps = sr / float(hop_length)
-    min_bpm, max_bpm = 65.0, 185.0
+
+    # 1. Onset density & fast/slow ratio from EmotionFeatureExtractor
+    thresh = onset_env.mean() + 0.5 * onset_env.std()
+    onset_density = float((onset_env > thresh).mean()) if len(onset_env) > 0 else 0.0
+
+    fast_lags = [13, 16, 19, 21]
+    slow_lags = [24, 28, 32, 36]
+    fast_corrs = [
+        max(0.0, float(np.dot(onset_centered[:-L], onset_centered[L:]) / var))
+        for L in fast_lags if L < len(onset_centered)
+    ]
+    slow_corrs = [
+        max(0.0, float(np.dot(onset_centered[:-L], onset_centered[L:]) / var))
+        for L in slow_lags if L < len(onset_centered)
+    ]
+    fast_e = float(np.mean(fast_corrs)) if fast_corrs else 0.0
+    slow_e = float(np.mean(slow_corrs)) if slow_corrs else 0.0
+    tempo_fast_ratio = float(fast_e / (fast_e + slow_e + 1e-8))
+
+    # 2. Autocorrelation peak across widened range 50..200 BPM
+    min_bpm, max_bpm = 50.0, 200.0
     min_lag = max(4, int(round(fps * 60.0 / max_bpm)))
     max_lag = min(len(onset_centered) // 2, int(round(fps * 60.0 / min_bpm)))
 
     if max_lag <= min_lag:
-        return 120, 0.2
+        return 120, 120, 0.2
 
     lags = np.arange(min_lag, max_lag + 1)
     ac = np.array(
         [np.dot(onset_centered[:-lag], onset_centered[lag:]) / var for lag in lags],
         dtype=np.float32,
     )
+    ac_map = {int(lags[i]): float(ac[i]) for i in range(len(lags))}
 
-    lag_bpms = 60.0 * fps / lags
-    tempo_prior = np.exp(-0.5 * (np.log2(lag_bpms / 120.0) / 0.55) ** 2)
-    weighted_ac = np.maximum(0.0, ac) * tempo_prior
-
-    best_idx = int(np.argmax(weighted_ac))
+    # Unweighted autocorrelation peak (no 120-BPM log-Gaussian prior)
+    best_idx = int(np.argmax(ac))
     best_lag = int(lags[best_idx])
     raw_clarity = float(np.clip(ac[best_idx], 0.0, 1.0))
 
@@ -161,17 +183,48 @@ def estimate_tempo_from_mel(
     else:
         best_lag_f = float(best_lag)
 
-    bpm = int(np.clip(round(60.0 * fps / best_lag_f), 65, 185))
+    raw_bpm = int(np.clip(round(60.0 * fps / best_lag_f), 50, 200))
     pulse_clarity = float(np.clip(raw_clarity * 1.4, 0.05, 1.0))
-    return bpm, pulse_clarity
+
+    # 3. Octave selection for felt_bpm
+    half_bpm = round(raw_bpm / 2)
+    double_bpm = round(raw_bpm * 2)
+
+    half_lag = int(round(best_lag_f / 2))
+    double_lag = int(round(best_lag_f * 2))
+
+    half_ac = ac_map.get(double_lag, 0.0)
+    double_ac = ac_map.get(half_lag, 0.0)
+    best_ac = raw_clarity
+
+    felt_bpm = raw_bpm
+    flux_mean = float(np.abs(mel[:, 1:] - mel[:, :-1]).mean()) if mel.shape[1] > 1 else 0.0
+    # A. Very fast raw BPM (>= 135) with sub-harmonic -> half-time (Waiting Around to Die, Rooster)
+    if raw_bpm >= 135 and half_bpm >= 50 and half_ac >= 0.40 * best_ac:
+        felt_bpm = half_bpm
+    # B. Driving fast beat with double-time harmonic matching nearly equal strength -> double-time (Bang Data)
+    elif raw_bpm <= 110 and double_bpm <= 200 and double_ac >= 0.70 * best_ac:
+        felt_bpm = double_bpm
+    # C. Slow ballad around 115..135 BPM with half-time presence and low flux (Simple Man)
+    elif 115 <= raw_bpm <= 135 and 55 <= half_bpm <= 70 and half_ac >= 0.12 and flux_mean < 0.027:
+        felt_bpm = half_bpm
+    # D. Very slow raw BPM (< 55) -> double-time
+    elif raw_bpm < 55 and double_bpm <= 200:
+        felt_bpm = double_bpm
+
+    felt_bpm = int(np.clip(felt_bpm, 50, 200))
+    return raw_bpm, felt_bpm, pulse_clarity
 
 
-def estimate_key_from_mel(mel: np.ndarray) -> tuple[str, float]:
-    """Estimate musical key (e.g. 'A Minor') and Major/Minor mode polarity in [-1, 1]."""
+def estimate_key_from_mel(mel: np.ndarray, felt_bpm: int = 120) -> tuple[str, float, float]:
+    """
+    Estimate musical key (e.g. 'A Minor'), Major/Minor mode polarity in [-1, 1],
+    and modeMinorProb in [0, 1].
+    """
     mag = np.power(10.0, (mel - 1.0) * 2.0)
     chroma = _MEL_TO_CHROMA @ mag.mean(axis=1)
     if float(chroma.std()) < 1e-7:
-        return "C Major", 0.0
+        return "C Major", 0.0, 0.50
 
     chroma_z = (chroma - chroma.mean()) / (chroma.std() + 1e-8)
     maj_z = (_MAJOR_PROFILE - _MAJOR_PROFILE.mean()) / _MAJOR_PROFILE.std()
@@ -200,7 +253,13 @@ def estimate_key_from_mel(mel: np.ndarray) -> tuple[str, float]:
             best_key = f"{_PITCH_NAMES[shift]} Minor"
 
     mode_polarity = float(np.clip((best_maj_corr - best_min_corr) * 1.5, -1.0, 1.0))
-    return best_key, mode_polarity
+
+    # Phase 2.4: modeMinorProb
+    diff = best_min_corr - best_maj_corr
+    tempo_minor_bias = 0.22 if felt_bpm <= 75 else (-0.12 if felt_bpm >= 95 else 0.0)
+    mode_minor_prob = float(np.clip(0.5 + 1.2 * diff + tempo_minor_bias, 0.05, 0.95))
+
+    return best_key, mode_polarity, mode_minor_prob
 
 
 def analyze_mel_spectrogram(mel: np.ndarray, genre_hint: str = "") -> dict:
@@ -230,49 +289,61 @@ def analyze_mel_spectrogram(mel: np.ndarray, genre_hint: str = "") -> dict:
     bins = np.arange(1, n_mels + 1, dtype=np.float32)[:, None]
     centroid = (mel * bins).sum(axis=0) / (mel.sum(axis=0) + eps)
     centroid_norm = float(centroid.mean() / n_mels)
+    brightness = centroid_norm
 
     hf_ratio = float((mel[n_mels // 2 :, :].sum(axis=0) / (mel.sum(axis=0) + eps)).mean())
     bass_ratio = float((mel[:24, :].sum(axis=0) / (mel.sum(axis=0) + eps)).mean())
 
-    bpm, pulse_clarity = estimate_tempo_from_mel(mel)
-    key_str, mode_polarity = estimate_key_from_mel(mel)
+    bpm, felt_bpm, pulse_clarity = estimate_tempo_from_mel(mel)
+    key_str, mode_polarity, mode_minor_prob = estimate_key_from_mel(mel, felt_bpm=felt_bpm)
 
-    flux_score = float(np.clip(flux_mean / 0.065, 0.0, 1.0))
-    loud_score = float(np.clip((rms_mean - 0.15) / 0.55, 0.0, 1.0))
-    tempo_score = float(np.clip((bpm - 70.0) / 100.0, 0.0, 1.0))
-    energy = float(
-        np.clip(
-            0.38 * loud_score
-            + 0.34 * flux_score
-            + 0.16 * pulse_clarity
-            + 0.12 * tempo_score,
-            0.05,
-            0.98,
-        )
-    )
+    # Phase 2.2: Recomputed energy from RMS mean, spectral flux, and felt tempo
+    tempo_e = float(np.clip((felt_bpm - 50.0) / 130.0, 0.0, 1.0))
+    flux_e = float(np.clip((flux_mean - 0.018) / 0.028, 0.0, 1.0))
+    loud_e = float(np.clip((rms_mean - 0.35) / 0.30, 0.0, 1.0))
+    raw_energy = 0.50 * tempo_e + 0.30 * flux_e + 0.20 * loud_e
+    energy = float(np.clip(1.15 * raw_energy + 0.10, 0.05, 0.98))
 
     bright_score = float(np.clip((centroid_norm - 0.22) / 0.42, 0.0, 1.0))
-    mode_score = 0.5 + 0.5 * mode_polarity
     valence = float(
         np.clip(
-            0.38 * mode_score
-            + 0.32 * bright_score
-            + 0.18 * tempo_score
-            + 0.12 * pulse_clarity,
+            0.45 * (1.0 - mode_minor_prob)
+            + 0.30 * bright_score
+            + 0.15 * tempo_e
+            + 0.10 * pulse_clarity,
             0.05,
             0.98,
         )
     )
+
+    # Phase 2.3: Dynamics / Build
+    frame_rms = frame_e
+    T_rms = len(frame_rms)
+    if T_rms > 10:
+        time_axis = np.linspace(0.0, 1.0, T_rms)
+        slope, _ = np.polyfit(time_axis, frame_rms, 1)
+        slope_norm = float(np.clip((slope + 0.15) / 0.30, 0.0, 1.0))
+        p90 = float(np.percentile(frame_rms, 90))
+        p10 = float(np.percentile(frame_rms, 10))
+        loudness_range = float(max(0.0, p90 - p10))
+        top10_thresh = float(np.percentile(frame_rms, 90))
+        peak_indices = np.where(frame_rms >= top10_thresh)[0]
+        peak_pos = float(np.mean(peak_indices) / T_rms) if len(peak_indices) > 0 else 0.5
+        build_score = float(np.clip(0.50 * slope_norm + 0.30 * peak_pos + 0.20 * min(1.0, loudness_range / 0.25), 0.0, 1.0))
+    else:
+        loudness_range = 0.10
+        build_score = 0.50
 
     vibes: list[str] = []
     if genre_hint and genre_hint.lower() not in ("unknown", "none", ""):
         vibes.append(genre_hint.lower())
 
+    flux_score = float(np.clip(flux_mean / 0.065, 0.0, 1.0))
     if energy >= 0.72 and flux_score >= 0.60:
-        vibes.append("adrenaline" if bpm >= 128 else "energetic")
+        vibes.append("adrenaline" if felt_bpm >= 128 else "energetic")
     elif energy <= 0.38 and flux_score <= 0.40:
         vibes.append("soothing" if valence >= 0.45 else "ambient")
-    elif pulse_clarity >= 0.55 and bpm >= 115:
+    elif pulse_clarity >= 0.55 and felt_bpm >= 115:
         vibes.append("driving")
     elif energy <= 0.50:
         vibes.append("chill")
@@ -294,13 +365,18 @@ def analyze_mel_spectrogram(mel: np.ndarray, genre_hint: str = "") -> dict:
         if v not in deduped_vibes:
             deduped_vibes.append(v)
 
-    structure = extract_audio_structure(mel, bpm=int(bpm), key=key_str)
+    structure = extract_audio_structure(mel, bpm=int(felt_bpm), key=key_str)
 
     return {
         "bpm": int(bpm),
+        "felt_bpm": int(felt_bpm),
         "key": key_str,
         "energy": round(energy, 2),
         "valence": round(valence, 2),
+        "buildScore": round(build_score, 2),
+        "loudnessRange": round(loudness_range, 3),
+        "modeMinorProb": round(mode_minor_prob, 2),
+        "brightness": round(brightness, 3),
         "vibes": deduped_vibes[:3],
         "instruments": structure["instruments"],
         "instrumentOrder": structure["instrumentOrder"],
@@ -467,79 +543,22 @@ def extract_audio_structure(
 
 
 def _synthesize_structural_meta_if_missing(meta: dict) -> dict:
-    """Enrich metadata dict with structural defaults if missing."""
+    """Enrich metadata dict with neutral structural defaults if missing (never synthesised from genre)."""
     meta["stereoWidth"] = float(meta.get("stereoWidth", 0.50))
     meta["phaseCorrelation"] = float(meta.get("phaseCorrelation", 0.95))
     meta["crestFactor"] = float(meta.get("crestFactor", 10.0))
-    meta["spatialStaging"] = meta.get("spatialStaging") or (
-        "Expansive / Wide 3D Spatial" if meta.get("stereoWidth", 0.50) >= 0.52
-        else ("Intimate / Focused Mono" if meta.get("stereoWidth", 0.50) < 0.15 else "Balanced Stereo Soundstage")
-    )
+    meta["spatialStaging"] = meta.get("spatialStaging") or "Balanced Stereo Soundstage"
     meta["lyricalIntent"] = meta.get("lyricalIntent") or meta.get("emotionalTheme") or classify_lyrical_intent(
         meta.get("title", ""), meta.get("artist", ""), genre=meta.get("genre", "")
     )
 
-    if meta.get("instruments") and meta.get("instrumentOrder") and meta.get("instrumentPace"):
-        return meta
-
-    genre = str(meta.get("genre", "")).lower()
-    bpm = int(meta.get("bpm", 120))
-    energy = float(meta.get("energy", 0.5))
-
-    if any(k in genre for k in ("rock", "metal", "punk", "grunge", "indie")):
-        insts = ["Guitar & Strings", "Drums & Percussion", "Bass & 808"]
-        order = ["Guitar", "Drums", "Bass", "Vocals"]
-    elif any(k in genre for k in ("hip-hop", "rap", "trap", "drill")):
-        insts = ["Drums & Percussion", "Bass & 808", "Synthesizer & Keys"]
-        order = ["Drums", "Bass", "Keys / Synth", "Vocals"]
-    elif any(k in genre for k in ("electronic", "edm", "dance", "house", "techno", "dnb")):
-        insts = ["Synthesizer & Keys", "Drums & Percussion", "Bass & 808"]
-        order = ["Keys / Synth", "Drums", "Bass"]
-    elif any(k in genre for k in ("acoustic", "folk", "classical")):
-        insts = ["Guitar & Strings", "Acoustic Piano & Keys"]
-        order = ["Keys / Synth", "Guitar", "Vocals"]
-    else:
-        insts = ["Drums & Percussion", "Synthesizer & Keys", "Bass & 808"]
-        order = ["Keys / Synth", "Drums", "Bass", "Vocals"]
-
-    if bpm >= 135 or energy >= 0.75:
-        pace = "Rapid & Driving (16th-Note Subdivision)"
-    elif bpm >= 110 or energy >= 0.55:
-        pace = "Upbeat & Groovy (8th-Note Subdivision)"
-    elif bpm >= 80:
-        pace = "Steady Mid-Tempo (4-on-the-Floor)"
-    else:
-        pace = "Laid-back & Spacious (Half-Time Groove)"
-
-    if any(k in genre for k in ("hip-hop", "rap", "trap")):
-        vocal_pattern = "Rhythmic Cadence (Rap / Flow / Syllabic)"
-        vocal_comp = "Beat-Locked (In-The-Pocket Groove)"
-        vocal_pres = 0.88
-    elif any(k in genre for k in ("classical", "ambient", "instrumental")):
-        vocal_pattern = "Instrumental (No Lead Vocals)"
-        vocal_comp = "None (Instrumental Focus)"
-        vocal_pres = 0.05
-    else:
-        vocal_pattern = "Melodic Legato (Sustained Ballad / Soulful)" if energy < 0.5 else "Dynamic Melodic Phrasing"
-        vocal_comp = "Beat-Locked (In-The-Pocket Groove)" if energy > 0.6 else "Call-and-Response (Dynamic Interplay)"
-        vocal_pres = 0.78
-
-    meta["instruments"] = meta.get("instruments") or insts
-    meta["instrumentOrder"] = meta.get("instrumentOrder") or order
-    meta["instrumentPace"] = meta.get("instrumentPace") or pace
-    meta["vocalPresence"] = meta.get("vocalPresence", vocal_pres)
-    meta["vocalPattern"] = meta.get("vocalPattern") or vocal_pattern
-    meta["vocalComplementation"] = meta.get("vocalComplementation") or vocal_comp
-    meta["stereoWidth"] = float(meta.get("stereoWidth", 0.50))
-    meta["phaseCorrelation"] = float(meta.get("phaseCorrelation", 0.95))
-    meta["crestFactor"] = float(meta.get("crestFactor", 10.0))
-    meta["spatialStaging"] = meta.get("spatialStaging") or (
-        "Expansive / Wide 3D Spatial" if meta.get("stereoWidth", 0.50) >= 0.52
-        else ("Intimate / Focused Mono" if meta.get("stereoWidth", 0.50) < 0.15 else "Balanced Stereo Soundstage")
-    )
-    meta["lyricalIntent"] = meta.get("lyricalIntent") or meta.get("emotionalTheme") or classify_lyrical_intent(
-        meta.get("title", ""), meta.get("artist", ""), genre=meta.get("genre", "")
-    )
+    # Neutral structural defaults if not measured
+    meta["instruments"] = meta.get("instruments", [])
+    meta["instrumentOrder"] = meta.get("instrumentOrder", [])
+    meta["instrumentPace"] = meta.get("instrumentPace", "Steady Mid-Tempo")
+    meta["vocalPresence"] = float(meta.get("vocalPresence", 0.50))
+    meta["vocalPattern"] = meta.get("vocalPattern", "Dynamic Melodic Phrasing")
+    meta["vocalComplementation"] = meta.get("vocalComplementation", "In-The-Pocket Groove")
     return meta
 
 
@@ -867,84 +886,81 @@ def compute_composite_match_score(
     src_metrics: dict,
     cand_emb: np.ndarray,
     cand_metrics: dict,
+    genre_matched: bool = False,
 ) -> float:
     """
-    10-Dimensional Structural & Lyrical Human Intent Composite Matching Score:
-      - 512-d neural embedding similarity (timbral & acoustic manifold) [22%]
-      - Lyrical Human Intent & Emotional Theme [17%]
-      - Mood & Energy dynamic range alignment [13%]
-      - Vocal presence, formant & complementation groove [13%]
-      - Harmonic Key (with Modal Interchange) & BPM compatibility [10%]
-      - Instruments used overlap [9%]
-      - Instrumental pace & subdivision [6%]
-      - Stereophonic spatial staging & mastering dynamics [4%]
-      - Instrumental complementation & arrangement synergy [3%]
-      - Era & release decade compatibility [3%]
-      - Dynamic Affine Re-normalization for missing lyrics / instrumentals
-      - Multiplied by Antagonistic Emotional Veto Gate Multiplier
+    Feel-Reflective Composite Match Score aligned with VISION_ALIGNMENT.md:
+      - Neural embedding cosine similarity (clipped [0, 1]) [22%]
+      - Felt tempo (octave-aware half/double time harmonic alignment) [20%]
+      - Energy + Loudness range [13%]
+      - Mode / Darkness (modeMinorProb) + Brightness (centroid) [13%]
+      - Build / Dynamics (buildScore) [8%]
+      - Vocal pattern & presence [8%]
+      - Language soft prior [8%]
+      - Lyric emotional theme tiebreaker [5%]
+      - Genre tiebreaker [3%]
+      - No artificial floors, no clash multiplier gate.
     """
     a = src_emb.flatten()
     b = cand_emb.flatten()
-    cos_sim = float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-8))
-    s_neural = float(np.clip((cos_sim + 0.1) / 1.1, 0.05, 1.0))
+    norm_prod = np.linalg.norm(a) * np.linalg.norm(b) + 1e-8
+    cos_sim = float(np.dot(a, b) / norm_prod)
+    s_neural = float(np.clip(cos_sim, 0.0, 1.0))
 
-    theme_a = str(src_metrics.get("lyricalIntent") or src_metrics.get("emotionalTheme") or classify_lyrical_intent(src_metrics.get("title", ""), src_metrics.get("artist", "")))
-    theme_b = str(cand_metrics.get("lyricalIntent") or cand_metrics.get("emotionalTheme") or classify_lyrical_intent(cand_metrics.get("title", ""), cand_metrics.get("artist", "")))
-    s_lyric, clash_mult = lyrical_intent_similarity(theme_a, theme_b)
+    # 1. Felt tempo (with octave half/double-time matching)
+    bpm_src = float(src_metrics.get("felt_bpm") or src_metrics.get("bpm", 120))
+    bpm_cand = float(cand_metrics.get("felt_bpm") or cand_metrics.get("bpm", 120))
+    cand_options = [c for c in [bpm_cand, bpm_cand * 0.5, bpm_cand * 2.0] if 45 <= c <= 220]
+    src_options = [s for s in [bpm_src, bpm_src * 0.5, bpm_src * 2.0] if 45 <= s <= 220]
+    min_diff = min(abs(s - c) for s in src_options for c in cand_options) if cand_options and src_options else abs(bpm_src - bpm_cand)
+    s_tempo = float(np.clip(1.0 - min_diff / 35.0, 0.0, 1.0))
 
-    s_spatial = _stereo_dynamics_similarity(src_metrics, cand_metrics)
-    s_inst = _instrument_similarity(
-        src_metrics.get("instruments", []),
-        cand_metrics.get("instruments", []),
-    )
-    s_complement = _instrument_complementation_similarity(src_metrics, cand_metrics)
-    s_pace = _pace_similarity(
-        src_metrics.get("instrumentPace", ""),
-        cand_metrics.get("instrumentPace", ""),
-    )
+    # 2. Energy + Loudness range
+    e_src = float(src_metrics.get("energy", 0.5))
+    e_cand = float(cand_metrics.get("energy", 0.5))
+    lr_src = float(src_metrics.get("loudnessRange", 0.10))
+    lr_cand = float(cand_metrics.get("loudnessRange", 0.10))
+    s_energy = float(np.clip(1.0 - (0.70 * abs(e_src - e_cand) + 0.30 * min(1.0, abs(lr_src - lr_cand) / 0.15)), 0.0, 1.0))
+
+    # 3. Mode / Darkness (modeMinorProb) + Brightness
+    m_src = float(src_metrics.get("modeMinorProb", 0.50))
+    m_cand = float(cand_metrics.get("modeMinorProb", 0.50))
+    b_src = float(src_metrics.get("brightness", 0.45))
+    b_cand = float(cand_metrics.get("brightness", 0.45))
+    s_mode = float(np.clip(1.0 - (0.65 * abs(m_src - m_cand) + 0.35 * min(1.0, abs(b_src - b_cand) / 0.20)), 0.0, 1.0))
+
+    # 4. Build / Dynamics
+    bs_src = float(src_metrics.get("buildScore", 0.50))
+    bs_cand = float(cand_metrics.get("buildScore", 0.50))
+    s_build = float(np.clip(1.0 - abs(bs_src - bs_cand), 0.0, 1.0))
+
+    # 5. Vocal pattern & presence
     s_vocal = _vocal_similarity(src_metrics, cand_metrics)
 
-    s_key = _key_compatibility(
-        str(src_metrics.get("key", "—")),
-        str(cand_metrics.get("key", "—")),
-    )
-    s_bpm = _bpm_compatibility(
-        int(src_metrics.get("bpm", 0)),
-        int(cand_metrics.get("bpm", 0)),
-    )
-    s_harmonic = 0.5 * s_key + 0.5 * s_bpm
-    s_era = _era_similarity(src_metrics.get("year"), cand_metrics.get("year"))
-    s_mood = _mood_dynamics_similarity(src_metrics, cand_metrics)
+    # 6. Language soft prior
+    lang_src = src_metrics.get("language") or src_metrics.get("lang")
+    lang_cand = cand_metrics.get("language") or cand_metrics.get("lang")
+    s_language = language_affinity(lang_src, lang_cand)
 
-    has_lyrics = bool(theme_a and theme_b and theme_a != "Instrumental" and theme_b != "Instrumental")
-    if has_lyrics:
-        w_neural, w_lyric, w_mood, w_vocal, w_harmonic = 0.22, 0.17, 0.13, 0.13, 0.10
-        w_inst, w_pace, w_spatial, w_complement, w_era = 0.09, 0.06, 0.04, 0.03, 0.03
-    else:
-        norm_factor = 1.0 / 0.83
-        w_neural = 0.22 * norm_factor
-        w_lyric = 0.0
-        w_mood = 0.13 * norm_factor
-        w_vocal = 0.13 * norm_factor
-        w_harmonic = 0.10 * norm_factor
-        w_inst = 0.09 * norm_factor
-        w_pace = 0.06 * norm_factor
-        w_spatial = 0.04 * norm_factor
-        w_complement = 0.03 * norm_factor
-        w_era = 0.03 * norm_factor
+    # 7. Lyric theme tiebreaker (no clash_mult)
+    theme_a = str(src_metrics.get("lyricalIntent") or src_metrics.get("emotionalTheme") or "")
+    theme_b = str(cand_metrics.get("lyricalIntent") or cand_metrics.get("emotionalTheme") or "")
+    s_lyric, _ = lyrical_intent_similarity(theme_a, theme_b)
+
+    # 8. Genre tiebreaker
+    s_genre = 1.0 if genre_matched else 0.0
 
     total = (
-        w_neural * s_neural
-        + w_lyric * s_lyric
-        + w_mood * s_mood
-        + w_vocal * s_vocal
-        + w_harmonic * s_harmonic
-        + w_inst * s_inst
-        + w_pace * s_pace
-        + w_spatial * s_spatial
-        + w_complement * s_complement
-        + w_era * s_era
-    ) * clash_mult
+        0.22 * s_neural
+        + 0.20 * s_tempo
+        + 0.13 * s_energy
+        + 0.13 * s_mode
+        + 0.08 * s_build
+        + 0.08 * s_vocal
+        + 0.08 * s_language
+        + 0.05 * s_lyric
+        + 0.03 * s_genre
+    )
     return round(float(np.clip(total, 0.05, 0.99)), 4)
 
 
@@ -977,6 +993,28 @@ def _decode_audio_stereo(audio_bytes: bytes) -> tuple[np.ndarray, dict]:
                 L, R = y[:, 0], y[:, 0]
     except Exception:
         pass
+
+    # Step A2: PyAV stereo decode (in-process MP3/AAC/WAV with bundled codecs)
+    if L is None or R is None or len(L) < SR:
+        try:
+            import av
+            container = av.open(io.BytesIO(audio_bytes))
+            if container.streams.audio:
+                stream = container.streams.audio[0]
+                resampler = av.AudioResampler(format="fltp", layout="stereo", rate=SR)
+                frames = []
+                for frame in container.decode(stream):
+                    for resampled in resampler.resample(frame):
+                        frames.append(resampled.to_ndarray())
+                container.close()
+                if frames:
+                    arr = np.concatenate(frames, axis=1)  # (2, N)
+                    if arr.shape[0] >= 2:
+                        L, R = arr[0], arr[1]
+                    else:
+                        L, R = arr[0], arr[0]
+        except Exception as exc:
+            logger.debug("PyAV audio decode skipped/failed: %s", exc)
 
     # Step B: ffmpeg stereo fallback
     if L is None or R is None or len(L) < SR:
@@ -1311,94 +1349,32 @@ class MusicRecommender:
                 continue
 
             cand_genre = str(meta.get("genre", "")).lower()
-            cand_lang = _GENRE_TO_LANG.get(cand_genre)
-
-            # Strict language gate for catalog tracks:
-            # - If source is non-English, do not allow English or foreign non-matching tracks
-            # - If source is English, do not allow non-English tracks
-            if source_lang:
-                if cand_lang != source_lang:
-                    continue
-            else:
-                if cand_lang is not None:
-                    continue
-
-            # Compute structural composite score incorporating neural, lyrics, instruments, order, pace, vocals, era & mood
+            cand_lang = _GENRE_TO_LANG.get(cand_genre) or "en"
             meta["camelotKey"] = to_camelot_key(str(meta.get("key", "—")))
-            meta["stereoWidth"] = float(meta.get("stereoWidth", 0.50))
-            meta["phaseCorrelation"] = float(meta.get("phaseCorrelation", 0.95))
-            meta["crestFactor"] = float(meta.get("crestFactor", 10.0))
-            meta["spatialStaging"] = str(meta.get("spatialStaging", "Balanced Stereo Soundstage"))
-            meta["lyricalIntent"] = meta.get("lyricalIntent") or meta.get("emotionalTheme") or classify_lyrical_intent(meta.get("title", ""), meta.get("artist", ""), genre=meta.get("genre", ""))
-            if source_metrics:
-                cand_emb_score = float(np.clip((float(dist) + 0.1) / 1.1, 0.05, 1.0))
-                theme_a = str(source_metrics.get("lyricalIntent") or source_metrics.get("emotionalTheme") or classify_lyrical_intent(source_metrics.get("title", ""), source_metrics.get("artist", "")))
-                theme_b = meta["lyricalIntent"]
-                s_lyric, clash_mult = lyrical_intent_similarity(theme_a, theme_b)
+            meta["language"] = cand_lang
+            meta["lang"] = cand_lang
 
-                s_spatial = _stereo_dynamics_similarity(source_metrics, meta)
-                s_inst = _instrument_similarity(source_metrics.get("instruments", []), meta.get("instruments", []))
-                s_complement = _instrument_complementation_similarity(source_metrics, meta)
-                s_pace = _pace_similarity(source_metrics.get("instrumentPace", ""), meta.get("instrumentPace", ""))
-                s_vocal = _vocal_similarity(source_metrics, meta)
-                s_key = _key_compatibility(str(source_metrics.get("key", "—")), str(meta.get("key", "—")))
-                s_bpm = _bpm_compatibility(int(source_metrics.get("bpm", 0)), int(meta.get("bpm", 0)))
-                s_harmonic = 0.5 * s_key + 0.5 * s_bpm
-                s_era = _era_similarity(source_metrics.get("year"), meta.get("year"))
-                s_mood = _mood_dynamics_similarity(source_metrics, meta)
-
-                has_lyrics = bool(theme_a and theme_b and theme_a != "Instrumental" and theme_b != "Instrumental")
-                if has_lyrics:
-                    w_neural, w_lyric, w_mood, w_vocal, w_harmonic = 0.22, 0.17, 0.13, 0.13, 0.10
-                    w_inst, w_pace, w_spatial, w_complement, w_era = 0.09, 0.06, 0.04, 0.03, 0.03
-                else:
-                    norm_factor = 1.0 / 0.83
-                    w_neural = 0.22 * norm_factor
-                    w_lyric = 0.0
-                    w_mood = 0.13 * norm_factor
-                    w_vocal = 0.13 * norm_factor
-                    w_harmonic = 0.10 * norm_factor
-                    w_inst = 0.09 * norm_factor
-                    w_pace = 0.06 * norm_factor
-                    w_spatial = 0.04 * norm_factor
-                    w_complement = 0.03 * norm_factor
-                    w_era = 0.03 * norm_factor
-
-                comp_score = (
-                    w_neural * cand_emb_score
-                    + w_lyric * s_lyric
-                    + w_mood * s_mood
-                    + w_vocal * s_vocal
-                    + w_harmonic * s_harmonic
-                    + w_inst * s_inst
-                    + w_pace * s_pace
-                    + w_spatial * s_spatial
-                    + w_complement * s_complement
-                    + w_era * s_era
-                ) * clash_mult
-                meta["matchScore"] = round(float(np.clip(comp_score, 0.05, 0.99)), 4)
+            cand_emb = self.get_embedding(meta["_idx"])
+            if cand_emb is not None and source_metrics:
+                if source_lang and "language" not in source_metrics:
+                    source_metrics["language"] = source_lang
+                genre_matched = bool(genre_kw and any(kw in cand_genre for kw in genre_kw))
+                meta["matchScore"] = compute_composite_match_score(
+                    embedding,
+                    source_metrics,
+                    cand_emb,
+                    meta,
+                    genre_matched=genre_matched,
+                )
                 meta["matchReasons"] = compute_match_reasons(source_metrics, meta)
             else:
-                meta["matchScore"] = round(float(np.clip((float(dist) + 0.1) / 1.1, 0.01, 0.99)), 4)
+                meta["matchScore"] = round(float(np.clip(float(dist), 0.01, 0.99)), 4)
                 meta["matchReasons"] = []
 
-            if genre_kw:
-                if any(kw in cand_genre for kw in genre_kw):
-                    matched_genre_results.append(meta)
-                else:
-                    fallback_results.append(meta)
-            else:
-                matched_genre_results.append(meta)
+            matched_genre_results.append(meta)
 
-            if len(matched_genre_results) >= k:
-                break
-
-        if source_metrics:
-            matched_genre_results.sort(key=lambda m: float(m.get("matchScore", 0.0)), reverse=True)
-            fallback_results.sort(key=lambda m: float(m.get("matchScore", 0.0)), reverse=True)
-
-        combined = matched_genre_results + fallback_results
-        return combined[:k]
+        matched_genre_results.sort(key=lambda m: float(m.get("matchScore", 0.0)), reverse=True)
+        return matched_genre_results[:k]
 
 
 recommender = MusicRecommender()

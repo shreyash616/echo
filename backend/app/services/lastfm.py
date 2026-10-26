@@ -17,13 +17,22 @@ LASTFM_BASE = "https://ws.audioscrobbler.com/2.0/"
 
 _cache: TTLCache = TTLCache(maxsize=512, ttl=3600)
 
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None or _client.is_closed:
+        _client = httpx.AsyncClient(timeout=8.0, limits=httpx.Limits(max_keepalive_connections=10, max_connections=20))
+    return _client
+
 
 async def _call(params: dict) -> dict:
     params = {**params, "api_key": settings.lastfm_api_key, "format": "json"}
-    async with httpx.AsyncClient(timeout=8.0) as client:
-        resp = await client.get(LASTFM_BASE, params=params)
-        resp.raise_for_status()
-        return resp.json()
+    client = _get_client()
+    resp = await client.get(LASTFM_BASE, params=params)
+    resp.raise_for_status()
+    return resp.json()
 
 
 async def get_artist_tags(artist_name: str) -> list[str]:

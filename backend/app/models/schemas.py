@@ -13,8 +13,13 @@ class TrackResult(BaseModel):
     matchScore: float | None = None  # similarity 0-1
     vibes: list[str] = []
     bpm: int = 120
+    felt_bpm: int | None = None
     key: str = "—"
     camelotKey: str | None = None
+    modeMinorProb: float | None = None
+    brightness: float | None = None
+    buildScore: float | None = None
+    loudnessRange: float | None = None
     stereoWidth: float = 0.5
     phaseCorrelation: float = 0.95
     crestFactor: float = 10.0
@@ -22,6 +27,7 @@ class TrackResult(BaseModel):
     lyricalIntent: str = "Chill & Atmospheric"
     energy: float = 0.5   # 0-1
     valence: float = 0.5  # 0-1
+    languageAffinity: float | None = None
     instruments: list[str] = []
     instrumentOrder: list[str] = []
     instrumentPace: str = "Steady Mid-Tempo"

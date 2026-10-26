@@ -2,6 +2,13 @@
 Recommendation Quality Evaluator for 1,000-Song Benchmark Suite.
 Computes multi-dimensional acoustic, linguistic, chronological, and genre metrics.
 """
+"""
+Legacy Evaluator for Echo Recommendations.
+
+NOTE: This legacy benchmark measures language purity, era MAE, and genre tag precision,
+NOT acoustic/emotional feel. See tests/feel_benchmark.py and VISION_ALIGNMENT.md for the
+canonical feel benchmark and acceptance test.
+"""
 from __future__ import annotations
 
 import unicodedata
@@ -231,10 +238,7 @@ def evaluate_single_recommendation_set(
                     f"Era Mismatch: Recommended '{rec_title}' ({rec_year}), exceeding 25-yr gap "
                     f"from anchor '{benchmark_song.title}' ({benchmark_song.release_year})"
                 )
-        else:
-            year_diffs.append(12.0)
-            era_scores.append(0.75)
-            era_window_passes += 1
+        # Note: missing rec_year is excluded from MAE and does not increment era_window_passes
 
         # 3. Genre evaluation
         if _is_genre_compatible(rec_genre, benchmark_song.expected_genre_family) or any(
@@ -243,7 +247,8 @@ def evaluate_single_recommendation_set(
             genre_matches += 1
 
         # 4. Harmonic & Pace evaluation
-        harmonic_matches.append(_harmonic_key_match("C Major", rec_key))
+        src_key = getattr(benchmark_song, "measured_key", None) or "C Major"
+        harmonic_matches.append(_harmonic_key_match(src_key, rec_key))
         tempo_matches.append(_bpm_octave_match(src_bpm, rec_bpm))
 
     purity = lang_matches / k

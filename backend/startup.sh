@@ -16,6 +16,11 @@ hf_hub_download(
     local_dir='$DEST',
 )
 "
+    local filepath="$DEST/$filename"
+    if [ ! -f "$filepath" ] || [ $(wc -c < "$filepath") -lt 1000 ]; then
+        echo "[startup] ERROR: $filename missing or smaller than 1000 bytes (LFS pointer / failed download)!"
+        exit 1
+    fi
     echo "[startup] $filename synced."
 }
 

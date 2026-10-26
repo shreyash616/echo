@@ -1,6 +1,10 @@
 """
 1,000-Song Recommendation Test Suite & Quality Benchmark Runner.
 
+NOTE: This legacy benchmark measures language purity, era MAE, and genre tag precision,
+NOT acoustic/emotional feel. See tests/feel_benchmark.py and VISION_ALIGNMENT.md for the
+canonical feel benchmark and acceptance test.
+
 Usage:
     # Full 1,000-song evaluation (local pipeline):
     python tests/test_recommendation_benchmark.py --sample-size 1000 --mode local
