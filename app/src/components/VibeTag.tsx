@@ -4,9 +4,17 @@ import { colors, radius, spacing, typography } from '../theme';
 
 const VIBE_COLORS: Record<string, { bg: string; text: string }> = {
   dark: { bg: 'rgba(139,92,246,0.15)', text: '#A78BFA' },
+  heavy: { bg: 'rgba(139,92,246,0.15)', text: '#A78BFA' },
+  somber: { bg: 'rgba(99,102,241,0.15)', text: '#A5B4FC' },
   energetic: { bg: 'rgba(251,191,36,0.15)', text: '#FCD34D' },
+  bright: { bg: 'rgba(251,191,36,0.15)', text: '#FCD34D' },
+  raw: { bg: 'rgba(251,146,60,0.15)', text: '#FB923C' },
   chill: { bg: 'rgba(45,212,191,0.15)', text: '#2DD4BF' },
+  warm: { bg: 'rgba(251,146,60,0.15)', text: '#FDBA74' },
   melodic: { bg: 'rgba(96,165,250,0.15)', text: '#93C5FD' },
+  punchy: { bg: 'rgba(244,63,94,0.15)', text: '#FDA4AF' },
+  builds: { bg: 'rgba(245,158,11,0.15)', text: '#FCD34D' },
+  driving: { bg: 'rgba(239,68,68,0.15)', text: '#FCA5A5' },
   aggressive: { bg: 'rgba(248,113,113,0.15)', text: '#FCA5A5' },
   euphoric: { bg: 'rgba(196,181,253,0.15)', text: '#C4B5FD' },
   sad: { bg: 'rgba(99,102,241,0.15)', text: '#A5B4FC' },
@@ -22,10 +30,20 @@ interface Props {
 }
 
 export const VibeTag: React.FC<Props> = ({ label }) => {
-  const c = VIBE_COLORS[label.toLowerCase()] ?? DEFAULT_COLOR;
+  const l = label.toLowerCase();
+  let c = VIBE_COLORS[l];
+  if (!c) {
+    for (const [key, val] of Object.entries(VIBE_COLORS)) {
+      if (l.includes(key)) {
+        c = val;
+        break;
+      }
+    }
+  }
+  const color = c ?? DEFAULT_COLOR;
   return (
-    <View style={[styles.tag, { backgroundColor: c.bg }]}>
-      <Text style={[styles.text, { color: c.text }]}>{label}</Text>
+    <View style={[styles.tag, { backgroundColor: color.bg }]}>
+      <Text style={[styles.text, { color: color.text }]}>{label}</Text>
     </View>
   );
 };

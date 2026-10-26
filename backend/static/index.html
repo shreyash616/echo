@@ -1575,6 +1575,10 @@
         const instSnippet = (track.instruments || []).slice(0, 2).join(' • ');
         const vocalSnippet = (track.vocalPattern || '').split('(')[0].trim();
         const recDecade = track.decade || (track.year ? `${Math.floor(track.year / 10) * 10}s` : '');
+        const langBadge = (track.languageAffinity !== null && track.languageAffinity !== undefined && track.languageAffinity < 0.99)
+          ? `<span class="rec-tag" style="background: rgba(45,212,191,0.15); border-color: rgba(45,212,191,0.3); color: #2dd4bf;">🌐 Feel Cross-Language</span>`
+          : '';
+        const vibeTags = (track.vibes || []).slice(0, 1).map(v => `<span class="rec-tag" style="background: rgba(139,92,246,0.15); border-color: rgba(139,92,246,0.3); color: #c4b5fd;">🌊 ${v}</span>`).join('');
         const reasonsHtml = (track.matchReasons || [])
           .filter(r => !r.toLowerCase().includes('bpm') && !r.toLowerCase().includes('camelot') && !r.toLowerCase().includes('key'))
           .map(r => `<span class="reason-badge">✨ ${r}</span>`).join('');
@@ -1586,6 +1590,8 @@
             <div class="rec-title">${track.title}</div>
             <div class="rec-artist">${track.artist}</div>
             <div class="rec-structural-tags">
+              ${vibeTags}
+              ${langBadge}
               ${recDecade ? `<span class="rec-tag">📅 (${recDecade})</span>` : ''}
               ${instSnippet ? `<span class="rec-tag">🎸 ${instSnippet}</span>` : ''}
               ${vocalSnippet ? `<span class="rec-tag">🎤 ${vocalSnippet}</span>` : ''}
