@@ -1,0 +1,164 @@
+{
+  "timestamp": "2026-10-26T08:54:48Z",
+  "base_url": "https://shreyash616-echo-backend.hf.space",
+  "total_seeds": 4,
+  "total_targets": 11,
+  "total_hits": 1,
+  "recall_at_20": "1/11",
+  "recall_ratio": 0.0909,
+  "self_recommended_count": 0,
+  "seeds": [
+    {
+      "seed": {
+        "title": "Simple Man",
+        "artist": "Lynyrd Skynyrd",
+        "language": "en"
+      },
+      "resolved_id": "1559695",
+      "resolved_track": "Simple Man by Lynyrd Skynyrd",
+      "perception": {
+        "bpm": 60,
+        "felt_bpm": 120,
+        "key": "D# Minor",
+        "energy": 0.68,
+        "valence": 0.59,
+        "instrumentPace": "Upbeat & Groovy (8th-Note Subdivision)",
+        "modeMinorProb": 0.4,
+        "buildScore": 0.86,
+        "vibes": [
+          "Rock / Telugu",
+          "Acoustic / Hindi"
+        ]
+      },
+      "round_trip_seconds": 15.79,
+      "k_returned": 20,
+      "targets_count": 3,
+      "hits_count": 0,
+      "hits": [],
+      "self_recommended": false,
+      "top_5": [
+        "I Don't Want to Miss a Thing (From \"Armageddon\" Soundtrack) - Aerosmith (0.8951)",
+        "Baba O'Riley - The Who (0.8778)",
+        "Gimme All Your Lovin' - ZZ Top (0.8602)",
+        "Smoke on the Water (2012 Remaster) - Deep Purple (0.855)",
+        "Start Me Up (Remastered 2009) - The Rolling Stones (0.8521)"
+      ]
+    },
+    {
+      "seed": {
+        "title": "Waiting Around to Die",
+        "artist": "Townes Van Zandt",
+        "language": "en"
+      },
+      "resolved_id": "596577332",
+      "resolved_track": "Waiting Around to Die by Townes Van Zandt",
+      "perception": {
+        "bpm": 180,
+        "felt_bpm": 90,
+        "key": "G# Major",
+        "energy": 0.55,
+        "valence": 0.53,
+        "instrumentPace": "Upbeat & Groovy (8th-Note Subdivision)",
+        "modeMinorProb": 0.29,
+        "buildScore": 0.6,
+        "vibes": [
+          "Acoustic / Hindi",
+          "Acoustic / Hindi"
+        ]
+      },
+      "round_trip_seconds": 15.99,
+      "k_returned": 19,
+      "targets_count": 3,
+      "hits_count": 0,
+      "hits": [],
+      "self_recommended": false,
+      "top_5": [
+        "Rising Sun Blues - Doc Watson (0.8694)",
+        "The Moonlight Song - Blaze Foley (0.8584)",
+        "Clay Pigeons - Blaze Foley (0.8431)",
+        "Little Sadie - Doc Watson (0.8269)",
+        "The Way It Goes - Gillian Welch (0.8263)"
+      ]
+    },
+    {
+      "seed": {
+        "title": "Bang Data",
+        "artist": "Bang Data",
+        "language": "es"
+      },
+      "resolved_id": "731189182",
+      "resolved_track": "Bang Data by Bang Data",
+      "perception": {
+        "bpm": 172,
+        "felt_bpm": 86,
+        "key": "G# Major",
+        "energy": 0.69,
+        "valence": 0.56,
+        "instrumentPace": "Upbeat & Groovy (8th-Note Subdivision)",
+        "modeMinorProb": 0.29,
+        "buildScore": 0.43,
+        "vibes": [
+          "Dnb / Edm",
+          "Rock / Tamil"
+        ]
+      },
+      "round_trip_seconds": 16.1,
+      "k_returned": 20,
+      "targets_count": 1,
+      "hits_count": 0,
+      "hits": [],
+      "self_recommended": false,
+      "top_5": [
+        "Carmen de Bol\u00edvar - Cumbia Ya! (0.8547)",
+        "Da pa lo do - Rita Indiana (0.8167)",
+        "La We\u00e1 - La Cumbia Chicharra (0.8095)",
+        "Early In The Morning - Orkesta Mendoza (0.8031)",
+        "El Tabl\u00f3n - Cumbia Ya! (0.8024)"
+      ]
+    },
+    {
+      "seed": {
+        "title": "Boyfriend",
+        "artist": "Karan Aujla",
+        "language": "pa"
+      },
+      "resolved_id": "3495188951",
+      "resolved_track": "Boyfriend by Karan Aujla",
+      "perception": {
+        "bpm": 96,
+        "felt_bpm": 192,
+        "key": "G# Major",
+        "energy": 0.98,
+        "valence": 0.7,
+        "instrumentPace": "Rapid & Driving (16th-Note Subdivision)",
+        "modeMinorProb": 0.28,
+        "buildScore": 0.61,
+        "vibes": [
+          "Latin / Punjabi",
+          "Hindi / Punjabi"
+        ]
+      },
+      "round_trip_seconds": 16.03,
+      "k_returned": 19,
+      "targets_count": 4,
+      "hits_count": 1,
+      "hits": [
+        {
+          "target": "For A Reason - Karan Aujla",
+          "rank": 13,
+          "score": 0.7428,
+          "actual_title": "For A Reason",
+          "actual_artist": "Karan Aujla"
+        }
+      ],
+      "self_recommended": false,
+      "top_5": [
+        "Bambiha Bole (feat. Sidhu Moose Wala) - Amrit Maan (0.8962)",
+        "Young G.O.A.T - Cheema Y (0.866)",
+        "Love Like This - Diljit Dosanjh (0.8621)",
+        "Dil Dardeh - Sukha (0.8612)",
+        "295 - Sidhu Moose Wala (0.8583)"
+      ]
+    }
+  ]
+}

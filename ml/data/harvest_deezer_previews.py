@@ -59,28 +59,42 @@ def _get_ffmpeg_cmd() -> str:
         return winget_paths[0]
     return "ffmpeg"
 
-# Curated multi-genre & multi-language seed queries to build a diverse mainstream catalog
+# Curated multi-genre & multi-language seed queries to build a diverse mainstream catalog (Phase 4.2)
 DEFAULT_SEED_QUERIES: list[tuple[str, str]] = [
-    # English Pop / Rock / Indie / Alternative
-    ("pop hits", "pop"), ("indie pop", "indie"), ("synthwave", "synthwave"),
-    ("alternative rock", "rock"), ("classic rock", "rock"), ("indie rock", "indie"),
-    ("post punk", "rock"), ("metalcore", "metal"), ("hard rock", "rock"),
+    # Benchmark Target & Canonical Feel Artist Seeds
+    ("Led Zeppelin", "rock"), ("Alice in Chains", "grunge"), ("Radiohead", "alternative"),
+    ("Manu Chao", "latin"), ("Thee Oh Sees", "garage"), ("Shubh", "punjabi"),
+    ("Sukha", "punjabi"), ("Danger Mouse", "alternative"), ("Townes Van Zandt", "folk"),
+    ("Bang Data", "latin"), ("Karan Aujla", "punjabi"), ("Lynyrd Skynyrd", "rock"),
+    # Rock / Grunge / Blues-Rock / Southern Rock
+    ("classic rock", "rock"), ("southern rock", "rock"), ("blues rock", "rock"),
+    ("grunge", "grunge"), ("garage rock", "rock"), ("psych rock", "psych"),
+    ("alternative rock", "rock"), ("indie rock", "indie"), ("post punk", "rock"),
+    ("britpop", "rock"), ("shoegaze", "indie"), ("dream pop", "indie"),
+    ("metalcore", "metal"), ("hard rock", "rock"),
+    # Folk / Acoustic / Alt-Country
     ("acoustic indie", "acoustic"), ("folk acoustic", "folk"), ("singer songwriter", "acoustic"),
-    # Hip-Hop / R&B / Soul
+    ("alt country", "country"), ("indie folk", "folk"), ("dark acoustic ballad", "folk"),
+    # Hip-Hop / R&B / Soul / Trip-Hop
     ("hip hop", "hip-hop"), ("trap beats", "trap"), ("melodic rap", "hip-hop"),
     ("r&b soul", "r&b"), ("neo soul", "soul"), ("boom bap", "hip-hop"),
+    ("trip hop", "trip-hop"), ("downtempo electronic", "downtempo"),
     # Electronic / Dance / Ambient
     ("house music", "house"), ("techno", "techno"), ("drum and bass", "dnb"),
     ("edm festival", "edm"), ("lo-fi beats", "lo-fi"), ("ambient chill", "ambient"),
-    ("downtempo electronic", "downtempo"), ("phonk", "phonk"),
-    # South Asian (Hindi / Punjabi / Tamil / Telugu)
-    ("bollywood hits", "hindi"), ("hindi indie", "hindi"), ("arijit singh", "hindi"),
+    ("synthwave", "synthwave"), ("phonk", "phonk"),
+    # Global / Latin / Cumbia / Reggae
+    ("latin alt", "latin"), ("cumbia", "latin"), ("reggae", "reggae"),
+    ("reggaeton hits", "latin"), ("afrobeats", "afrobeats"), ("french pop", "french"),
+    # South Asian (Hindi / Punjabi / Tamil / Telugu / Ghazal / Sufi)
+    ("bollywood hits", "hindi"), ("bollywood 70s", "hindi"), ("hindi indie", "hindi"),
+    ("ghazal", "hindi"), ("sufi", "hindi"), ("arijit singh", "hindi"),
     ("pritam bollywood", "hindi"), ("punjabi hits", "punjabi"), ("diljit dosanjh", "punjabi"),
-    ("ap dhillon", "punjabi"), ("karan aujla", "punjabi"), ("tamil hits", "tamil"),
+    ("ap dhillon", "punjabi"), ("tamil hits", "tamil"), ("tamil 90s", "tamil"),
     ("anirudh ravichander", "tamil"), ("telugu hits", "telugu"),
-    # East Asian / Latin / Global
-    ("k-pop hits", "k-pop"), ("j-pop anime", "j-pop"), ("reggaeton hits", "latin"),
-    ("latin pop", "latin"), ("afrobeats", "afrobeats"), ("french pop", "french"),
+    # East Asian
+    ("k-pop hits", "k-pop"), ("k-indie", "k-pop"), ("j-pop anime", "j-pop"),
+    ("j-rock", "j-rock"), ("city pop", "pop"),
     # Instrumental / Jazz / Classical
     ("jazz instrumental", "jazz"), ("piano solo", "classical"), ("cinematic soundtrack", "soundtrack"),
 ]
@@ -96,34 +110,54 @@ _HEADERS = {
 
 
 def _decode_mp3_bytes_to_mel(audio_bytes: bytes) -> np.ndarray | None:
-    """Decode raw MP3/AAC preview bytes via ffmpeg and extract fixed-floor mel spectrogram."""
+    """Decode raw MP3/AAC preview bytes via PyAV or ffmpeg and extract fixed-floor mel spectrogram."""
+    y = None
+    # Method 1: PyAV (fast, in-process, no external ffmpeg required)
     try:
-        ffmpeg_cmd = _get_ffmpeg_cmd()
-        proc = subprocess.run(
-            [
-                ffmpeg_cmd, "-i", "pipe:0",
-                "-f", "wav", "-ar", str(SR), "-ac", "1",
-                "-loglevel", "error",
-                "pipe:1",
-            ],
-            input=audio_bytes,
-            capture_output=True,
-            timeout=15,
-        )
-        if proc.returncode != 0:
-            return None
-        y, _ = sf.read(io.BytesIO(proc.stdout), dtype="float32", always_2d=False)
-        if len(y) < SR * 5 or float(np.max(np.abs(y))) < 1e-4:
-            return None
-
-        mel = librosa.feature.melspectrogram(
-            y=y, sr=SR, n_mels=N_MELS, n_fft=N_FFT, hop_length=HOP_LENGTH
-        )
-        mel_db = librosa.power_to_db(mel, ref=np.max, top_db=TOP_DB)
-        mel_norm = np.clip((mel_db + TOP_DB) / TOP_DB, 0.0, 1.0)
-        return mel_norm.astype(np.float32)
+        import av
+        container = av.open(io.BytesIO(audio_bytes))
+        stream = next(s for s in container.streams if s.type == "audio")
+        resampler = av.AudioResampler(format="fltp", layout="mono", rate=SR)
+        chunks = []
+        for frame in container.decode(stream):
+            for resampled in resampler.resample(frame):
+                chunks.append(resampled.to_ndarray())
+        if chunks:
+            y = np.concatenate(chunks, axis=1).squeeze()
     except Exception:
+        y = None
+
+    # Method 2: ffmpeg subprocess fallback
+    if y is None or len(y) < SR * 5:
+        try:
+            ffmpeg_cmd = _get_ffmpeg_cmd()
+            proc = subprocess.run(
+                [
+                    ffmpeg_cmd, "-i", "pipe:0",
+                    "-f", "wav", "-ar", str(SR), "-ac", "1",
+                    "-loglevel", "error",
+                    "pipe:1",
+                ],
+                input=audio_bytes,
+                capture_output=True,
+                timeout=15,
+            )
+            if proc.returncode == 0:
+                y_sub, _ = sf.read(io.BytesIO(proc.stdout), dtype="float32", always_2d=False)
+                if len(y_sub) >= SR * 5:
+                    y = y_sub
+        except Exception:
+            pass
+
+    if y is None or len(y) < SR * 5 or float(np.max(np.abs(y))) < 1e-4:
         return None
+
+    mel = librosa.feature.melspectrogram(
+        y=y, sr=SR, n_mels=N_MELS, n_fft=N_FFT, hop_length=HOP_LENGTH
+    )
+    mel_db = librosa.power_to_db(mel, ref=np.max, top_db=TOP_DB)
+    mel_norm = np.clip((mel_db + TOP_DB) / TOP_DB, 0.0, 1.0)
+    return mel_norm.astype(np.float32)
 
 
 def _fetch_tracks_for_query(client: httpx.Client, query: str, genre: str, limit: int) -> list[dict]:

@@ -256,19 +256,24 @@ def main() -> None:
             genre = _clean_str(row.get("genre"), "")
             analytics = analyze_mel_spectrogram(mel, genre_hint=genre)
             track_meta = {
-                "id":          str(row.get("id", key)),
-                "title":       _clean_str(row.get("title"), f"Track {key}"),
-                "artist":      _clean_str(row.get("artist"), ""),
-                "album":       _clean_str(row.get("album"), ""),
-                "albumArtUrl": _clean_str(row.get("albumArtUrl"), ""),
-                "previewUrl":  row.get("previewUrl"),
-                "durationMs":  int(row.get("durationMs", 30000)),
-                "genre":       genre,
-                "bpm":         analytics["bpm"],
-                "key":         analytics["key"],
-                "energy":      analytics["energy"],
-                "valence":     analytics["valence"],
-                "vibes":       analytics["vibes"],
+                "id":            str(row.get("id", key)),
+                "title":         _clean_str(row.get("title"), f"Track {key}"),
+                "artist":        _clean_str(row.get("artist"), ""),
+                "album":         _clean_str(row.get("album"), ""),
+                "albumArtUrl":   _clean_str(row.get("albumArtUrl"), ""),
+                "previewUrl":    row.get("previewUrl"),
+                "durationMs":    int(row.get("durationMs", 30000)),
+                "genre":         genre,
+                "bpm":           analytics["bpm"],
+                "felt_bpm":      analytics.get("felt_bpm", analytics["bpm"]),
+                "key":           analytics["key"],
+                "modeMinorProb": analytics.get("modeMinorProb", 0.50),
+                "brightness":    analytics.get("brightness", 0.45),
+                "buildScore":    analytics.get("buildScore", 0.50),
+                "loudnessRange": analytics.get("loudnessRange", 0.10),
+                "energy":        analytics["energy"],
+                "valence":       analytics["valence"],
+                "vibes":         analytics["vibes"],
             }
         else:
             genre = _clean_str(row.get("track_genre_top"), "")
@@ -279,19 +284,24 @@ def main() -> None:
             except Exception:
                 dur_ms = 0
             track_meta = {
-                "id":          f"fma_{key}",
-                "title":       _clean_str(row.get("track_title"), f"Track {key}"),
-                "artist":      _clean_str(row.get("artist_name"), ""),
-                "album":       _clean_str(row.get("album_title"), ""),
-                "albumArtUrl": "",
-                "previewUrl":  None,
-                "durationMs":  dur_ms,
-                "genre":       genre,
-                "bpm":         analytics["bpm"],
-                "key":         analytics["key"],
-                "energy":      analytics["energy"],
-                "valence":     analytics["valence"],
-                "vibes":       analytics["vibes"],
+                "id":            f"fma_{key}",
+                "title":         _clean_str(row.get("track_title"), f"Track {key}"),
+                "artist":        _clean_str(row.get("artist_name"), ""),
+                "album":         _clean_str(row.get("album_title"), ""),
+                "albumArtUrl":   "",
+                "previewUrl":    None,
+                "durationMs":    dur_ms,
+                "genre":         genre,
+                "bpm":           analytics["bpm"],
+                "felt_bpm":      analytics.get("felt_bpm", analytics["bpm"]),
+                "key":           analytics["key"],
+                "modeMinorProb": analytics.get("modeMinorProb", 0.50),
+                "brightness":    analytics.get("brightness", 0.45),
+                "buildScore":    analytics.get("buildScore", 0.50),
+                "loudnessRange": analytics.get("loudnessRange", 0.10),
+                "energy":        analytics["energy"],
+                "valence":       analytics["valence"],
+                "vibes":         analytics["vibes"],
             }
 
         batch_crops.append(crops)
@@ -339,17 +349,46 @@ def main() -> None:
     centers = kmeans.cluster_centers_  # (n_clusters, 512)
     centers = centers / (np.linalg.norm(centers, axis=1, keepdims=True) + 1e-8)
 
-    # Automatically derive human-interpretable names for each archetype
-    # based on prominent genre/artists in that cluster
+    # Automatically derive human-interpretable feel words for each archetype (Phase 4.3)
+    # based on the cluster's acoustic distribution (felt tempo, energy, modeMinorProb, buildScore)
+    def _cluster_feel_name(cluster_metas: list[dict]) -> str:
+        if not cluster_metas:
+            return "Atmospheric Flow"
+        mean_tempo = np.mean([m.get("felt_bpm", m.get("bpm", 120)) for m in cluster_metas])
+        mean_energy = np.mean([m.get("energy", 0.5) for m in cluster_metas])
+        mean_minor = np.mean([m.get("modeMinorProb", 0.5) for m in cluster_metas])
+        mean_build = np.mean([m.get("buildScore", 0.5) for m in cluster_metas])
+
+        if mean_tempo <= 75:
+            pace = "Slow"
+        elif mean_tempo <= 105:
+            pace = "Steady"
+        elif mean_tempo <= 135:
+            pace = "Driving"
+        else:
+            pace = "Fast"
+
+        if mean_minor >= 0.58:
+            weight = "Heavy & Dark" if mean_energy >= 0.60 else "Sparse & Somber"
+        elif mean_minor <= 0.42:
+            weight = "Raw & Bright" if mean_energy >= 0.60 else "Warm & Breezy"
+        else:
+            weight = "Melodic & Punchy" if mean_energy >= 0.55 else "Intimate & Acoustic"
+
+        if mean_build >= 0.58:
+            arc = "Builds"
+        elif mean_build <= 0.38:
+            arc = "Hypnotic Groove"
+        else:
+            arc = "Flow"
+
+        return f"{pace}, {weight}, {arc}"
+
     archetype_names: dict[str, str] = {}
     for c_id in range(n_clusters):
         c_indices = np.where(cluster_labels == c_id)[0]
-        c_genres = [metadata[i].get("genre", "") for i in c_indices if metadata[i].get("genre")]
-        top_genres = [g for g, _ in Counter(c_genres).most_common(2) if g]
-        if top_genres:
-            archetype_names[str(c_id)] = " / ".join(top_genres).title()
-        else:
-            archetype_names[str(c_id)] = f"Acoustic Vibe #{c_id + 1}"
+        c_metas = [metadata[i] for i in c_indices]
+        archetype_names[str(c_id)] = _cluster_feel_name(c_metas)
 
     # Assign each song its top-2 matching discovered archetypes
     for i, meta in enumerate(metadata):
