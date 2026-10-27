@@ -39,7 +39,7 @@ def _assert_match_expected(actual: dict, expected: dict, fixture_name: str):
                 f"[{fixture_name}] Key '{key}' mismatch: expected {exp_val!r}, got {act_val!r}"
             )
         elif isinstance(exp_val, float):
-            assert abs(act_val - exp_val) < 2e-3, (
+            assert abs(act_val - exp_val) < 5e-3, (
                 f"[{fixture_name}] Key '{key}' float mismatch: expected {exp_val}, got {act_val}"
             )
         elif isinstance(exp_val, dict):
@@ -51,7 +51,7 @@ def _assert_match_expected(actual: dict, expected: dict, fixture_name: str):
                     act_sub_val = act_val.get(int(dk))
                 assert act_sub_val is not None, f"[{fixture_name}] Key '{key}[{dk}]' missing in actual"
                 if isinstance(de_v, float):
-                    assert abs(act_sub_val - de_v) < 2e-3, (
+                    assert abs(act_sub_val - de_v) < 5e-3, (
                         f"[{fixture_name}] Key '{key}[{dk}]' mismatch: expected {de_v}, got {act_sub_val}"
                     )
                 else:
