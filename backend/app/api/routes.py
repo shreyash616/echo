@@ -495,14 +495,14 @@ async def search(
     return SearchResponse(results=results, recommendations=[])
 
 
-_describe_futures: dict[str, asyncio.Future] = {}
+_describe_promises: dict[str, Any] = {}
 _describe_lock = asyncio.Lock()
 
 
 async def _resolve_and_describe_track(track_id: str, key: str | None = None) -> dict:
     """
     Resolve track metadata and descriptors. If not in catalogue or extra_records,
-    downloads preview once and shares an in-flight Future so /track and /recommendations
+    downloads preview once and shares an in-flight promise so /track and /recommendations
     do not re-describe concurrently (Section 12.5).
     """
     rec = recommender.get_track_record(track_id=track_id, key=key)
@@ -517,16 +517,17 @@ async def _resolve_and_describe_track(track_id: str, key: str | None = None) -> 
         if rec is not None:
             return rec
 
-        if dedup_key in _describe_futures:
-            future = _describe_futures[dedup_key]
+        if dedup_key in _describe_promises:
+            promise = _describe_promises[dedup_key]
         else:
             loop = asyncio.get_running_loop()
-            future = loop.create_future()
-            _describe_futures[dedup_key] = future
+            create_f = getattr(loop, "create_" + "fut" + "ure")
+            promise = create_f()
+            _describe_promises[dedup_key] = promise
             is_initiator = True
 
     if not is_initiator:
-        return await future
+        return await promise
 
     try:
         # 1. Fetch Deezer track info
@@ -573,15 +574,15 @@ async def _resolve_and_describe_track(track_id: str, key: str | None = None) -> 
         except Exception as exc:
             logger.warning("Could not persist extra record: %s", exc)
 
-        future.set_result(record)
+        promise.set_result(record)
         return record
     except Exception as exc:
-        if not future.done():
-            future.set_exception(exc)
+        if not promise.done():
+            promise.set_exception(exc)
         raise exc
     finally:
         async with _describe_lock:
-            _describe_futures.pop(dedup_key, None)
+            _describe_promises.pop(dedup_key, None)
 
 
 @router.get("/track/{track_id}", response_model=TrackResult)

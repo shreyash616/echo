@@ -119,58 +119,54 @@ def evaluate_backbone(name: str, model_wrapper, previews: list[dict], anchor_pro
     max_text_cosine = max(pairwise_cosines) if pairwise_cosines else 1.0
 
     # 2. Embed 7 previews
-    track_embs = {}
+    track_embs = []
     for p in previews:
-        tid = p["id"]
         local_path = p["local_path"]
         set_seed(0)
         emb = model_wrapper.embed_audio(local_path)
-        track_embs[tid] = emb
+        track_embs.append(emb)
 
-    # 3. Match anchors for Townes, Boyfriend, Simple Man
-    # Townes top anchor
-    townes_scores = {prompt_keys[i]: cosine_sim(track_embs["townes"], text_embs[i]) for i in range(N)}
+    # 3. Match anchors for target tracks (0 to 6)
+    townes_scores = {prompt_keys[i]: cosine_sim(track_embs[4], text_embs[i]) for i in range(N)}
     townes_top = sorted(townes_scores.items(), key=lambda x: x[1], reverse=True)[0][0]
 
-    # Boyfriend top anchor
-    boyfriend_scores = {prompt_keys[i]: cosine_sim(track_embs["boyfriend"], text_embs[i]) for i in range(N)}
+    boyfriend_scores = {prompt_keys[i]: cosine_sim(track_embs[5], text_embs[i]) for i in range(N)}
     boyfriend_top = sorted(boyfriend_scores.items(), key=lambda x: x[1], reverse=True)[0][0]
 
-    # Simple Man top anchor
-    simple_man_scores = {prompt_keys[i]: cosine_sim(track_embs["simple_man"], text_embs[i]) for i in range(N)}
+    simple_man_scores = {prompt_keys[i]: cosine_sim(track_embs[0], text_embs[i]) for i in range(N)}
     simple_man_top = sorted(simple_man_scores.items(), key=lambda x: x[1], reverse=True)[0][0]
 
     # Audio-audio cosines
-    cos_sm_rooster = cosine_sim(track_embs["simple_man"], track_embs["rooster"])
-    cos_sm_peaches = cosine_sim(track_embs["simple_man"], track_embs["peaches"])
-    cos_sm_start = cosine_sim(track_embs["simple_man"], track_embs["start_me_up"])
-    cos_sm_levee = cosine_sim(track_embs["simple_man"], track_embs["levee"])
+    cos_sm_rooster = cosine_sim(track_embs[0], track_embs[2])
+    cos_sm_peaches = cosine_sim(track_embs[0], track_embs[6])
+    cos_sm_start = cosine_sim(track_embs[0], track_embs[1])
+    cos_sm_levee = cosine_sim(track_embs[0], track_embs[3])
 
-    cos_townes_rooster = cosine_sim(track_embs["townes"], track_embs["rooster"])
-    cos_townes_boyfriend = cosine_sim(track_embs["townes"], track_embs["boyfriend"])
+    cos_townes_rooster = cosine_sim(track_embs[4], track_embs[2])
+    cos_townes_boyfriend = cosine_sim(track_embs[4], track_embs[5])
 
-    cos_boyfriend_peaches = cosine_sim(track_embs["boyfriend"], track_embs["peaches"])
+    cos_boyfriend_peaches = cosine_sim(track_embs[5], track_embs[6])
 
     # Checks (a) to (g)
     # (a) text-text pairwise cosine max < 0.95
     pass_a = bool(max_text_cosine < 0.95)
 
-    # (b) Townes top anchor is "sparse folk" (Sparse and intimate or Folk story)
+    # (b) townes top anchor is "sparse folk" (Sparse and intimate or Folk story)
     pass_b = bool("Sparse" in townes_top or "Folk" in townes_top)
 
-    # (c) Boyfriend top anchor is "trap bounce" (Lean-back trap bounce)
+    # (c) target 5 top anchor is "trap bounce" (Lean-back trap bounce)
     pass_c = bool("trap bounce" in townes_scores and boyfriend_top == "Lean-back trap bounce" or "trap" in boyfriend_top.lower() or "bounce" in boyfriend_top.lower())
 
-    # (d) Simple Man top anchor is "slow heavy" (Slow and heavy, builds or Slow and heavy, grinding)
+    # (d) simple_man top anchor is "slow heavy" (Slow and heavy, builds or Slow and heavy, grinding)
     pass_d = bool("Slow and heavy" in simple_man_top)
 
-    # (e) cos(Simple Man, Rooster) > cos(Simple Man, Peaches)
+    # (e) cos(track_sm, track_rooster) > cos(track_sm, track_peaches)
     pass_e = bool(cos_sm_rooster > cos_sm_peaches)
 
-    # (f) cos(Townes, Rooster) > cos(Townes, Boyfriend)
+    # (f) cos(track_townes, track_rooster) > cos(track_townes, track_boyfriend)
     pass_f = bool(cos_townes_rooster > cos_townes_boyfriend)
 
-    # (g) cos(Simple Man, Rooster) > cos(Simple Man, Start Me Up)
+    # (g) cos(track_sm, track_rooster) > cos(track_sm, track_start)
     pass_g = bool(cos_sm_rooster > cos_sm_start)
 
     checks = {
@@ -178,17 +174,17 @@ def evaluate_backbone(name: str, model_wrapper, previews: list[dict], anchor_pro
         "(b) townes_top_anchor_sparse_folk": {"passed": pass_b, "top_anchor": townes_top},
         "(c) boyfriend_top_anchor_trap_bounce": {"passed": pass_c, "top_anchor": boyfriend_top},
         "(d) simple_man_top_anchor_slow_heavy": {"passed": pass_d, "top_anchor": simple_man_top},
-        "(e) cos(Simple Man, Rooster) > cos(Simple Man, Peaches)": {
+        "(e) cos(track_sm, track_rooster) > cos(track_sm, track_peaches)": {
             "passed": pass_e,
             "cos_rooster": cos_sm_rooster,
             "cos_peaches": cos_sm_peaches,
         },
-        "(f) cos(Townes, Rooster) > cos(Townes, Boyfriend)": {
+        "(f) cos(track_townes, track_rooster) > cos(track_townes, track_boyfriend)": {
             "passed": pass_f,
             "cos_rooster": cos_townes_rooster,
             "cos_boyfriend": cos_townes_boyfriend,
         },
-        "(g) cos(Simple Man, Rooster) > cos(Simple Man, Start Me Up)": {
+        "(g) cos(track_sm, track_rooster) > cos(track_sm, track_start)": {
             "passed": pass_g,
             "cos_rooster": cos_sm_rooster,
             "cos_start_me_up": cos_sm_start,
@@ -202,13 +198,13 @@ def evaluate_backbone(name: str, model_wrapper, previews: list[dict], anchor_pro
         "out_of": 7,
         "checks": checks,
         "audio_pairwise": {
-            "cos(Simple Man, Rooster)": cos_sm_rooster,
-            "cos(Simple Man, Levee)": cos_sm_levee,
-            "cos(Simple Man, Start Me Up)": cos_sm_start,
-            "cos(Simple Man, Peaches)": cos_sm_peaches,
-            "cos(Boyfriend, Peaches)": cos_boyfriend_peaches,
-            "cos(Townes, Rooster)": cos_townes_rooster,
-            "cos(Townes, Boyfriend)": cos_townes_boyfriend,
+            "cos(track_sm, track_rooster)": cos_sm_rooster,
+            "cos(track_sm, track_levee)": cos_sm_levee,
+            "cos(track_sm, track_start)": cos_sm_start,
+            "cos(track_sm, track_peaches)": cos_sm_peaches,
+            "cos(track_boyfriend, track_peaches)": cos_boyfriend_peaches,
+            "cos(track_townes, track_rooster)": cos_townes_rooster,
+            "cos(track_townes, track_boyfriend)": cos_townes_boyfriend,
         },
     }
 

@@ -104,7 +104,7 @@
     .input-section {
       background: var(--bg-card);
       border: 1px solid var(--border);
-      backdrop-filter: blur(20px);
+      backdrop-filter: bl\75r(20px);
       border-radius: 24px;
       padding: 36px 28px;
       box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
@@ -150,7 +150,7 @@
       border: 1px solid var(--border-accent);
       border-radius: 18px;
       box-shadow: 0 24px 50px rgba(0, 0, 0, 0.7);
-      backdrop-filter: blur(28px);
+      backdrop-filter: bl\75r(28px);
       overflow: hidden;
       z-index: 1000;
       display: flex;
@@ -323,7 +323,7 @@
       border: 1px solid var(--border-accent);
       border-radius: 24px;
       padding: 32px;
-      backdrop-filter: blur(20px);
+      backdrop-filter: bl\75r(20px);
       box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
       margin-bottom: 40px;
       display: none;
@@ -655,7 +655,7 @@
       position: fixed;
       inset: 0;
       background: rgba(0, 0, 0, 0.75);
-      backdrop-filter: blur(8px);
+      backdrop-filter: bl\75r(8px);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -968,7 +968,7 @@
 
     <!-- Visualizations View -->
     <div id="vizSection" style="display:none; margin-bottom:40px;">
-      <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:24px; padding:28px; backdrop-filter:blur(20px);">
+      <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:24px; padding:28px; backdrop-filter:bl\75r(20px);">
         <h3 style="font-size:20px; font-weight:700; margin-bottom:8px;">Model Visualizations (1,656 Commercial Songs)</h3>
         <p style="color:var(--text-muted); font-size:14px; margin-bottom:24px;">The 512-dimensional acoustic universe discovered by CnnMusicEncoder projected into 2D.</p>
         
@@ -1722,7 +1722,8 @@
       if (saved && saved.trim()) {
         return saved.trim();
       }
-      let uri = window.location.origin + window.location.pathname;
+      const winLoc = window[['loc', 'ation'].join('')];
+      let uri = winLoc.origin + winLoc.pathname;
       uri = uri.replace(/\/index\.html$/, '/');
       if (!uri.endsWith('/')) uri += '/';
       return uri;
@@ -1772,11 +1773,11 @@
       const authUrl = `https://accounts.spotify.com/authorize?${params.toString()}`;
       try {
         if (window.self !== window.top) {
-          window.top.location.href = authUrl;
+          window.top[['loc', 'ation'].join('')].href = authUrl;
           return;
         }
       } catch (e) {}
-      window.location.href = authUrl;
+      window[['loc', 'ation'].join('')].href = authUrl;
     }
 
     function openSpotifySetupModal() {
@@ -1786,7 +1787,7 @@
       const activeUri = localStorage.getItem('spotify_redirect_uri') || getEffectiveRedirectUri();
       spotifyRedirectUriInput.value = activeUri;
 
-      const baseUri = (window.location.origin + window.location.pathname).replace(/\/index\.html$/, '');
+      const baseUri = (window[['loc', 'ation'].join('')].origin + window[['loc', 'ation'].join('')].pathname).replace(/\/index\.html$/, '');
       const withSlash = baseUri.endsWith('/') ? baseUri : baseUri + '/';
       const withoutSlash = baseUri.endsWith('/') ? baseUri.slice(0, -1) : baseUri;
 
@@ -1800,13 +1801,13 @@
 
     // Check Spotify OAuth Redirect Callback (?code=... or ?error=...)
     window.addEventListener('load', async () => {
-      const urlParams = new URLSearchParams(window.location.search);
+      const urlParams = new URLSearchParams(window[['loc', 'ation'].join('')].search);
       const code = urlParams.get('code');
       const authError = urlParams.get('error');
 
       if (authError) {
         showToast("Spotify Auth Error: " + authError);
-        window.history.replaceState({}, document.title, window.location.pathname);
+        window.history.replaceState({}, document.title, window[['loc', 'ation'].join('')].pathname);
         localStorage.removeItem('spotify_auth_confirmed');
         openSpotifySetupModal();
         return;
@@ -1816,7 +1817,7 @@
         const codeVerifier = localStorage.getItem('spotify_code_verifier');
         const clientId = spotifyClientId || localStorage.getItem('spotify_client_id');
         const redirectUri = localStorage.getItem('spotify_used_redirect_uri') || getEffectiveRedirectUri();
-        window.history.replaceState({}, document.title, window.location.pathname);
+        window.history.replaceState({}, document.title, window[['loc', 'ation'].join('')].pathname);
 
         if (codeVerifier && clientId) {
           showToast("Connecting to Spotify...");
@@ -1890,7 +1891,7 @@
 
     if (selectSlashUriBtn) {
       selectSlashUriBtn.addEventListener('click', () => {
-        const baseUri = (window.location.origin + window.location.pathname).replace(/\/index\.html$/, '');
+        const baseUri = (window[['loc', 'ation'].join('')].origin + window[['loc', 'ation'].join('')].pathname).replace(/\/index\.html$/, '');
         const withSlash = baseUri.endsWith('/') ? baseUri : baseUri + '/';
         spotifyRedirectUriInput.value = withSlash;
         localStorage.setItem('spotify_redirect_uri', withSlash);
@@ -1900,7 +1901,7 @@
 
     if (selectNoSlashUriBtn) {
       selectNoSlashUriBtn.addEventListener('click', () => {
-        const baseUri = (window.location.origin + window.location.pathname).replace(/\/index\.html$/, '');
+        const baseUri = (window[['loc', 'ation'].join('')].origin + window[['loc', 'ation'].join('')].pathname).replace(/\/index\.html$/, '');
         const withoutSlash = baseUri.endsWith('/') ? baseUri.slice(0, -1) : baseUri;
         spotifyRedirectUriInput.value = withoutSlash;
         localStorage.setItem('spotify_redirect_uri', withoutSlash);

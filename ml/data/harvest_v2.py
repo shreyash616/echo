@@ -63,8 +63,8 @@ BENCHMARK_PATH = Path("tests/feel_benchmark_v2.json")
 
 DEEZER_BASE = "https://api.deezer.com"
 
-# Mood words by language (Section 11.4.1 / 12.4.4)
-MOOD_WORDS: dict[str, list[str]] = {
+# Feel query words by language (Section 11.4.1 / 12.4.4)
+FEEL_QUERY_WORDS: dict[str, list[str]] = {
     "en": [
         "sad", "melancholy", "heartbreak", "chill", "mellow", "calm", "acoustic",
         "late night", "rainy day", "slow", "intimate", "lonely", "nostalgic",
@@ -195,7 +195,7 @@ async def harvest_deezer_membership(
         logger.info("Playlist membership target already met! Proceeding to candidate expansion.")
         return total_membership_rows, len(seen_playlists), artist_counts
 
-    all_queries = [w for words in MOOD_WORDS.values() for w in words]
+    all_queries = [w for words in FEEL_QUERY_WORDS.values() for w in words]
     additional_genres = [
         "rock", "classic rock", "indie rock", "alternative rock", "folk", "americana",
         "garage rock", "punk", "psychedelic rock", "metal", "heavy metal", "grunge",

@@ -187,7 +187,7 @@ export const ResultsScreen: React.FC = () => {
                   end={{ x: 1, y: 0 }}
                 />
                 <Text style={styles.sectionLabel}>SIMILAR VIBE</Text>
-                <Text style={styles.recSubtitle}>Songs that match the beat, mood, and energy</Text>
+                <Text style={styles.recSubtitle}>Songs that match the beat, vibe, and energy</Text>
               </View>
               <View style={styles.cardList}>
                 {displayRecs.map((rec, i) => (

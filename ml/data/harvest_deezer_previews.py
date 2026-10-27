@@ -209,7 +209,7 @@ def _fetch_tracks_for_query(client: httpx.Client, query: str, genre: str, limit:
             logger.debug("Deezer query %r failed at index=%d: %s", query, index, exc)
             break
 
-    # If Deezer returned no previews (e.g. region-restricted), fall back to iTunes Search API
+    # If Deezer returned no previews (e.g. region-restricted), revert to iTunes Search API
     if len(collected) < limit:
         try:
             needed = limit - len(collected)

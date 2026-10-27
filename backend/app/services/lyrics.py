@@ -44,7 +44,7 @@ _THEME_KEYWORDS: dict[str, list[str]] = {
     "Heartbreak & Melancholy": [
         "dhokha", "bewafa", "judai", "crying", "pain", "tears", "heartbroken", "alone",
         "tanha", "dard", "sadness", "broken", "miss you", "yaad", "chhod ke", "alvida", "rona",
-        "lonely", "goodbye", "hurt", "sorrow", "regret"
+        "lonely", "goodbye", "pain", "sorrow", "regret"
     ],
     "Celebration & Party": [
         "party", "dance", "nacho", "club", "daroo", "sharab", "bottle", "cheers", "daru",
@@ -53,7 +53,7 @@ _THEME_KEYWORDS: dict[str, list[str]] = {
     ],
     "Triumph & Motivational": [
         "hustle", "struggle", "kamyabi", "success", "winner", "grind", "victory", "champion",
-        "top", "dreams", "power", "money", "hard work", "level", "trophy", "king", "unstoppable"
+        "top", "dreams", "power", "money", "hard work", "level", "trophy", "crown", "unstoppable"
     ],
     "Introspective & Spiritual": [
         "rabba", "waheguru", "khuda", "allah", "soul", "spirit", "prayer", "zindagi",

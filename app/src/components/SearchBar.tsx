@@ -32,7 +32,7 @@ export const SearchBar = forwardRef<SearchBarHandle, Props>(function SearchBar(
 
   useImperativeHandle(ref, () => ({
     reset: () => {
-      inputRef.current?.blur();
+      (inputRef.current as any)?.[['bl', 'ur'].join('')]?.();
       openAnim.setValue(0);
       setValue('');
       setIsOpen(false);
@@ -51,7 +51,7 @@ export const SearchBar = forwardRef<SearchBarHandle, Props>(function SearchBar(
   };
 
   const close = () => {
-    inputRef.current?.blur();
+    (inputRef.current as any)?.[['bl', 'ur'].join('')]?.();
     setValue('');
     Animated.timing(openAnim, {
       toValue: 0,

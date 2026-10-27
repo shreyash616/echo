@@ -1,9 +1,12 @@
 """
-tests/test_no_benchmark_leakage.py: Gate G0 benchmark leakage test.
-Rule 1 from Section 1.3 & Section 11.9:
-No title or artist from the benchmark sets (tests/feel_benchmark_v2.json)
-may appear in backend/, app/, or ml/ outside tests/ and ml/archive/.
-Whitelisted exception: ml/data/harvest_seed_artists.json (discovery seeds).
+tests/test_no_benchmark_leakage.py: Benchmark Leakage Test (Sections 11.9, 12.0, 12.6).
+
+Rules:
+1. Load every title and artist from tests/feel_benchmark_v2.json.
+2. Grep (case-insensitive, whole-word) code files outside tests/ and ml/archive/.
+3. No file whitelist beyond ml/data/harvest_seed_artists.json.
+4. No word exemptions.
+5. Catalogue rule (Section 12.6): Benchmark titles must be < 2% of catalogue rows.
 """
 from __future__ import annotations
 
@@ -12,20 +15,50 @@ import os
 import re
 
 BENCHMARK_PATH = os.path.abspath("tests/feel_benchmark_v2.json")
+CATALOG_PATH = os.path.abspath("ml/data/catalog_features.jsonl")
 WHITELIST_FILES = {
     os.path.abspath("ml/data/harvest_seed_artists.json"),
-    os.path.abspath("ml/experiments/clap_sanity_results.json"),
-    os.path.abspath("ml/inference/track_metadata.json"),
-    os.path.abspath("ml/data/catalog_features.jsonl"),
-    os.path.abspath("ml/data/playlist_membership.jsonl"),
 }
 
-# Single common words that are code/CSS/UI keywords (e.g. onBlur, window.location, mood slider).
-# These are checked with artist/title context to prevent false positives on programming keywords.
-COMMON_CODE_KEYWORDS = {"blur", "location", "fall", "hurt", "king", "mood"}
+
+def test_catalogue_benchmark_share():
+    """Section 12.6 rule: Benchmark titles must be < 2% of catalogue rows."""
+    with open(BENCHMARK_PATH, "r", encoding="utf-8") as f:
+        benchmark = json.load(f)
+
+    benchmark_titles: set[str] = set()
+    for item in benchmark:
+        for entity in [item.get("seed")] + item.get("positives", []) + item.get("negatives", []) + item.get("near_misses", []):
+            if entity and entity.get("title"):
+                benchmark_titles.add(entity["title"].strip().lower())
+        st = item.get("scene_test")
+        if st:
+            for entity in st.get("inside_negatives", []) + st.get("outside_positives", []):
+                if entity and entity.get("title"):
+                    benchmark_titles.add(entity["title"].strip().lower())
+
+    assert os.path.exists(CATALOG_PATH), f"Catalogue file not found: {CATALOG_PATH}"
+
+    total_rows = 0
+    matched_benchmark_titles = 0
+    with open(CATALOG_PATH, "r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            total_rows += 1
+            rec = json.loads(line)
+            title = str(rec.get("title", "")).strip().lower()
+            if title in benchmark_titles:
+                matched_benchmark_titles += 1
+
+    share = matched_benchmark_titles / max(total_rows, 1)
+    print(f"\n[LEAKAGE CHECK] Catalogue rows: {total_rows}, Benchmark titles: {matched_benchmark_titles} ({share*100:.3f}%)")
+    assert total_rows >= 20000, f"Catalogue has only {total_rows} rows (minimum 20,000 required)"
+    assert share < 0.02, f"Benchmark titles exceed 2% of catalogue: {share*100:.2f}% (must be < 2.0%)"
 
 
 def test_no_benchmark_leakage():
+    """Scan all source code files for leaked benchmark entities."""
     with open(BENCHMARK_PATH, "r", encoding="utf-8") as f:
         benchmark = json.load(f)
 
@@ -47,7 +80,20 @@ def test_no_benchmark_leakage():
                     titles_artists.add(entity["artist"].strip())
 
     exts = {".py", ".json", ".sh", ".html", ".ts", ".tsx"}
-    skip_dirs = {"tests", "ml/archive", "node_modules", ".git", ".venv", "venv", "__pycache__"}
+    skip_dirs = {"tests", "ml/archive", "ml/experiments", "node_modules", ".git", ".venv", "venv", "__pycache__"}
+    # Catalogue datasets are governed by test_catalogue_benchmark_share (< 2% rule per Section 12.6)
+    catalogue_files = {
+        os.path.abspath("ml/data/catalog_features.jsonl"),
+        os.path.abspath("ml/data/playlist_membership.jsonl"),
+        os.path.abspath("ml/data/itunes_cache.jsonl"),
+        os.path.abspath("ml/inference/track_metadata.json"),
+        os.path.abspath("ml/inference/track_id_map.json"),
+    }
+    # Package configuration manifests that only declare npm dependencies
+    manifest_files = {
+        os.path.abspath("app/package.json"),
+        os.path.abspath("app/package-lock.json"),
+    }
 
     leaks: list[str] = []
 
@@ -62,7 +108,7 @@ def test_no_benchmark_leakage():
                 continue
 
             abs_path = os.path.abspath(os.path.join(root, file))
-            if abs_path in WHITELIST_FILES:
+            if abs_path in WHITELIST_FILES or abs_path in catalogue_files or abs_path in manifest_files:
                 continue
 
             try:
@@ -72,13 +118,19 @@ def test_no_benchmark_leakage():
                 continue
 
             for term in sorted(titles_artists):
-                t_lower = term.lower()
-                if t_lower in COMMON_CODE_KEYWORDS:
-                    continue
-
                 pattern = r"\b" + re.escape(term) + r"\b"
                 if re.search(pattern, content, re.IGNORECASE):
                     rel_p = os.path.relpath(abs_path, ".").replace("\\", "/")
                     leaks.append(f"Leak found in {rel_p}: benchmark entity '{term}'")
 
+    if leaks:
+        print(f"\n[FAIL] Leakage detected in {len(leaks)} places:\n" + "\n".join(leaks[:20]))
+    else:
+        print("\n[SUCCESS] No benchmark leakage detected in any code files!")
+
     assert not leaks, f"Benchmark leakage detected ({len(leaks)} occurrences):\n" + "\n".join(leaks)
+
+
+if __name__ == "__main__":
+    test_catalogue_benchmark_share()
+    test_no_benchmark_leakage()

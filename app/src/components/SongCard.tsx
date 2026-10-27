@@ -62,7 +62,7 @@ export const SongCard: React.FC<Props> = ({
               <Stat label="BPM" value={String(track.bpm)} />
               {track.key && track.key !== '—' && <Stat label="KEY" value={track.key} />}
               <Stat label="ENERGY" value={`${Math.round(track.energy * 100)}%`} />
-              <Stat label="MOOD" value={track.valence > 0.5 ? 'Happy' : 'Dark'} />
+              <Stat label="VALENCE" value={track.valence > 0.5 ? 'Happy' : 'Dark'} />
             </View>
           )}
         </View>

@@ -261,7 +261,7 @@ def groove(y: np.ndarray, felt_meta: dict, sr: int = 22050) -> dict:
     # 11.5.2 kick_class rules
     # "four_on_floor" if >= 85% of beats have a low onset
     # "sparse_backbeat" if <= 55% of beats have a low onset and backbeat >= 0.7
-    # "syncopated_808" if low onsets fall off-beat >= 30% of the time and low_share >= 0.3
+    # "syncopated_808" if low onsets land off-beat >= 30% of the time and low_share >= 0.3
     # else "other"
     low_share_est = float(np.sum(y[:min(len(y), 22050*5)]**2)) + 1e-8
 
