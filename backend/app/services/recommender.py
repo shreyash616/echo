@@ -151,6 +151,7 @@ class MusicRecommender:
         self._anchor_means: np.ndarray | None = None
         self._anchor_stds: np.ndarray | None = None
         self._weights: dict[str, float] = dict(DEFAULT_WEIGHTS)
+        self._clap_matrix: np.ndarray | None = None
 
         # Backbone on CPU
         self._clap_model: Any = None
@@ -226,6 +227,9 @@ class MusicRecommender:
                 self._index = faiss.read_index(str(index_path))
                 self._dim = self._index.d
                 logger.info("Loaded FAISS index from %s with %d entries, dim=%d", index_path, self._index.ntotal, self._dim)
+                if self._index.ntotal > 0:
+                    self._clap_matrix = self._index.reconstruct_n(0, self._index.ntotal)
+                    logger.info("Extracted CLAP matrix from FAISS index: shape %s", self._clap_matrix.shape)
             except Exception as exc:
                 logger.warning("Could not read FAISS index from %s: %s", index_path, exc)
 
@@ -357,6 +361,28 @@ class MusicRecommender:
             return self._extra_records[key]
         return None
 
+    def get_clap_vector(self, track: dict | None) -> np.ndarray:
+        """Retrieve unit-norm 512-d CLAP vector for catalogue or described track."""
+        if not track:
+            return np.zeros(self._dim, dtype=np.float32)
+        if track.get("clap_vector") is not None:
+            v = np.array(track["clap_vector"], dtype=np.float32)
+            if v.ndim == 1 and len(v) == self._dim:
+                return v
+        k = track.get("key") or make_track_key(str(track.get("artist", "")), str(track.get("title", "")))
+        idx = self._track_id_map.get(k)
+        if idx is None and track.get("id"):
+            idx = self._track_id_map.get(str(track["id"]))
+        if idx is None and track.get("deezer_id"):
+            idx = self._track_id_map.get(str(track["deezer_id"]))
+        if idx is None and track.get("itunes_id"):
+            idx = self._track_id_map.get(str(track["itunes_id"]))
+            if idx is None:
+                idx = self._track_id_map.get(f"it_{track['itunes_id']}")
+        if idx is not None and self._clap_matrix is not None and 0 <= idx < len(self._clap_matrix):
+            return self._clap_matrix[idx]
+        return np.zeros(self._dim, dtype=np.float32)
+
     def describe(self, audio_bytes: bytes, meta: dict | None = None) -> dict:
         """
         Decode preview -> 11.5 descriptors + official CLAP embedding + anchor vibes.
@@ -441,8 +467,8 @@ class MusicRecommender:
         w = self._weights
 
         # 1. s_clap (backbone cosine, clipped to [0, 1])
-        clap_a = np.array(seed.get("clap_vector") or [0.0] * self._dim, dtype=np.float32)
-        clap_b = np.array(cand.get("clap_vector") or [0.0] * self._dim, dtype=np.float32)
+        clap_a = self.get_clap_vector(seed)
+        clap_b = self.get_clap_vector(cand)
         dim = len(clap_a)
         if dim > 0 and len(clap_b) == dim and np.linalg.norm(clap_a) > 0 and np.linalg.norm(clap_b) > 0:
             s_clap = float(np.clip(np.dot(clap_a, clap_b), 0.0, 1.0))
@@ -661,7 +687,8 @@ class MusicRecommender:
             except Exception as exc:
                 logger.warning("Could not persist extra record: %s", exc)
 
-        seed_clap = np.array([seed_record.get("clap_vector") or [0.0] * self._dim], dtype=np.float32)
+        seed_clap = self.get_clap_vector(seed_record)
+        seed_clap_2d = seed_clap.reshape(1, -1)
 
         # 2. Retrieve candidates: ANN search k=500
         candidate_indices: set[int] = set()
@@ -669,14 +696,14 @@ class MusicRecommender:
 
         if self._index is not None and self._index.ntotal > 0:
             k_search = min(500, self._index.ntotal)
-            _, I = self._index.search(seed_clap, k_search)
+            _, I = self._index.search(seed_clap_2d, k_search)
             for idx in I[0]:
                 if idx >= 0:
                     candidate_indices.add(int(idx))
 
         if self._side_index is not None and self._side_index.ntotal > 0:
             k_side = min(100, self._side_index.ntotal)
-            _, I_side = self._side_index.search(seed_clap, k_side)
+            _, I_side = self._side_index.search(seed_clap_2d, k_side)
             for s_idx in I_side[0]:
                 if s_idx >= 0:
                     side_indices.add(int(s_idx))
@@ -744,9 +771,9 @@ class MusicRecommender:
 
                 # Diversity penalty
                 if selected:
-                    cand_clap = np.array(cand.get("clap_vector") or [0.0] * self._dim, dtype=np.float32)
+                    cand_clap = self.get_clap_vector(cand)
                     max_sim = max(
-                        float(np.dot(cand_clap, np.array(s.get("clap_vector") or [0.0] * self._dim, dtype=np.float32)))
+                        float(np.dot(cand_clap, self.get_clap_vector(s)))
                         for s in selected
                     )
                 else:
