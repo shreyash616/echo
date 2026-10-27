@@ -55,6 +55,7 @@ export const SongCard: React.FC<Props> = ({
               {track.vibes.slice(0, 3).map(v => (
                 <VibeTag key={v} label={v} />
               ))}
+              {track.theme ? <VibeTag label={`Theme: ${track.theme}`} /> : null}
             </View>
           )}
           {track.bpm > 0 && (
@@ -88,9 +89,10 @@ export const SongCard: React.FC<Props> = ({
           {track.artist}
         </Text>
         <View style={styles.tagRow}>
-          {track.vibes.slice(0, 2).map(v => (
+          {track.vibes.slice(0, 1).map(v => (
             <VibeTag key={v} label={v} />
           ))}
+          {track.theme ? <VibeTag label={track.theme} /> : null}
         </View>
       </View>
       <View style={styles.scoreContainer}>

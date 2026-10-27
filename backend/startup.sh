@@ -34,11 +34,27 @@ download_file "language_affinity.json"
 # Optional artifacts
 python -c "
 from huggingface_hub import hf_hub_download
-try:
-    hf_hub_download(repo_id='$REPO', filename='adapter.npz', repo_type='dataset', local_dir='$DEST')
-    print('[startup] adapter.npz synced.')
-except Exception as e:
-    print('[startup] adapter.npz not present or skipped:', e)
+for opt in ['adapter.npz', 'theme_prompts.json']:
+    try:
+        hf_hub_download(repo_id='$REPO', filename=opt, repo_type='dataset', local_dir='$DEST')
+        print(f'[startup] {opt} synced.')
+    except Exception as e:
+        print(f'[startup] {opt} not present or skipped:', e)
+"
+
+# Official LAION CLAP checkpoint
+python -c "
+from pathlib import Path
+from huggingface_hub import hf_hub_download
+cache_dir = Path.home() / '.cache' / 'clap'
+cache_dir.mkdir(parents=True, exist_ok=True)
+ckpt = cache_dir / 'music_audioset_epoch_15_esc_90.14.pt'
+if not ckpt.exists():
+    print('[startup] Downloading official LAION CLAP checkpoint...')
+    hf_hub_download(repo_id='lukewys/laion_clap', filename='music_audioset_epoch_15_esc_90.14.pt', local_dir=str(cache_dir))
+    print('[startup] LAION CLAP checkpoint ready.')
+else:
+    print('[startup] LAION CLAP checkpoint already cached.')
 "
 
 exec uvicorn main:app --host 0.0.0.0 --port 7860

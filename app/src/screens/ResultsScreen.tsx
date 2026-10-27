@@ -54,7 +54,7 @@ export const ResultsScreen: React.FC = () => {
       setRecLoading(false);
       return;
     }
-    getRecommendations(searchResults[0].id)
+    getRecommendations(searchResults[0].id, searchResults[0].key)
       .then(fetched => {
         setSearchRecs(fetched.slice(0, 5));
         setNoPreview(fetched.length === 0);
@@ -77,7 +77,7 @@ export const ResultsScreen: React.FC = () => {
       if (loadingTrackId) return;
       setLoadingTrackId(track.id);
       try {
-        const recs = await getRecommendations(track.id);
+        const recs = await getRecommendations(track.id, track.key);
         navigation.push('Results', {
           data: { identified: track, recommendations: recs },
           mode: 'select',

@@ -285,7 +285,15 @@ class MusicRecommender:
                         ckpt_path = alt
                         break
             if not ckpt_path.exists():
-                raise FileNotFoundError(f"LAION CLAP checkpoint not found at {ckpt_path}")
+                try:
+                    from huggingface_hub import hf_hub_download
+                    logger.info("Downloading official LAION CLAP checkpoint to ~/.cache/clap/...")
+                    cache_dir = Path.home() / ".cache" / "clap"
+                    cache_dir.mkdir(parents=True, exist_ok=True)
+                    dl_path = hf_hub_download(repo_id="lukewys/laion_clap", filename="music_audioset_epoch_15_esc_90.14.pt", local_dir=str(cache_dir))
+                    ckpt_path = Path(dl_path)
+                except Exception as dl_err:
+                    raise FileNotFoundError(f"LAION CLAP checkpoint not found at {ckpt_path} and auto-download failed: {dl_err}")
 
             if not HAS_LAION:
                 raise ImportError("laion_clap package is not installed. Install with `pip install laion_clap torchvision torchaudio`")

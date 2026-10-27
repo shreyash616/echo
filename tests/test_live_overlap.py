@@ -153,6 +153,12 @@ def run_overlap_test(base_url: str | None = None) -> dict:
     return {"seeds": SEEDS, "pair_stats": pair_stats}
 
 
+def test_live_overlap_four_worlds():
+    import os
+    base_url = os.environ.get("ECHO_BASE_URL")
+    run_overlap_test(base_url)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test Live Overlap across 4 worlds")
     parser.add_argument("--base-url", type=str, default=None, help="Base URL of live Echo backend")
