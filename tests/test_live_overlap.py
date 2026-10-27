@@ -68,7 +68,8 @@ def run_overlap_test(base_url: str | None = None) -> dict:
             resp = client.get(f"/api/recommendations/{k}", params={"key": k, "k": 20})
             if resp.status_code != 200:
                 raise RuntimeError(f"Failed to fetch recommendations for {s['name']}: {resp.status_code} {resp.text}")
-            recs = resp.json().get("recommendations", [])
+            data = resp.json()
+            recs = data if isinstance(data, list) else data.get("recommendations", [])
             results_by_seed[s["name"]] = recs
     else:
         print("Running in-process using MusicRecommender...\n")
