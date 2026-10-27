@@ -1,1 +1,1 @@
-Read FIX_PLAN.md top to bottom, execute sections 3 and 6 in the order of section 4, stop at any gate that fails, and log every number with its command. When it reports done, send me the word and I will re-verify against the live Space and the artifacts the same way as this round, starting with the section 5 table.
+
