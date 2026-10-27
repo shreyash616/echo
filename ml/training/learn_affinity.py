@@ -1,10 +1,10 @@
 """
-ml/training/learn_affinity.py: Step 3.3 Language Affinity from PMI (Section 11.8.3).
+ml/training/learn_affinity.py: Step R7 Language Affinity from PMI (Sections 11.8.3, 12.6).
 
 Computes Pointwise Mutual Information (PMI) between language pairs over playlist
 co-membership:
   PMI(a, b) = log( P(a, b) / (P(a) * P(b)) )
-Mapped to [0.50, 0.95] by rank, blended 50/50 with Section 5 table.
+Mapped to [0.50, 0.95] by rank within pairs, blended 50/50 with Section 5 table.
 Outputs: ml/inference/language_affinity.json
 """
 from __future__ import annotations
@@ -12,8 +12,13 @@ from __future__ import annotations
 import json
 import logging
 import math
+import sys
 from collections import Counter
 from pathlib import Path
+
+# Add backend to path
+sys.path.insert(0, "backend")
+from app.services.recommender import make_track_key
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("learn_affinity")
@@ -22,7 +27,7 @@ CATALOG_FEATURES_PATH = Path("ml/data/catalog_features.jsonl")
 PLAYLIST_MEMBERSHIP_PATH = Path("ml/data/playlist_membership.jsonl")
 OUT_AFFINITY_PATH = Path("ml/inference/language_affinity.json")
 
-# Baseline Section 5 table
+# Baseline Section 5 table (Table v2)
 BASE_TABLE_V2: dict[tuple[str, str], float] = {
     ("pa", "hi"): 0.90, ("hi", "pa"): 0.90,
     ("hi", "ur"): 0.90, ("ur", "hi"): 0.90,
@@ -58,7 +63,9 @@ BASE_TABLE_V2: dict[tuple[str, str], float] = {
 
 
 def compute_pmi() -> dict[str, float]:
-    # 1. Load catalog track languages
+    logger.info("Computing PMI from catalogue and playlist membership...")
+
+    # 1. Load catalog track languages (keyed by id, deezer_id, and make_track_key)
     track_langs: dict[str, str] = {}
     if CATALOG_FEATURES_PATH.exists():
         with open(CATALOG_FEATURES_PATH, "r", encoding="utf-8") as f:
@@ -66,11 +73,18 @@ def compute_pmi() -> dict[str, float]:
                 if line.strip():
                     try:
                         rec = json.loads(line)
-                        l = rec.get("language")
-                        if l:
-                            track_langs[str(rec["id"])] = str(l)
+                        l = rec.get("language") or "en"
+                        if l and l != "unknown":
+                            if rec.get("id"):
+                                track_langs[str(rec["id"])] = str(l)
+                            if rec.get("deezer_id"):
+                                track_langs[str(rec["deezer_id"])] = str(l)
+                            k = rec.get("key") or make_track_key(str(rec.get("artist", "")), str(rec.get("title", "")))
+                            track_langs[k] = str(l)
                     except Exception:
                         pass
+
+    logger.info("Indexed languages for %d track references.", len(track_langs))
 
     # 2. Group playlist tracks by language
     pl_langs: dict[str, list[str]] = {}
@@ -82,19 +96,20 @@ def compute_pmi() -> dict[str, float]:
                 try:
                     entry = json.loads(line)
                     pl_id = str(entry["playlist_id"])
-                    t_id = str(entry["track_id"])
-                    if t_id in track_langs:
-                        pl_langs.setdefault(pl_id, []).append(track_langs[t_id])
+                    did = str(entry.get("deezer_track_id", ""))
+                    k = make_track_key(str(entry.get("artist", "")), str(entry.get("title", "")))
+
+                    lang = track_langs.get(k) or (track_langs.get(did) if did else None)
+                    if lang:
+                        pl_langs.setdefault(pl_id, []).append(lang)
                 except Exception:
                     continue
 
     lang_counts = Counter()
     pair_counts = Counter()
-    total_pairs = 0
+    n_playlists = max(1, len(pl_langs))
 
     for pl_id, langs in pl_langs.items():
-        if len(langs) < 2:
-            continue
         u_langs = list(set(langs))
         for l in u_langs:
             lang_counts[l] += 1
@@ -102,10 +117,8 @@ def compute_pmi() -> dict[str, float]:
             for j in range(i + 1, len(u_langs)):
                 l1, l2 = sorted([u_langs[i], u_langs[j]])
                 pair_counts[(l1, l2)] += 1
-                total_pairs += 1
 
-    pmi_scores = {}
-    n_playlists = max(1, len(pl_langs))
+    pmi_scores: dict[tuple[str, str], float] = {}
     for (l1, l2), c12 in pair_counts.items():
         p12 = c12 / n_playlists
         p1 = lang_counts[l1] / n_playlists
@@ -116,9 +129,9 @@ def compute_pmi() -> dict[str, float]:
     # Rank-map to [0.50, 0.95]
     sorted_pairs = sorted(pmi_scores.items(), key=lambda x: x[1])
     n_p = len(sorted_pairs)
-    pmi_norm = {}
+    pmi_norm: dict[tuple[str, str], float] = {}
     for r, ((l1, l2), _) in enumerate(sorted_pairs):
-        frac = r / max(1, n_p - 1)
+        frac = r / max(1, n_p - 1) if n_p > 1 else 0.5
         val = 0.50 + 0.45 * frac
         pmi_norm[(l1, l2)] = val
         pmi_norm[(l2, l1)] = val
@@ -129,22 +142,16 @@ def compute_pmi() -> dict[str, float]:
     for l1, l2 in all_keys:
         v_base = BASE_TABLE_V2.get((l1, l2), 0.55)
         v_pmi = pmi_norm.get((l1, l2), v_base)
-        blended = round(0.50 * v_base + 0.50 * v_pmi, 3)
-        final_table[f"{l1}:{l2}"] = blended
-
-    return final_table
-
-
-def main():
-    logger.info("Computing language affinity from playlist PMI (Section 11.8.3)...")
-    affinity_dict = compute_pmi()
+        blended = 0.50 * v_base + 0.50 * v_pmi
+        final_table[f"{l1}:{l2}"] = round(blended, 4)
 
     OUT_AFFINITY_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(OUT_AFFINITY_PATH, "w", encoding="utf-8") as f:
-        json.dump(affinity_dict, f, indent=2)
+        json.dump(final_table, f, indent=2)
 
-    logger.info(f"Saved {len(affinity_dict)} language affinity pairs to {OUT_AFFINITY_PATH}")
+    logger.info("Saved %d language pair affinity entries to %s", len(final_table), OUT_AFFINITY_PATH)
+    return final_table
 
 
 if __name__ == "__main__":
-    main()
+    compute_pmi()

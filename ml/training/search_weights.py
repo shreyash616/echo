@@ -1,12 +1,12 @@
 """
-ml/training/search_weights.py: Step 3.2 Weight Search (Section 11.8.2).
+ml/training/search_weights.py: Step R7 Weight Search (Sections 11.8.2, 12.6).
 
 Performs coordinate ascent over the 12 feel reranking weights on TUNE seeds:
-- Step: 0.02, weights constrained to [0.0, 0.4], renormalised to sum 1.0.
+- Step: 0.02, weights constrained to [0.0, 0.40], renormalised to sum 1.0.
 - Objective: mean over TUNE seeds of:
     0.6 * recall@20 + 0.3 * MRR - 0.1 * (negatives_in_top_10 / 10.0)
 - Writes: ml/inference/rerank_weights.json
-- Reads HOLDOUT split only at the end (Gate G4) and prints it for recording.
+- Reads HOLDOUT split only if --eval-holdout is explicitly passed (Gate G4 only).
 """
 from __future__ import annotations
 
@@ -15,16 +15,16 @@ import copy
 import json
 import logging
 import os
-import re
 import sys
 from pathlib import Path
 
 import numpy as np
 
 sys.path.insert(0, os.path.abspath("backend"))
+sys.path.insert(0, os.path.abspath("."))
 
-from app.services.recommender import recommender
-from app.services.language_affinity import language_affinity
+from app.services.recommender import recommender, make_track_key
+from tests.feel_benchmark import match_track
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("search_weights")
@@ -32,17 +32,22 @@ logger = logging.getLogger("search_weights")
 BENCHMARK_PATH = Path("tests/feel_benchmark_v2.json")
 WEIGHTS_PATH = Path("ml/inference/rerank_weights.json")
 
-
-def _norm_str(s: str) -> str:
-    return re.sub(r"[^\w\s]", "", str(s).lower()).strip()
-
-
-def _is_match(c_title: str, c_artist: str, t_title: str, t_artist: str) -> bool:
-    nc_t = _norm_str(c_title)
-    nc_a = _norm_str(c_artist)
-    nt_t = _norm_str(t_title)
-    nt_a = _norm_str(t_artist)
-    return bool((nt_t in nc_t or nc_t in nt_t) and (nt_a in nc_a or nc_a in nt_a))
+INITIAL_SECTION_12_WEIGHTS = {
+    "s_clap": 0.18,
+    "s_anchor": 0.10,
+    "s_tempo": 0.14,
+    "s_pulse": 0.05,
+    "s_groove": 0.10,
+    "s_dark": 0.08,
+    "s_grit": 0.08,
+    "s_vocal": 0.07,
+    "s_intimacy": 0.04,
+    "s_restraint": 0.03,
+    "s_meaning": 0.08,
+    "s_language": 0.05,
+    "s_harm": 0.00,
+    "s_mode": 0.00,
+}
 
 
 def evaluate_split(
@@ -63,20 +68,19 @@ def evaluate_split(
 
     for item in seeds_data:
         seed = item["seed"]
+        seed_key = seed.get("key") or make_track_key(seed.get("artist", ""), seed.get("title", ""))
         positives = item.get("positives", [])
         negatives = item.get("negatives", [])
 
         # Recommender call offline against catalogue
-        recs = recommender.recommend(seed, k=k, cross_language_max=6, diversity=0.70)
+        recs = recommender.recommend(seed, k=k, cross_language_max=6, diversity=0.70, key=seed_key)
 
         # Hits
         hits_found = 0
         first_rank = 0
-        for rank, r in enumerate(recs, 1):
-            r_t = r.get("title", "")
-            r_a = r.get("artist", "")
+        for rank, cand in enumerate(recs, 1):
             for p in positives:
-                if _is_match(r_t, r_a, p["title"], p["artist"]):
+                if match_track(cand, p):
                     hits_found += 1
                     if first_rank == 0:
                         first_rank = rank
@@ -88,11 +92,9 @@ def evaluate_split(
         # Negatives in top 10
         top_10 = recs[:10]
         neg_count = 0
-        for r in top_10:
-            r_t = r.get("title", "")
-            r_a = r.get("artist", "")
+        for cand in top_10:
             for n in negatives:
-                if _is_match(r_t, r_a, n["title"], n["artist"]):
+                if match_track(cand, n):
                     neg_count += 1
                     break
 
@@ -120,13 +122,13 @@ def normalize_weights(w: dict[str, float]) -> dict[str, float]:
 def coordinate_ascent(tune_seeds: list[dict], initial_weights: dict[str, float], step: float = 0.02) -> dict[str, float]:
     current_w = normalize_weights(initial_weights)
     best_obj, b_rec, b_mrr, b_neg = evaluate_split(tune_seeds, current_w)
-    logger.info(f"Initial TUNE objective: {best_obj:.4f} (Recall@20: {b_rec:.4f}, MRR: {b_mrr:.4f}, Neg@10: {b_neg:.4f})")
+    logger.info("Initial TUNE objective: %.4f (Recall@20: %.4f, MRR: %.4f, Neg@10: %.4f)", best_obj, b_rec, b_mrr, b_neg)
 
-    tunable_keys = [k for k in current_w.keys() if k != "clap_cosine"]
+    tunable_keys = [k for k in current_w.keys() if k not in ("s_harm", "s_mode")]
     improved = True
     iteration = 0
 
-    while improved and iteration < 50:
+    while improved and iteration < 30:
         improved = False
         iteration += 1
         for key in tunable_keys:
@@ -141,8 +143,8 @@ def coordinate_ascent(tune_seeds: list[dict], initial_weights: dict[str, float],
                     current_w = cand_w
                     improved = True
                     logger.info(
-                        f"Iter {iteration} | {key} {'+' if delta > 0 else ''}{delta:.2f} -> "
-                        f"Obj: {best_obj:.4f} (Recall: {c_rec:.4f}, MRR: {c_mrr:.4f})"
+                        "Iter %d | %s %s%.2f -> Obj: %.4f (Recall: %.4f, MRR: %.4f)",
+                        iteration, key, "+" if delta > 0 else "", delta, best_obj, c_rec, c_mrr
                     )
                     break
             if improved:
@@ -164,22 +166,15 @@ def main():
 
     tune_seeds = [item for item in benchmark if item.get("split") == "tune"]
     holdout_seeds = [item for item in benchmark if item.get("split") == "holdout"]
-    logger.info(f"Benchmark: {len(tune_seeds)} TUNE seeds, {len(holdout_seeds)} HOLDOUT seeds.")
+    logger.info("Loaded benchmark: %d TUNE seeds, %d HOLDOUT seeds.", len(tune_seeds), len(holdout_seeds))
 
-    # Load initial weights
-    if WEIGHTS_PATH.exists():
-        with open(WEIGHTS_PATH, "r", encoding="utf-8") as f:
-            init_weights = json.load(f)
-    else:
-        init_weights = recommender._weights
-
-    # Run coordinate ascent on TUNE seeds ONLY
-    best_weights = coordinate_ascent(tune_seeds, init_weights, step=args.step)
+    # Run coordinate ascent on TUNE seeds ONLY (HOLDOUT is untouched per 12.6)
+    best_weights = coordinate_ascent(tune_seeds, INITIAL_SECTION_12_WEIGHTS, step=args.step)
 
     # Save best weights
     with open(WEIGHTS_PATH, "w", encoding="utf-8") as f:
         json.dump(best_weights, f, indent=2)
-    logger.info(f"Saved optimized rerank weights to {WEIGHTS_PATH}")
+    logger.info("Saved optimized rerank weights to %s", WEIGHTS_PATH)
 
     # Final TUNE evaluation
     t_obj, t_rec, t_mrr, t_neg = evaluate_split(tune_seeds, best_weights)

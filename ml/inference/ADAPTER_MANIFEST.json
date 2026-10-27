@@ -1,0 +1,15 @@
+{
+  "pairs_used": 48769,
+  "playlists_used": 1104,
+  "epochs": 30,
+  "final_loss": 1.381,
+  "device": "cuda",
+  "adapter_shape": [
+    512,
+    128
+  ],
+  "tune_recall_before": 0.037037,
+  "tune_recall_after": 0.049383,
+  "gate_passed": true,
+  "gate_condition": "tune_recall_after >= tune_recall_before"
+}
