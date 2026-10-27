@@ -1,0 +1,22 @@
+{
+  "timestamp": "2026-10-27T17:02:14.733293+00:00",
+  "rows": 20000,
+  "membership_rows": 150069,
+  "distinct_playlists": 1999,
+  "distinct_artists": 2735,
+  "per_language_counts": {
+    "unknown": 18352,
+    "hi": 334,
+    "es": 918,
+    "pa": 157,
+    "ru": 57,
+    "ja": 127,
+    "ko": 53,
+    "ta": 2
+  },
+  "catalog_features_sha256": "d11e9419c98edec7f28254017d9973ce3c51110498907d0ca911c336aaca546c",
+  "catalog_features_file": "catalog_features.jsonl",
+  "command_line": "ml/data/harvest_v2.py --target 20000 --membership-target 150000 --playlists-target 1500 --device cuda",
+  "target_met": true,
+  "elapsed_seconds": 38244.116469
+}
