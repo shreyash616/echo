@@ -1,12 +1,50 @@
 {
-  "resignation": "accepting a hard life, weary advice, making peace with fate",
-  "defiance": "war, violence, survival, anger, defiance against authority",
-  "grief": "grief, loss, regret, self destruction, mourning",
-  "longing": "longing for someone, romantic yearning, missing a lover",
-  "devotion": "devotion, gratitude, faith, love that stays",
-  "celebration": "party, dancing, drinking, celebration, having fun",
-  "swagger": "money, status, flexing, confidence, being the best",
-  "escape": "driving away, the open road, night, freedom, leaving town",
-  "heartbreak": "heartbreak, betrayal, breakup, loneliness after love",
-  "wonder": "nature, the sky, beauty, quiet awe"
+  "prompts": {
+    "resignation": "accepting a hard life, weary advice, making peace with fate",
+    "defiance": "war, violence, survival, anger, defiance against authority",
+    "grief": "grief, loss, regret, self destruction, mourning",
+    "longing": "longing for someone, romantic yearning, missing a lover",
+    "devotion": "devotion, gratitude, faith, love that stays",
+    "celebration": "party, dancing, drinking, celebration, having fun",
+    "swagger": "money, status, flexing, confidence, being the best",
+    "escape": "driving away, the open road, night, freedom, leaving town",
+    "heartbreak": "heartbreak, betrayal, breakup, loneliness after love",
+    "wonder": "nature, the sky, beauty, quiet awe"
+  },
+  "means": [
+    0.3783341944217682,
+    0.22469773888587952,
+    0.2263433039188385,
+    0.27515602111816406,
+    0.32007431983947754,
+    0.16596634685993195,
+    0.14299435913562775,
+    0.26547738909721375,
+    0.20956426858901978,
+    0.24525949358940125
+  ],
+  "stds": [
+    0.08362869173288345,
+    0.01868605986237526,
+    0.04171178117394447,
+    0.07896813750267029,
+    0.03813692182302475,
+    0.06547518819570541,
+    0.08540670573711395,
+    0.014237657189369202,
+    0.018896931782364845,
+    0.06638794392347336
+  ],
+  "keys": [
+    "resignation",
+    "defiance",
+    "grief",
+    "longing",
+    "devotion",
+    "celebration",
+    "swagger",
+    "escape",
+    "heartbreak",
+    "wonder"
+  ]
 }

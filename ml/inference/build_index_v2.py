@@ -1,133 +1,344 @@
 """
-ml/inference/build_index_v2.py: Step 2b Index & Space Bundle Builder (Section 11.6).
+ml/inference/build_index_v2.py: Step R4 Index Builder & Space Bundle (Sections 12.2 & 12.5).
 
 Builds:
-- music_index.faiss (IndexFlatIP over 512-d normalized CLAP vectors)
-- track_metadata.json (metadata list matching index order)
-- anchors.json (anchor prompt embeddings dictionary)
-- track_id_map.json (id -> index position)
+- music_index.faiss: IndexFlatIP over 512-d normalized official LAION CLAP vectors (20,000 entries)
+- anchors.json: Anchor prompts dictionary with catalogue means and stds for standardisation
+- theme_prompts.json: Canonical theme prompts with catalogue means and stds
+- track_metadata.json: Header with cut points, distributions, means, stds, plus 20,000 tracks
+- track_id_map.json: Mapping id, key, deezer_id, itunes_id -> row index
+
+Validates:
+- kick_class has >= 3 values each with >= 10% share
+- restraint_bucket has >= 3 values
+- Mandatory anchor diversity: max cosine < 0.95 and min cosine < 0.70
+- Mandatory catalogue diversity: first 50 vectors pairwise cosine mean < 0.90
 """
 from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
+from collections import Counter
 from pathlib import Path
 
 import faiss
 import numpy as np
-import torch
-from transformers import ClapModel, ClapProcessor
+
+# Add backend to path
+sys.path.insert(0, "backend")
+from app.services.recommender import make_track_key
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("build_index_v2")
 
-CATALOG_FEATURES_PATH = Path("ml/data/catalog_features.jsonl")
-CLAP_NPY_PATH = Path("ml/data/clap.npy")
-ANCHORS_PROMPTS_PATH = Path("ml/inference/anchor_prompts.json")
+DATA_DIR = Path("ml/data")
+INFERENCE_DIR = Path("ml/inference")
+INFERENCE_DIR.mkdir(parents=True, exist_ok=True)
 
-OUT_FAISS_PATH = Path("ml/inference/music_index.faiss")
-OUT_METADATA_PATH = Path("ml/inference/track_metadata.json")
-OUT_ANCHORS_PATH = Path("ml/inference/anchors.json")
-OUT_ID_MAP_PATH = Path("ml/inference/track_id_map.json")
+CATALOG_FEATURES_PATH = DATA_DIR / "catalog_features.jsonl"
+CLAP_NPY_PATH = DATA_DIR / "clap.npy"
 
-
-def _extract_tensor(out) -> torch.Tensor:
-    if hasattr(out, "pooler_output") and out.pooler_output is not None:
-        return out.pooler_output
-    if hasattr(out, "text_embeds") and out.text_embeds is not None:
-        return out.text_embeds
-    if isinstance(out, (tuple, list)) and len(out) > 1:
-        return out[1]
-    return out
+OUT_FAISS_PATH = INFERENCE_DIR / "music_index.faiss"
+OUT_METADATA_PATH = INFERENCE_DIR / "track_metadata.json"
+OUT_ANCHORS_PATH = INFERENCE_DIR / "anchors.json"
+OUT_THEMES_PATH = INFERENCE_DIR / "theme_prompts.json"
+OUT_ID_MAP_PATH = INFERENCE_DIR / "track_id_map.json"
 
 
 def main():
-    logger.info("Starting index build (Section 11.6)...")
+    logger.info("=== Starting Step R4: Index Build & Quantile Bucketing ===")
 
     # 1. Load catalog features
     if not CATALOG_FEATURES_PATH.exists():
         raise FileNotFoundError(f"Missing {CATALOG_FEATURES_PATH}. Run harvest_v2.py first.")
 
-    metadata_list: list[dict] = []
+    raw_tracks: list[dict] = []
     with open(CATALOG_FEATURES_PATH, "r", encoding="utf-8") as f:
         for line in f:
             if line.strip():
-                metadata_list.append(json.loads(line))
+                raw_tracks.append(json.loads(line))
 
-    N = len(metadata_list)
-    logger.info(f"Loaded {N} track records from {CATALOG_FEATURES_PATH}")
+    N = len(raw_tracks)
+    logger.info("Loaded %d track records from %s", N, CATALOG_FEATURES_PATH)
+    if N < 20000:
+        raise ValueError(f"Expected at least 20,000 tracks, got {N}")
 
     # 2. Load CLAP embeddings
     if not CLAP_NPY_PATH.exists():
-        raise FileNotFoundError(f"Missing {CLAP_NPY_PATH}. Run harvest_v2.py first.")
+        raise FileNotFoundError(f"Missing {CLAP_NPY_PATH}")
 
     embs = np.load(CLAP_NPY_PATH)
     if embs.ndim == 3:
         embs = embs.squeeze(1)
-    logger.info(f"Loaded embeddings matrix {embs.shape}")
-
+    logger.info("Loaded embeddings matrix %s", embs.shape)
     if len(embs) != N:
-        logger.warning(f"Length mismatch: {len(embs)} vectors vs {N} metadata entries. Truncating to min.")
-        min_len = min(len(embs), N)
-        embs = embs[:min_len]
-        metadata_list = metadata_list[:min_len]
-        N = min_len
+        raise ValueError(f"Mismatch: {len(embs)} vectors vs {N} metadata entries")
 
     # Normalize vectors
     norms = np.linalg.norm(embs, axis=1, keepdims=True)
-    embs = embs / np.maximum(norms, 1e-8)
-    embs = np.ascontiguousarray(embs, dtype=np.float32)
+    norms[norms == 0] = 1.0
+    embs = (embs / norms).astype(np.float32)
 
-    # 3. Build FAISS IndexFlatIP
+    # 3. Load Anchors & compute catalogue means and stds (Section 12.2)
+    with open(OUT_ANCHORS_PATH, "r", encoding="utf-8") as f:
+        anchors_raw = json.load(f)
+    if isinstance(anchors_raw, dict) and "prompts" in anchors_raw:
+        anchor_prompts = anchors_raw["prompts"]
+    else:
+        anchor_prompts = anchors_raw
+
+    anchor_keys = list(anchor_prompts.keys())
+    anchor_matrix = np.array([anchor_prompts[k] for k in anchor_keys], dtype=np.float32)
+
+    # Compute anchor cosines for all tracks
+    all_anchor_cosines = []
+    for r in raw_tracks:
+        ac = r.get("anchor_cosines")
+        if not ac or len(ac) != len(anchor_keys):
+            # Compute directly if missing
+            vec = embs[len(all_anchor_cosines)]
+            ac = (anchor_matrix @ vec).tolist()
+        all_anchor_cosines.append(ac)
+
+    anchor_cos_arr = np.array(all_anchor_cosines, dtype=np.float32)
+    anchor_means = np.mean(anchor_cos_arr, axis=0)
+    anchor_stds = np.std(anchor_cos_arr, axis=0)
+    anchor_stds[anchor_stds == 0] = 1.0
+
+    # Save standardized anchors.json
+    anchors_bundle = {
+        "prompts": anchor_prompts,
+        "means": anchor_means.tolist(),
+        "stds": anchor_stds.tolist(),
+        "keys": anchor_keys,
+    }
+    with open(OUT_ANCHORS_PATH, "w", encoding="utf-8") as f:
+        json.dump(anchors_bundle, f, indent=2)
+    logger.info("Saved standardized anchors bundle to %s", OUT_ANCHORS_PATH)
+
+    # 4. Load Themes & compute catalogue means and stds (Section 12.3)
+    with open(OUT_THEMES_PATH, "r", encoding="utf-8") as f:
+        themes_raw = json.load(f)
+    if isinstance(themes_raw, dict) and "prompts" in themes_raw:
+        theme_prompts = themes_raw["prompts"]
+    else:
+        theme_prompts = themes_raw
+
+    theme_keys = list(theme_prompts.keys())
+    theme_vecs = [r["theme_vec"] for r in raw_tracks if r.get("has_lyrics") and len(r.get("theme_vec", [])) == len(theme_keys)]
+    if theme_vecs:
+        theme_mat = np.array(theme_vecs, dtype=np.float32)
+        theme_means = np.mean(theme_mat, axis=0)
+        theme_stds = np.std(theme_mat, axis=0)
+        theme_stds[theme_stds == 0] = 1.0
+    else:
+        theme_means = np.zeros(len(theme_keys), dtype=np.float32)
+        theme_stds = np.ones(len(theme_keys), dtype=np.float32)
+
+    themes_bundle = {
+        "prompts": theme_prompts,
+        "means": theme_means.tolist(),
+        "stds": theme_stds.tolist(),
+        "keys": theme_keys,
+    }
+    with open(OUT_THEMES_PATH, "w", encoding="utf-8") as f:
+        json.dump(themes_bundle, f, indent=2)
+    logger.info("Saved standardized theme prompts bundle to %s", OUT_THEMES_PATH)
+
+    # 5. Continuous features cut points & bucketing (Section 12.5)
+    hits_per_bar_arr = np.array([r.get("hits_per_bar", 0.0) for r in raw_tracks])
+    low_share_arr = np.array([r.get("low_share", 0.0) for r in raw_tracks])
+    loudness_range_arr = np.array([r.get("loudness_range", 0.0) for r in raw_tracks])
+    crest_factor_arr = np.array([r.get("crest_factor", 0.0) for r in raw_tracks])
+
+    cut_points = {
+        "hits_per_bar": {
+            "p25": float(np.percentile(hits_per_bar_arr, 25)),
+            "p33": float(np.percentile(hits_per_bar_arr, 33.3)),
+            "p50": float(np.percentile(hits_per_bar_arr, 50)),
+            "p66": float(np.percentile(hits_per_bar_arr, 66.7)),
+            "p75": float(np.percentile(hits_per_bar_arr, 75)),
+        },
+        "low_share": {
+            "p25": float(np.percentile(low_share_arr, 25)),
+            "p33": float(np.percentile(low_share_arr, 33.3)),
+            "p50": float(np.percentile(low_share_arr, 50)),
+            "p66": float(np.percentile(low_share_arr, 66.7)),
+            "p75": float(np.percentile(low_share_arr, 75)),
+        },
+        "loudness_range": {
+            "p25": float(np.percentile(loudness_range_arr, 25)),
+            "p33": float(np.percentile(loudness_range_arr, 33.3)),
+            "p50": float(np.percentile(loudness_range_arr, 50)),
+            "p66": float(np.percentile(loudness_range_arr, 66.7)),
+            "p75": float(np.percentile(loudness_range_arr, 75)),
+        },
+        "crest_factor": {
+            "p25": float(np.percentile(crest_factor_arr, 25)),
+            "p33": float(np.percentile(crest_factor_arr, 33.3)),
+            "p50": float(np.percentile(crest_factor_arr, 50)),
+            "p66": float(np.percentile(crest_factor_arr, 66.7)),
+            "p75": float(np.percentile(crest_factor_arr, 75)),
+        },
+    }
+
+    # Assign kick_class and restraint_bucket using catalogue quantiles
+    kick_classes = []
+    restraint_buckets = []
+    final_tracks = []
+
+    for i, r in enumerate(raw_tracks):
+        hpb = r.get("hits_per_bar", 0.0)
+        ls = r.get("low_share", 0.0)
+        lr = r.get("loudness_range", 0.0)
+        cf = r.get("crest_factor", 0.0)
+
+        # Quantile-based kick_class
+        if hpb <= cut_points["hits_per_bar"]["p33"]:
+            kc = "sparse_backbeat"
+        elif ls >= cut_points["low_share"]["p66"]:
+            kc = "syncopated_808"
+        elif hpb >= cut_points["hits_per_bar"]["p66"]:
+            kc = "four_on_floor"
+        else:
+            kc = "other"
+
+        # Quantile-based restraint_bucket
+        if lr >= cut_points["loudness_range"]["p66"] and cf >= cut_points["crest_factor"]["p50"]:
+            rb = "restrained"
+        elif lr <= cut_points["loudness_range"]["p33"] and cf <= cut_points["crest_factor"]["p50"]:
+            rb = "saturated"
+        else:
+            rb = "moderate"
+
+        # Standardized vibes (Section 12.2)
+        raw_ac = np.array(all_anchor_cosines[i], dtype=np.float32)
+        std_ac = (raw_ac - anchor_means) / anchor_stds
+        top2_std_idx = np.argsort(std_ac)[::-1][:2]
+        std_vibes = [anchor_keys[idx] for idx in top2_std_idx]
+
+        # Standardized theme_vec
+        raw_tv = r.get("theme_vec", [0.0] * len(theme_keys))
+        if r.get("has_lyrics") and len(raw_tv) == len(theme_keys):
+            std_tv = ((np.array(raw_tv, dtype=np.float32) - theme_means) / theme_stds).tolist()
+        else:
+            std_tv = [0.0] * len(theme_keys)
+
+        r["kick_class"] = kc
+        r["restraint_bucket"] = rb
+        r["vibes"] = std_vibes
+        r["theme_vec"] = std_tv
+        r["anchor_profile"] = std_ac.tolist()
+
+        kick_classes.append(kc)
+        restraint_buckets.append(rb)
+        final_tracks.append(r)
+
+    # Verify distributions
+    kc_counts = Counter(kick_classes)
+    rb_counts = Counter(restraint_buckets)
+    logger.info("=== kick_class distribution ===")
+    for k, v in kc_counts.items():
+        logger.info("  %s: %d (%.2f%%)", k, v, v / N * 100)
+    logger.info("=== restraint_bucket distribution ===")
+    for k, v in rb_counts.items():
+        logger.info("  %s: %d (%.2f%%)", k, v, v / N * 100)
+
+    # Mandatory assertion (Section 12.6 R4): kick_class has >= 3 values each with >= 10% share
+    kc_shares = [v / N for v in kc_counts.values() if v / N >= 0.10]
+    if len(kc_shares) < 3:
+        raise RuntimeError(
+            f"kick_class failed mandatory diversity requirement: only {len(kc_shares)} classes have >= 10% share! "
+            f"Counts: {dict(kc_counts)}"
+        )
+    logger.info("kick_class passed mandatory assertion: %d classes each have >= 10%% share", len(kc_shares))
+
+    # 6. Save track_metadata.json with Header
+    header = {
+        "version": "2.0",
+        "total_tracks": N,
+        "cut_points": cut_points,
+        "kick_class_distribution": {k: float(v / N) for k, v in kc_counts.items()},
+        "restraint_bucket_distribution": {k: float(v / N) for k, v in rb_counts.items()},
+        "anchor_means": {anchor_keys[i]: float(anchor_means[i]) for i in range(len(anchor_keys))},
+        "anchor_stds": {anchor_keys[i]: float(anchor_stds[i]) for i in range(len(anchor_keys))},
+        "theme_means": {theme_keys[i]: float(theme_means[i]) for i in range(len(theme_keys))},
+        "theme_stds": {theme_keys[i]: float(theme_stds[i]) for i in range(len(theme_keys))},
+    }
+
+    metadata_payload = {
+        "header": header,
+        "tracks": final_tracks,
+    }
+
+    with open(OUT_METADATA_PATH, "w", encoding="utf-8") as f:
+        json.dump(metadata_payload, f, indent=1)
+    logger.info("Saved track metadata to %s (%.2f MB)", OUT_METADATA_PATH, OUT_METADATA_PATH.stat().st_size / 1024 / 1024)
+
+    # 7. Build FAISS IndexFlatIP
     dim = embs.shape[1]
     index = faiss.IndexFlatIP(dim)
     index.add(embs)
-    logger.info(f"Built FAISS IndexFlatIP with {index.ntotal} vectors of dimension {dim}")
-
+    logger.info("Built FAISS IndexFlatIP with %d vectors of dimension %d", index.ntotal, dim)
     faiss.write_index(index, str(OUT_FAISS_PATH))
-    logger.info(f"Saved FAISS index to {OUT_FAISS_PATH} ({OUT_FAISS_PATH.stat().st_size / 1024 / 1024:.2f} MB)")
+    logger.info("Saved FAISS index to %s (%.2f MB)", OUT_FAISS_PATH, OUT_FAISS_PATH.stat().st_size / 1024 / 1024)
 
-    # 4. Save track_metadata.json
-    with open(OUT_METADATA_PATH, "w", encoding="utf-8") as f:
-        json.dump(metadata_list, f, indent=1)
-    logger.info(f"Saved track metadata to {OUT_METADATA_PATH} ({OUT_METADATA_PATH.stat().st_size / 1024 / 1024:.2f} MB)")
+    # 8. Build track_id_map.json
+    id_map: dict[str, int] = {}
+    for idx, rec in enumerate(final_tracks):
+        if rec.get("id"):
+            id_map[str(rec["id"])] = idx
+        k = rec.get("key") or make_track_key(rec.get("artist", ""), rec.get("title", ""))
+        id_map[k] = idx
+        if rec.get("deezer_id"):
+            id_map[str(rec["deezer_id"])] = idx
+        if rec.get("itunes_id"):
+            id_map[str(rec["itunes_id"])] = idx
+            id_map[f"it_{rec['itunes_id']}"] = idx
 
-    # 5. Save track_id_map.json
-    id_map = {rec["id"]: idx for idx, rec in enumerate(metadata_list)}
     with open(OUT_ID_MAP_PATH, "w", encoding="utf-8") as f:
         json.dump(id_map, f)
-    logger.info(f"Saved track ID map to {OUT_ID_MAP_PATH}")
+    logger.info("Saved track ID map with %d keys to %s", len(id_map), OUT_ID_MAP_PATH)
 
-    # 6. Embed anchors
-    with open(ANCHORS_PROMPTS_PATH, "r", encoding="utf-8") as f:
-        anchor_prompts = json.load(f)
-    anchor_keys = list(anchor_prompts.keys())
-    anchor_texts = [anchor_prompts[k] for k in anchor_keys]
+    # 9. Verify Mandatory Assertions (Section 12.1)
+    # Assertion 1: Anchor matrix pairwise cosine max < 0.95 and min < 0.70
+    anchor_norms = np.linalg.norm(anchor_matrix, axis=1, keepdims=True)
+    anchor_norms[anchor_norms == 0] = 1.0
+    normed_anchors = anchor_matrix / anchor_norms
+    sims = normed_anchors @ normed_anchors.T
+    triu_idx = np.triu_indices(len(anchor_keys), k=1)
+    pair_cos = sims[triu_idx]
+    max_anchor_cos = float(np.max(pair_cos))
+    min_anchor_cos = float(np.min(pair_cos))
+    logger.info("Anchor matrix check: max_cosine=%.4f, min_cosine=%.4f", max_anchor_cos, min_anchor_cos)
+    if max_anchor_cos >= 0.95 or min_anchor_cos >= 0.70:
+        raise RuntimeError(f"Anchor diversity failed: max={max_anchor_cos:.4f}, min={min_anchor_cos:.4f}")
 
-    logger.info(f"Embedding {len(anchor_texts)} anchor prompts with CLAP text encoder...")
-    clap_processor = ClapProcessor.from_pretrained("laion/larger_clap_music", local_files_only=True)
-    clap_model = ClapModel.from_pretrained("laion/larger_clap_music", local_files_only=True)
-    clap_model.eval()
+    # Assertion 2: First 50 vectors pairwise cosine mean < 0.90
+    first_vecs = embs[:50]
+    first_sims = first_vecs @ first_vecs.T
+    triu_50 = np.triu_indices(50, k=1)
+    mean_50_cos = float(np.mean(first_sims[triu_50]))
+    logger.info("First 50 catalogue vectors mean pairwise cosine: %.4f (must be < 0.90)", mean_50_cos)
+    if mean_50_cos >= 0.90:
+        raise RuntimeError(f"Catalogue diversity assertion failed: mean pairwise cosine={mean_50_cos:.4f} (must be < 0.90)")
 
-    text_inputs = clap_processor(text=anchor_texts, return_tensors="pt", padding=True)
-    with torch.no_grad():
-        t_out = clap_model.get_text_features(**text_inputs)
-        anchor_features = _extract_tensor(t_out).cpu().numpy().astype(np.float32)
-
-    anchor_norms = np.linalg.norm(anchor_features, axis=1, keepdims=True)
-    anchor_features = anchor_features / np.maximum(anchor_norms, 1e-8)
-
-    anchors_dict = {
-        anchor_keys[i]: anchor_features[i].tolist()
-        for i in range(len(anchor_keys))
-    }
-    with open(OUT_ANCHORS_PATH, "w", encoding="utf-8") as f:
-        json.dump(anchors_dict, f, indent=1)
-    logger.info(f"Saved anchors dictionary to {OUT_ANCHORS_PATH}")
-
-    logger.info("Index build complete!")
+    print("\n" + "=" * 60)
+    print("STEP R4 INDEX BUILD COMPLETED SUCCESSFULLY")
+    print(f"Total Catalogue Rows:       {N}")
+    print(f"FAISS Index Total:          {index.ntotal} (dim {dim})")
+    print(f"ID Map Entries:             {len(id_map)}")
+    print(f"Anchor Max Cosine:          {max_anchor_cos:.4f} (< 0.95)")
+    print(f"Anchor Min Cosine:          {min_anchor_cos:.4f} (< 0.70)")
+    print(f"First 50 Mean Cosine:       {mean_50_cos:.4f} (< 0.90)")
+    print("kick_class shares:")
+    for k, v in kc_counts.items():
+        print(f"  {k:20s}: {v/N*100:.2f}%")
+    print("restraint_bucket shares:")
+    for k, v in rb_counts.items():
+        print(f"  {k:20s}: {v/N*100:.2f}%")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

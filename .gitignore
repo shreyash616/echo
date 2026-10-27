@@ -37,3 +37,4 @@ __pycache__
 # Expo
 /app/.expo
 /app/dist
+/ml/data/itunes_cache.jsonl
