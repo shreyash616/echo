@@ -23,7 +23,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install system dependencies (ffmpeg)
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
@@ -42,3 +46,7 @@ jobs:
         env:
           ECHO_BASE_URL: https://shreyash616-echo-backend.hf.space
         run: pytest tests/test_live_overlap.py
+
+      - name: Run Feel Benchmark on TUNE (report-only)
+        run: |
+          python tests/feel_benchmark.py --split tune --base-url https://shreyash616-echo-backend.hf.space || true

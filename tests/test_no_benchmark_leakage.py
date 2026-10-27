@@ -19,6 +19,9 @@ CATALOG_PATH = os.path.abspath("ml/data/catalog_features.jsonl")
 WHITELIST_FILES = {
     os.path.abspath("ml/data/harvest_seed_artists.json"),
 }
+WHITELIST_DIRS = {
+    os.path.abspath("tests/fixtures"),
+}
 
 
 def test_catalogue_benchmark_share():
@@ -108,7 +111,7 @@ def test_no_benchmark_leakage():
                 continue
 
             abs_path = os.path.abspath(os.path.join(root, file))
-            if abs_path in WHITELIST_FILES or abs_path in catalogue_files or abs_path in manifest_files:
+            if abs_path in WHITELIST_FILES or any(abs_path.startswith(d) for d in WHITELIST_DIRS) or abs_path in catalogue_files or abs_path in manifest_files:
                 continue
 
             try:

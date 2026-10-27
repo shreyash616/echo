@@ -760,30 +760,28 @@ class MusicRecommender:
         artist_counts: dict[str, int] = {}
         cross_lang_used = 0
 
-        # MMR greedy selection
-        remaining = list(scored_candidates)
-        while len(selected) < k and remaining:
+        # MMR greedy selection with cached vectors and hoisted outer invariants
+        selected_claps: list[np.ndarray] = []
+        remaining_records = [
+            (cand, score, _norm_artist(cand.get("artist", "")), bool((cand.get("languageAffinity") or 0.0) < 0.99), self.get_clap_vector(cand))
+            for cand, score, _ in scored_candidates
+        ]
+
+        while len(selected) < k and remaining_records:
             best_idx = -1
             best_mmr_score = -1e9
 
-            for idx, (cand, score, _) in enumerate(remaining):
-                art = _norm_artist(cand.get("artist", ""))
-                is_capped = bool(artist_counts.get(art, 0) >= 2)
+            best_same = max(
+                (rec[1] for rec in remaining_records if not rec[3]),
+                default=0.0,
+            )
 
-                is_cross = bool((cand.get("languageAffinity") or 0.0) < 0.99)
-                best_same = max(
-                    [r_score for r_cand, r_score, _ in remaining if (r_cand.get("languageAffinity") or 0.0) >= 0.99],
-                    default=0.0,
-                )
+            for idx, (cand, score, art, is_cross, cand_clap) in enumerate(remaining_records):
+                is_capped = bool(artist_counts.get(art, 0) >= 2)
                 budget_exceeded = bool(is_cross and cross_lang_used >= budget and score < (best_same + 0.05))
 
-                # Diversity penalty
-                if selected:
-                    cand_clap = self.get_clap_vector(cand)
-                    max_sim = max(
-                        float(np.dot(cand_clap, self.get_clap_vector(s)))
-                        for s in selected
-                    )
+                if selected_claps:
+                    max_sim = max(float(np.dot(cand_clap, s_clap)) for s_clap in selected_claps)
                 else:
                     max_sim = 0.0
 
@@ -798,15 +796,14 @@ class MusicRecommender:
                     best_idx = idx
 
             if best_idx < 0:
-                cand, _, _ = remaining.pop(0)
-                selected.append(cand)
-            else:
-                cand, _, _ = remaining.pop(best_idx)
-                art = _norm_artist(cand.get("artist", ""))
-                artist_counts[art] = artist_counts.get(art, 0) + 1
-                if (cand.get("languageAffinity") or 0.0) < 0.99:
-                    cross_lang_used += 1
-                selected.append(cand)
+                best_idx = 0
+
+            cand, score, art, is_cross, cand_clap = remaining_records.pop(best_idx)
+            artist_counts[art] = artist_counts.get(art, 0) + 1
+            if is_cross:
+                cross_lang_used += 1
+            selected.append(cand)
+            selected_claps.append(cand_clap)
 
         return selected
 

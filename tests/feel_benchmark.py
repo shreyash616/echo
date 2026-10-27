@@ -178,7 +178,8 @@ def run_benchmark(
             resp = client.get(f"/api/recommendations/{seed_key}", params={"key": seed_key, "k": 20})
             if resp.status_code != 200:
                 raise RuntimeError(f"API failed for seed {seed_key}: {resp.status_code} {resp.text}")
-            recs = resp.json().get("recommendations", [])
+            data = resp.json()
+            recs = data if isinstance(data, list) else data.get("recommendations", [])
             seed_record = client.get(f"/api/track/{seed_key}", params={"key": seed_key}).json()
         else:
             seed_record = recommender._metadata[recommender._track_id_map[seed_key]]
