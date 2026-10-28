@@ -249,16 +249,29 @@ T2 to T7 are evaluated before anything is deployed.
 
 ## 5. Order and gates
 
-1. T9 first (so the replica validation and range tests exist), then T10.
-2. T3 (features) + T5 (kick) + T4 (language) + T8 (theme) in one change set, then T1 (the full
-   data pass, which is what makes them real), one index build, one deploy. Gate: T1, T3, T4, T5,
-   T8 "done when" on the artifacts; `report.py --validate-live` deviation under 0.001.
-3. T2 (z-scored similarities). Gate: rule 18 on the replica; validate-live after deploy.
-4. T6 (pools, latency). Gate: pooled counts on the replica, p95 on the Space.
-5. T7 (weights). Gate: replica before and after, live benchmark within one hit.
-6. Section 6 measured on the live Space, HOLDOUT once.
+**Protocol (binding).** Work in the packets below, one at a time. For each: write the packet
+heading, start time and the files you intend to touch in `FEEL_ALGORITHM.md`'s progress log; touch
+nothing outside that list; run the packet's verification exactly as written and paste the full
+output; fix failures inside the packet, never carry one forward, never edit a check to make it
+pass; commit once per packet as `Packet <id>: <title>` and push; end with
+`PACKET <id> READY FOR REVIEW` and stop until the owner replies `GO <next id>`. If a packet cannot
+be done as written, end with `PACKET <id> BLOCKED` and the evidence; do not improvise a design.
 
-A step that fails its gate is not deployed. Weights are not touched before step 5.
+| Packet | Scope | Files it may touch | Verification to paste | Gate |
+|---|---|---|---|---|
+| P0 | Baseline | `FEEL_ALGORITHM.md` | `report.py --split tune --validate-live <space>` | pooled 20 of 81, hits 0 and 0, deviation 0.0000 |
+| P1 | T9 tests and workflow, T10 log corrections | `tests/*.py` listed in T9, `.github/workflows/tests.yml`, `FEEL_ALGORITHM.md` | `gh run list --branch main --limit 1`, `pytest -q tests/` | green run URL; every test in the T9 list present and passing |
+| P2 | T3 features and T5 kick class | `backend/app/audio/features.py`, `tests/test_features_golden.py`, `tests/fixtures/` | `pytest -q tests/test_features_golden.py tests/fixtures/test_octave_truth.py`; the catalogue std table from a 500-row describe sample | T3 and T5 "done when" on the sample: saturation std at least 0.08, sustain not 1.0 on more than 20%, darkness std above 0.10, no kick class above 50% |
+| P3 | T4 language and T8 theme | `backend/app/audio/features.py` (language only), `ml/data/redescribe_catalog.py`, `ml/data/harvest_v2.py`, `ml/inference/build_index_v2.py`, `backend/app/audio/english_words.txt` | the 14-seed language table from a local describe; theme histogram on the 500-row sample | 14 of 14; `has_lyrics` true only with a lyric file |
+| P4 | T1 the data pass (batched, delete after describe) | `ml/data/redescribe_catalog.py`, `ml/data/HARVEST_MANIFEST.json`, `ml/data/DROPPED.jsonl` | manifest printed; `report.py` on the rebuilt artifacts | rule 17 counts; T1, T3, T4, T5, T8 "done when" on the full catalogue |
+| P5 | Deploy and validate | `tests/deploy_hf.py` | health, `report.py --validate-live`, `test_live_overlap.py`, `feel_benchmark.py --split tune --base-url` | deviation under 0.001; overlap passes; numbers pasted |
+| P6 | T2 z-scored similarities | `backend/app/services/recommender.py`, `ml/inference/build_index_v2.py` (header std), `ml/experiments/offline_rerank/score_lib.py` | `report.py` before and after; `--validate-live` after deploy | rule 18: no feel axis under 0.05 on three or more TUNE seeds; replica at or above the section 2 floor |
+| P7 | T6 pools and latency test | `backend/app/config.py`, `tests/test_candidate_pool.py` | `report.py` pooled counts; `test_candidate_pool.py --base-url` | at least 8 of 11 owner and 35 of 81 TUNE positives pooled; p95 parsed as seconds |
+| P8 | T7 weight search | `ml/training/search_weights.py`, `ml/inference/rerank_weights.json`, `ml/inference/WEIGHTS_REPORT.md`, `ml/training/weight_search_log.jsonl` | the report; `report.py` with the new weights; live benchmark | at least 500 evaluations; live within one hit of the replica; no regression below P6 |
+| P9 | Section 6 acceptance | `FEEL_ALGORITHM.md` | every row of section 6 with its command | every row measured; failures stated as failures |
+
+Ordering stays as before: tests first, then the four descriptor fixes and the data pass together,
+then the scoring, then pools, then weights. Weights are not touched before P8.
 
 ## 6. Acceptance (live Space, measured, pasted into the log with the commands)
 

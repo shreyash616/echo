@@ -7,10 +7,36 @@ and the benchmark can be run on it. Latency, index compression and catalogue str
 deferred and listed in section 9 so nobody builds them early. Where this file and `FIX_PLAN_2.md`
 disagree, `FIX_PLAN_2.md` wins until its section 6 passes, then this file wins.
 
-Sections: 1 why the catalogue is the search space, 2 machines and the division of labour, 3 the
-50 GB disk budget, 4 discovery, 5 the harvester, 6 storage and index at a million, 7 serving
-changes, 8 tests and acceptance, 9 deferred, 10 rules, 11 order and gates, 12 amendment to
-`FIX_PLAN_2.md` T1.
+Sections: 0 how to work this plan (read first), 1 why the catalogue is the search space, 2 machines
+and the division of labour, 3 the 50 GB disk budget, 4 discovery, 5 the harvester, 6 storage and
+index at a million, 7 serving changes, 8 tests and acceptance, 9 deferred, 10 rules, 11 work
+packets and gates, 12 amendment to `FIX_PLAN_2.md` T1.
+
+## 0. How to work this plan (binding for the implementing agent)
+
+The work is cut into packets (section 11). Each packet is small enough for one sitting, names the
+only files it may touch, and ends with a verification block whose output is pasted, verbatim, into
+`SCALE_PROGRESS.md` under the packet's heading. The protocol:
+
+1. Start a packet by writing its heading and start time in `SCALE_PROGRESS.md`, then the list of
+   files you intend to touch. Touching a file outside the packet's list is a failed packet.
+2. Do only what the packet says. A good idea that belongs to a later packet goes into a
+   "Noticed" line in the progress entry, not into the code.
+3. Run the packet's verification block exactly as written and paste the full output. If any check
+   fails, fix it inside the packet and re-run; never carry a failing check into the next packet and
+   never edit a check to make it pass.
+4. End the packet with the line `PACKET <id> READY FOR REVIEW` and stop. Do not start the next
+   packet until the owner replies `GO <next id>`. The owner, or an auditor the owner runs, re-runs
+   the verification block before replying; a packet whose checks do not reproduce is reopened.
+5. One commit per packet, message `Packet <id>: <packet title>`, pushed before the review request.
+   The commit touches only the packet's files plus `SCALE_PROGRESS.md`.
+6. If a packet cannot be completed as written (an API changed, a number is unreachable), stop,
+   write what was found with the command output, and end with `PACKET <id> BLOCKED`. Do not
+   improvise a different design.
+
+The point of the protocol is that a mistake costs one packet, not the whole run. A million-song
+harvest executed on a wrong describe or a wrong storage format is a week lost; the gates in
+section 11 exist to make that impossible.
 
 ## 1. Why the catalogue is the search space
 
@@ -217,18 +243,104 @@ million-row catalogue works.
 25. The serving Space is never used as a harvester while users can reach it; if the Space takes
     shards, it is a separate Space.
 
-## 11. Order and gates
+## 11. Work packets and gates
 
-1. Round 2 passes (its section 6). Gate: the pasted table.
-2. Section 6 storage and loader, built and deployed on the existing 20,000 rows. Gate:
-   `test_columnar_loader.py`, the full existing suite, `report.py --validate-live` under 0.001.
-   Doing this first means the loader is proven before the data gets big.
-3. Discovery on the Space. Gate: section 4 "done when".
-4. Harvester on one fixture shard, then ten real shards. Gate: the two harvest tests, the throughput
-   check, previews directory empty, free disk unchanged after the shards.
-5. The full run to 1,000,000, both runners if the owner chooses. Gate: `catalog/v3/MANIFEST.json`
-   row sum at least 1,000,000.
-6. Index build and deploy. Gate: section 8 acceptance.
+Each packet: scope, files it may touch, verification block (run and paste), stop. Packets run in
+this order; none starts before the previous one's `GO`.
+
+**WP0. Preconditions.** Scope: confirm `FIX_PLAN_2.md` section 6 passed, and record the describe
+code commit that every shard will carry. Files: `SCALE_PROGRESS.md` only.
+Verify and paste:
+```
+git log -1 --format=%H -- backend/app/audio/features.py
+ECHO_ARTIFACT_DIR=ml/inference python ml/experiments/offline_rerank/report.py --split tune --validate-live https://shreyash616-echo-backend.hf.space | tail -3
+```
+Gate: the `FIX_PLAN_2.md` section 6 table pasted with every row measured; replica deviation under
+0.001. If section 6 has not passed, this packet ends `BLOCKED` and nothing below starts.
+
+**WP1. Windows box environment.** Scope: WSL2 Ubuntu with the project venv: ffmpeg, librosa,
+pyloudnorm, laion_clap with CUDA, sentence-transformers, lingua, pyarrow, huggingface_hub; the
+LAION music checkpoint downloaded; HF write token for the dataset in the environment. Files:
+`SETUP.md` (a WSL2 section), `ml/data/requirements-harvest.txt`.
+Verify and paste:
+```
+uname -a && nvidia-smi --query-gpu=name,memory.total --format=csv && df -h ~ | tail -1
+python -c "import torch, laion_clap, librosa, lingua, pyarrow; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+python tests/test_features_golden.py
+```
+Gate: CUDA true on the RTX 3080; golden tests pass on this machine; at least 30 GB free.
+
+**WP2. Columnar storage and loader, on the existing 20,000 rows.** Scope: `build_index_v3.py`
+writing the section 6 files from the current `catalog_features.jsonl` and `clap.npy`; the loader
+change in `recommender.py`; `score_lib.py` reading the same files. Files: `ml/inference/build_index_v3.py`
+(new), `backend/app/services/recommender.py` (loader only), `ml/experiments/offline_rerank/score_lib.py`,
+`tests/test_columnar_loader.py` (new), `tests/deploy_hf.py` (file list).
+Verify and paste:
+```
+python ml/inference/build_index_v3.py --out ml/inference && ls -la ml/inference | grep -E "clap.f16|feel_matrix|features.npz|strings.parquet|keys.npy|header.json"
+python -m pytest -q tests/test_columnar_loader.py tests/test_features_golden.py tests/test_no_gates.py tests/test_no_benchmark_leakage.py
+python tests/deploy_hf.py && curl -s https://shreyash616-echo-backend.hf.space/api/health
+ECHO_ARTIFACT_DIR=ml/inference python ml/experiments/offline_rerank/report.py --split tune --validate-live https://shreyash616-echo-backend.hf.space | tail -3
+python tests/test_live_overlap.py --base-url https://shreyash616-echo-backend.hf.space | tail -2
+```
+Gate: all tests pass; health `recommender_loaded: true`; replica deviation under 0.001 against the
+redeployed Space; overlap passes; `report.py` pooled and hits equal to the WP0 numbers (the storage
+change must not move a single rank).
+
+**WP3. Discovery on the Space.** Scope: `ml/data/discover_artists.py` implementing section 4,
+run from the Space's shell, writing `discovery/artists.jsonl`, `discovery/MANIFEST.json`,
+`discovery/shards.json` to the dataset. Files: `ml/data/discover_artists.py` (new),
+`ml/data/harvest_seed_artists.json` (read only).
+Verify and paste:
+```
+python -c "from huggingface_hub import hf_hub_download as d; import json; m=json.load(open(d('shreyash616/echo-ml-artifacts','discovery/MANIFEST.json',repo_type='dataset'))); print(m)"
+```
+Gate: at least 80,000 artists; counts per source (chart, related, genre) all above zero; at least
+30 chart countries; `shards.json` with artist ranges covering every artist exactly once.
+
+**WP4. Harvester on one fixture shard.** Scope: `ml/data/harvest_v3.py` stages A to F and the
+claim and resume logic of section 5, run on `tests/fixtures/harvest_fixture_shard.json` (5 artists
+that are not in the benchmark). Files: `ml/data/harvest_v3.py` (new), `tests/test_harvest_shard.py`
+(new), `tests/test_harvest_resume.py` (new), the fixture file, `.gitignore` (previews scratch).
+Verify and paste:
+```
+python -m pytest -q tests/test_harvest_shard.py tests/test_harvest_resume.py
+ls ml/data/previews | wc -l
+python -c "from huggingface_hub import hf_hub_download as d; import json; print(json.load(open(d('shreyash616/echo-ml-artifacts','catalog/v3/shard_fixture.manifest.json',repo_type='dataset'))))"
+```
+Gate: both tests pass; previews directory empty; the fixture shard manifest on the dataset shows
+`describe_commit` equal to WP0's hash, seconds per stage, dropped count, and SHA256s that match the
+uploaded files.
+
+**WP5. Ten real shards.** Scope: run `harvest_v3.py` on shards 0 to 9 from `discovery/shards.json`
+on the Windows box. No code changes except bug fixes inside `harvest_v3.py`, each named in the
+progress entry. Files: `ml/data/harvest_v3.py`, `SCALE_PROGRESS.md`.
+Verify and paste:
+```
+python -c "from huggingface_hub import hf_hub_download as d; import json; m=json.load(open(d('shreyash616/echo-ml-artifacts','catalog/v3/MANIFEST.json',repo_type='dataset'))); print(len(m['shards']), sum(x['rows'] for x in m['shards']), sum(x['dropped'] for x in m['shards']))"
+df -h ~ | tail -1 && ls ml/data/previews | wc -l
+```
+Gate: 10 shards complete, at least 40,000 rows, dropped under 10%; free disk within 3 GB of WP1's
+value; previews directory empty; a projected finish date for a million at the measured songs per
+hour, stated in the entry. If the projection exceeds 14 days, stop and report before WP6.
+
+**WP6. The full run.** Scope: run to at least 1,000,000 rows; optionally a second runner on a
+separate Space following rule 25. No code changes; a bug fix reopens WP4 and re-verifies the
+fixture shard before the run resumes. Files: `SCALE_PROGRESS.md` (one line a day: shards done,
+rows, dropped, free disk).
+Verify and paste: the WP5 manifest command, daily, and at the end.
+Gate: manifest row sum at least 1,000,000; every shard manifest carries the WP0 describe commit.
+
+**WP7. Index build and deploy at a million.** Scope: `build_index_v3.py` over all shards from the
+dataset, upload, redeploy. Files: `ml/inference/build_index_v3.py` (bug fixes only),
+`tests/deploy_hf.py`.
+Verify and paste: the whole of section 8's acceptance table, with every command, plus the blind
+listen sheet (40 rows: world, hidden title revealed after rating, yes or no).
+Gate: section 8, every row. Recall at 20 is reported without a threshold.
+
+A packet's gate is checked by the owner before `GO`. The owner may also run
+`ml/experiments/offline_rerank/report.py` and the live tests independently at any time; a
+disagreement with a pasted output reopens the packet.
 
 ## 12. Amendment to `FIX_PLAN_2.md` T1
 
