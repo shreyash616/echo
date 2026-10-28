@@ -68,7 +68,7 @@ def felt_tempo(y: np.ndarray, sr: int = 22050) -> dict:
     c_list = [tatum, tatum / 2.0, tatum / 4.0]
     if tatum / 8.0 >= 40:
         c_list.append(tatum / 8.0)
-    if tatum < 120 and (tatum * 2) <= 240:
+    if tatum < 90 and (tatum * 2) <= 240:
         c_list.append(tatum * 2.0)
     if (tatum / 3.0) >= 40:
         val_3 = get_curve_val(curve_fused, tatum / 3.0)
@@ -93,16 +93,31 @@ def felt_tempo(y: np.ndarray, sr: int = 22050) -> dict:
     thresh = 0.3 * env_max if env_max > 0 else 0.0
     fused_peaks, _ = scipy.signal.find_peaks(env_fused, height=thresh)
 
+    dur_sec = len(y) / sr
+
+    # S2 backbeat_acf_c: autocorrelation of mean-removed, lag-0-normalized full-band onset envelope
+    env_mr = env_fused - np.mean(env_fused)
+    acf_raw = np.correlate(env_mr, env_mr, mode="full")[len(env_mr) - 1:]
+    acf_norm = acf_raw / acf_raw[0] if (len(acf_raw) > 0 and acf_raw[0] > 0) else np.zeros_like(acf_raw)
+
+    raw_acf_vals = {}
+    for c in C:
+        period_frames = (60.0 / c) * (sr / hop_length)
+        lag_2beats = int(round(2.0 * period_frames))
+        l_min = max(0, lag_2beats - 3)
+        l_max = min(len(acf_norm) - 1, lag_2beats + 3)
+        raw_acf_vals[c] = float(np.max(acf_norm[l_min : l_max + 1])) if l_max >= l_min else 0.0
+
+    max_acf = max(raw_acf_vals.values()) if raw_acf_vals else 1.0
+
     scores = []
     clarities = []
-    dur_sec = len(y) / sr
 
     for c in C:
         clarity_c = get_curve_val(curve_fused, c) / fused_max
         low_clarity_c = (get_curve_val(curve_low, c) / low_max) if low_max >= 0.01 else 0.0
 
         # Mid-band backbeat analysis at tactus c
-        # beat period in frames
         period_frames = (60.0 / c) * (sr / hop_length)
         best_bb = 0.5
         best_bb_half = 0.5
@@ -140,37 +155,38 @@ def felt_tempo(y: np.ndarray, sr: int = 22050) -> dict:
 
         backbeat_c = float(np.clip(max(best_bb, best_bb_half), 0.0, 1.0))
 
-        # Onset density per beat of c
+        # S2 backbeat_acf_c: divide by max over candidates so term is 0 to 1
+        backbeat_acf_c = float(np.clip(raw_acf_vals[c] / (max_acf + 1e-8), 0.0, 1.0))
+
+        # S2 Onset density per beat of c: 1.0 for 1.0-2.5, 0.6 for 2.5-4.0, 0.2 above 4.0 or below 0.5
         num_beats = (dur_sec / 60.0) * c
         density_val = len(fused_peaks) / max(1.0, num_beats)
-        if 0.70 <= density_val <= 3.2:
+        if 1.0 <= density_val <= 2.5:
             density_c = 1.0
-        elif 3.2 < density_val <= 6.0:
-            density_c = 0.5
-        elif density_val > 6.0:
+        elif (2.5 < density_val <= 4.0) or (0.5 <= density_val < 1.0):
+            density_c = 0.6
+        else:
             density_c = 0.2
-        else:
-            density_c = 0.5
 
-        # Bar flux (c / 4)
-        bar_bpm = c / 4.0
-        if bar_bpm >= 40:
-            bar_flux_c = get_curve_val(curve_fused, bar_bpm) / fused_max
-        else:
-            bar_flux_c = 0.3
+        # S2 Resonance prior around 100 BPM
+        prior_c = float(np.exp(-0.5 * ((np.log2(c / 100.0) / 0.5) ** 2)))
 
-        # Resonance prior around 110 BPM
-        prior_c = float(np.exp(-0.5 * ((np.log2(c / 110.0)) / 0.6) ** 2))
-
-        # Combined score s_c
+        # S2 Combined score: 0.25 clarity + 0.10 low_clarity + 0.20 backbeat + 0.20 backbeat_acf + 0.10 density + 0.15 prior
         s_c = (
-            0.30 * clarity_c
-            + 0.15 * low_clarity_c
-            + 0.25 * backbeat_c
-            + 0.15 * density_c
-            + 0.10 * bar_flux_c
-            + 0.05 * prior_c
+            0.25 * clarity_c
+            + 0.10 * low_clarity_c
+            + 0.20 * backbeat_c
+            + 0.20 * backbeat_acf_c
+            + 0.10 * density_c
+            + 0.15 * prior_c
         )
+
+        # Candidates > 150 BPM multiplied by 0.5 unless clarity_c >= 0.9 and backbeat_acf_c is max
+        if c > 150:
+            is_max_acf = (raw_acf_vals[c] >= max_acf - 1e-6)
+            if not (clarity_c >= 0.9 and is_max_acf):
+                s_c *= 0.5
+
         scores.append(s_c)
         clarities.append(clarity_c)
 
@@ -258,22 +274,6 @@ def groove(y: np.ndarray, felt_meta: dict, sr: int = 22050) -> dict:
     beat_low_ratio = beat_has_low / max(1, total_beats)
     off_beat_ratio = off_beat_hits / max(1, total_low)
 
-    # 11.5.2 kick_class rules
-    # "four_on_floor" if >= 85% of beats have a low onset
-    # "sparse_backbeat" if <= 55% of beats have a low onset and backbeat >= 0.7
-    # "syncopated_808" if low onsets land off-beat >= 30% of the time and low_share >= 0.3
-    # else "other"
-    low_share_est = float(np.sum(y[:min(len(y), 22050*5)]**2)) + 1e-8
-
-    if beat_low_ratio >= 0.85:
-        kick_class = "four_on_floor"
-    elif off_beat_ratio >= 0.28:
-        kick_class = "syncopated_808"
-    elif beat_low_ratio <= 0.58 and felt_meta.get("pulse_clarity", 0.5) >= 0.5:
-        kick_class = "sparse_backbeat"
-    else:
-        kick_class = "other"
-
     fused_peaks = felt_meta.get("_fused_peaks", [])
     hits_per_bar = float(len(fused_peaks) / max(1, total_beats / 4.0))
 
@@ -286,7 +286,18 @@ def groove(y: np.ndarray, felt_meta: dict, sr: int = 22050) -> dict:
 
     lag_ms = float(np.mean(lags)) if lags else 0.0
 
+    if beat_low_ratio >= 0.85:
+        kick_class = "four_on_floor"
+    elif off_beat_ratio >= 0.28:
+        kick_class = "syncopated_808"
+    elif beat_low_ratio <= 0.58 and felt_meta.get("pulse_clarity", 0.5) >= 0.5:
+        kick_class = "sparse_backbeat"
+    else:
+        kick_class = "other"
+
     return {
+        "beat_low_ratio": float(beat_low_ratio),
+        "off_beat_ratio": float(off_beat_ratio),
         "kick_class": kick_class,
         "backbeat": float(felt_meta.get("pulse_clarity", 0.5)),
         "hits_per_bar": hits_per_bar,
@@ -544,24 +555,24 @@ def restraint(y: np.ndarray, pulse_rate: float = 0.5, sr: int = 22050) -> dict:
     rms = float(np.sqrt(np.mean(y**2))) + 1e-8
     crest_factor = float(20.0 * np.log10(max(peak, 1e-4) / rms))
 
-    if loudness_range >= 8.0 and crest_factor >= 14.0:
-        bucket = "restrained"
-    elif loudness_range <= 4.0 and crest_factor <= 9.0:
-        bucket = "saturated"
-    else:
-        bucket = "moderate"
-
     # Energy formula (Tempo is NOT in this formula!)
     flux = np.mean(librosa.onset.onset_strength(y=y, sr=sr, hop_length=512))
     flux_norm = float(np.clip((flux - 0.02) / 0.03, 0.0, 1.0))
     crest_norm = float(np.clip((crest_factor - 6.0) / 14.0, 0.0, 1.0))
     energy_val = float(np.clip(0.40 * pulse_rate + 0.30 * flux_norm + 0.30 * (1.0 - crest_norm), 0.0, 1.0))
 
+    if loudness_range >= 8.0 and crest_factor >= 12.0:
+        restraint_bucket = "restrained"
+    elif loudness_range <= 3.0 and crest_factor <= 8.0:
+        restraint_bucket = "saturated"
+    else:
+        restraint_bucket = "moderate"
+
     return {
         "lufs_raw": -23.0,
         "loudness_range": loudness_range,
         "crest_factor": crest_factor,
-        "restraint_bucket": bucket,
+        "restraint_bucket": restraint_bucket,
         "energy": energy_val,
     }
 
@@ -605,52 +616,195 @@ def harmonic_rhythm(dark_meta: dict, felt_bpm: int = 120, sr: int = 22050) -> di
     }
 
 
-def language_from_meta(meta: dict) -> tuple[str | None, float]:
+DEFAULT_CUT_POINTS = {
+    "hits_per_bar": {"p33": 4.0, "p66": 5.7},
+    "low_share": {"p66": 0.60},
+    "loudness_range": {"p33": 1.74, "p66": 3.31},
+    "crest_factor": {"p50": 12.46},
+}
+
+
+def quantize_kick_and_restraint(
+    hits_per_bar: float,
+    low_share: float,
+    loudness_range: float,
+    crest_factor: float,
+    cut_points: dict | None = None,
+) -> tuple[str, str]:
     """
-    11.5.8 Script-based and genre-based language detection.
-    Latin script with no tag returns None with 0 confidence.
+    S5: The quantile rule at build_index_v2.py:197-213 is the single unified rule.
     """
+    cp = cut_points or DEFAULT_CUT_POINTS
+    hpb_p33 = cp.get("hits_per_bar", {}).get("p33", 4.0)
+    hpb_p66 = cp.get("hits_per_bar", {}).get("p66", 5.7)
+    ls_p66 = cp.get("low_share", {}).get("p66", 0.60)
+    lr_p33 = cp.get("loudness_range", {}).get("p33", 1.74)
+    lr_p66 = cp.get("loudness_range", {}).get("p66", 3.31)
+    cf_p50 = cp.get("crest_factor", {}).get("p50", 12.46)
+
+    # Quantile-based kick_class
+    if hits_per_bar <= hpb_p33:
+        kc = "sparse_backbeat"
+    elif low_share >= ls_p66:
+        kc = "syncopated_808"
+    elif hits_per_bar >= hpb_p66:
+        kc = "four_on_floor"
+    else:
+        kc = "other"
+
+    # Quantile-based restraint_bucket
+    if loudness_range >= lr_p66 and crest_factor >= cf_p50:
+        rb = "restrained"
+    elif loudness_range <= lr_p33 and crest_factor <= cf_p50:
+        rb = "saturated"
+    else:
+        rb = "moderate"
+
+    return kc, rb
+
+
+_LINGUA_DETECTOR = None
+_LINGUA_ISO_MAP = None
+
+
+def _get_lingua_detector():
+    global _LINGUA_DETECTOR, _LINGUA_ISO_MAP
+    if _LINGUA_DETECTOR is None:
+        try:
+            from lingua import Language, LanguageDetectorBuilder
+            langs = [
+                Language.HINDI, Language.PUNJABI, Language.URDU, Language.BENGALI,
+                Language.MARATHI, Language.GUJARATI, Language.TAMIL, Language.TELUGU,
+                Language.SPANISH, Language.PORTUGUESE, Language.ITALIAN, Language.FRENCH,
+                Language.CATALAN, Language.KOREAN, Language.JAPANESE, Language.CHINESE,
+                Language.ENGLISH, Language.GERMAN, Language.DUTCH, Language.SWEDISH,
+                Language.DANISH, Language.BOKMAL, Language.NYNORSK, Language.ARABIC,
+                Language.PERSIAN, Language.TURKISH, Language.RUSSIAN
+            ]
+            _LINGUA_DETECTOR = LanguageDetectorBuilder.from_languages(*langs).build()
+            _LINGUA_ISO_MAP = {
+                Language.HINDI: "hi", Language.PUNJABI: "pa", Language.URDU: "ur",
+                Language.BENGALI: "bn", Language.MARATHI: "mr", Language.GUJARATI: "gu",
+                Language.TAMIL: "ta", Language.TELUGU: "te", Language.SPANISH: "es",
+                Language.PORTUGUESE: "pt", Language.ITALIAN: "it", Language.FRENCH: "fr",
+                Language.CATALAN: "ca", Language.KOREAN: "ko", Language.JAPANESE: "ja",
+                Language.CHINESE: "zh", Language.ENGLISH: "en", Language.GERMAN: "de",
+                Language.DUTCH: "nl", Language.SWEDISH: "sv", Language.DANISH: "da",
+                Language.BOKMAL: "no", Language.NYNORSK: "no", Language.ARABIC: "ar",
+                Language.PERSIAN: "fa", Language.TURKISH: "tr", Language.RUSSIAN: "ru",
+            }
+        except Exception:
+            _LINGUA_DETECTOR = False
+    return _LINGUA_DETECTOR, _LINGUA_ISO_MAP
+
+
+def language_from_lyrics(text: str) -> tuple[str | None, float]:
+    """Detect language from lyrics text using Lingua, restricted to affinity languages."""
+    if not text or len(text.strip()) < 15:
+        return None, 0.0
+    detector, iso_map = _get_lingua_detector()
+    if not detector or not iso_map:
+        return None, 0.0
+    try:
+        conf_vals = detector.compute_language_confidence_values(text)
+        if conf_vals:
+            best = conf_vals[0]
+            code = iso_map.get(best.language)
+            conf = float(best.value)
+            if code and conf >= 0.6:
+                return code, conf
+    except Exception:
+        pass
+    return None, 0.0
+
+
+def language_from_meta(meta: dict, lyrics: str | None = None) -> tuple[str | None, float, str]:
+    """
+    S4 Resolution order per row:
+    lyrics (if has_lyrics) -> script -> genre map -> artist_vote (in catalogue pass) -> None.
+    Returns (language_code, confidence, source)
+    """
+    # 1. Lyrics
+    lyr_code = None
+    lyr_conf = 0.0
+    if lyrics and len(lyrics.strip()) > 15:
+        lyr_code, lyr_conf = language_from_lyrics(lyrics)
+
+    # 2. Script detection
+    script_code = None
+    script_conf = 0.0
     text = f"{meta.get('title', '')} {meta.get('artist', '')} {meta.get('album', '')}"
     for ch in text:
         name = unicodedata.name(ch, '')
         if 'DEVANAGARI' in name:
-            return "hi", 0.95
+            script_code, script_conf = "hi", 0.95; break
         if 'GURMUKHI' in name:
-            return "pa", 0.95
+            script_code, script_conf = "pa", 0.95; break
         if 'TAMIL' in name:
-            return "ta", 0.95
+            script_code, script_conf = "ta", 0.95; break
         if 'TELUGU' in name:
-            return "te", 0.95
+            script_code, script_conf = "te", 0.95; break
         if 'HANGUL' in name:
-            return "ko", 0.95
+            script_code, script_conf = "ko", 0.95; break
         if 'HIRAGANA' in name or 'KATAKANA' in name or 'CJK' in name:
-            return "ja", 0.95
+            script_code, script_conf = "ja", 0.95; break
         if 'ARABIC' in name:
-            return "ar", 0.95
+            script_code, script_conf = "ar", 0.95; break
         if 'CYRILLIC' in name:
-            return "ru", 0.95
+            script_code, script_conf = "ru", 0.95; break
 
-    # Deezer album.genre names
-    genre = str(meta.get("deezer_genre") or meta.get("genre") or "").lower()
-    genre_map = {
-        "bollywood": ("hi", 0.60),
-        "punjabi": ("pa", 0.60),
-        "tamil": ("ta", 0.60),
-        "k-pop": ("ko", 0.60),
-        "kpop": ("ko", 0.60),
-        "j-pop": ("ja", 0.60),
-        "jpop": ("ja", 0.60),
-        "latin": ("es", 0.60),
-        "reggaeton": ("es", 0.60),
+    # 3. Genre detection
+    genre_code = None
+    genre_conf = 0.0
+    genre_str = str(meta.get("deezer_genre") or meta.get("genre") or "").lower()
+    GENRE_MAP = {
+        "bollywood": ("hi", 0.75), "punjabi": ("pa", 0.75), "tamil": ("ta", 0.75),
+        "telugu": ("te", 0.75), "k-pop": ("ko", 0.75), "kpop": ("ko", 0.75),
+        "korean": ("ko", 0.75), "j-pop": ("ja", 0.75), "jpop": ("ja", 0.75),
+        "japanese": ("ja", 0.75), "latin": ("es", 0.70), "reggaeton": ("es", 0.70),
+        "urbano latino": ("es", 0.70), "french": ("fr", 0.70), "deutsch": ("de", 0.70),
+        "german": ("de", 0.70), "rock": ("en", 0.65), "alternative": ("en", 0.65),
+        "country": ("en", 0.70), "hip-hop": ("en", 0.65), "rap": ("en", 0.65),
+        "pop": ("en", 0.65), "r&b": ("en", 0.65), "soul": ("en", 0.65),
+        "metal": ("en", 0.65), "soundtrack": ("en", 0.60), "singer/songwriter": ("en", 0.65),
+        "dance": ("en", 0.60), "electronic": ("en", 0.60),
+        "afrobeats": ("en", 0.65), "afro-fusion": ("en", 0.65), "blues": ("en", 0.65),
+        "jazz": ("en", 0.65), "easy listening": ("en", 0.60), "ambient": ("en", 0.60),
+        "folk": ("en", 0.65), "holiday": ("en", 0.60), "new age": ("en", 0.60),
+        "tropical": ("es", 0.70), "brazilian": ("pt", 0.70), "sufi": ("hi", 0.75),
+        "devotional": ("hi", 0.75), "ghazal": ("hi", 0.75), "raices": ("es", 0.70),
+        "races": ("es", 0.70), "flamenco": ("es", 0.75), "cumbia": ("es", 0.70),
+        "salsa": ("es", 0.70), "bachata": ("es", 0.70), "mpb": ("pt", 0.75),
+        "samba": ("pt", 0.75), "bossa nova": ("pt", 0.75), "reggae": ("en", 0.65),
+        "ska": ("en", 0.65), "classical": ("en", 0.60), "instrumental": ("en", 0.60),
     }
-    for g_key, (code, conf) in genre_map.items():
-        if g_key in genre:
-            return code, conf
+    for g_key, (code, conf) in GENRE_MAP.items():
+        if g_key in genre_str:
+            genre_code, genre_conf = code, conf
+            break
 
-    return None, 0.0
+    # S4 Weak spot rule: when lingua returns "en" with confidence under 0.8
+    # and genre or script says Indic, Indic answer wins.
+    indic_langs = {"hi", "pa", "ur", "bn", "mr", "gu", "ta", "te", "ml", "kn"}
+    if lyr_code == "en" and lyr_conf < 0.8:
+        if script_code in indic_langs:
+            return script_code, script_conf, "script"
+        if genre_code in indic_langs:
+            return genre_code, genre_conf, "genre"
+
+    if lyr_code:
+        return lyr_code, lyr_conf, "lyrics"
+    if script_code:
+        return script_code, script_conf, "script"
+    if genre_code:
+        return genre_code, genre_conf, "genre"
+    if meta and meta.get("_artist_majority_lang"):
+        return meta["_artist_majority_lang"], 0.65, "artist_vote"
+
+    return None, 0.0, "none"
 
 
-def describe_audio(y: np.ndarray, meta: dict | None = None, sr: int = 22050) -> dict:
+def describe_audio(y: np.ndarray, meta: dict | None = None, sr: int = 22050, cut_points: dict | None = None, lyrics: str | None = None) -> dict:
     """
     Computes all 11.5 feel descriptors for an audio array.
     """
@@ -664,7 +818,21 @@ def describe_audio(y: np.ndarray, meta: dict | None = None, sr: int = 22050) -> 
     f_vocal = vocal(y, felt_bpm=f_tempo["felt_bpm"], dark_meta=f_dark, sr=sr)
     f_restraint = restraint(y, pulse_rate=f_tempo["pulse_rate"], sr=sr)
     f_harm = harmonic_rhythm(f_dark, felt_bpm=f_tempo["felt_bpm"], sr=sr)
-    lang_code, lang_conf = language_from_meta(meta)
+
+    # S5 Unified quantile bucketing if cut points provided
+    if cut_points is not None:
+        kc, rb = quantize_kick_and_restraint(
+            hits_per_bar=f_groove["hits_per_bar"],
+            low_share=f_dark["low_share"],
+            loudness_range=f_restraint["loudness_range"],
+            crest_factor=f_restraint["crest_factor"],
+            cut_points=cut_points,
+        )
+        f_groove["kick_class"] = kc
+        f_restraint["restraint_bucket"] = rb
+
+    # S4 Language resolution
+    lang_code, lang_conf, lang_src = language_from_meta(meta, lyrics=lyrics)
 
     # Clean internal temporary arrays
     f_tempo_clean = {k: v for k, v in f_tempo.items() if not k.startswith('_')}
@@ -677,6 +845,7 @@ def describe_audio(y: np.ndarray, meta: dict | None = None, sr: int = 22050) -> 
         **meta,
         "language": lang_code,
         "language_conf": lang_conf,
+        "language_source": lang_src,
         **f_tempo_clean,
         **f_groove_clean,
         **f_dark_clean,

@@ -144,6 +144,7 @@ class MusicRecommender:
         self._index: faiss.Index | None = None
         self._metadata: list[dict] = []
         self._metadata_header: dict[str, Any] = {}
+        self._cut_points: dict[str, Any] | None = None
         self._track_id_map: dict[str, int] = {}
         self._anchors: dict[str, np.ndarray] = {}
         self._anchor_keys: list[str] = []
@@ -195,7 +196,8 @@ class MusicRecommender:
                 raw_meta = json.load(f)
             if isinstance(raw_meta, dict) and "tracks" in raw_meta:
                 self._metadata = raw_meta["tracks"]
-                self._metadata_header = {k: v for k, v in raw_meta.items() if k != "tracks"}
+                self._metadata_header = raw_meta.get("header", {k: v for k, v in raw_meta.items() if k != "tracks"})
+                self._cut_points = self._metadata_header.get("cut_points")
             elif isinstance(raw_meta, list):
                 self._metadata = raw_meta
             logger.info("Loaded %d track records from %s", len(self._metadata), meta_path)
@@ -397,7 +399,7 @@ class MusicRecommender:
         Runs in 1.5 - 2.5s on CPU.
         """
         y_22k = decode_preview(audio_bytes)
-        desc = describe_audio(y_22k, meta=meta, sr=22050)
+        desc = describe_audio(y_22k, meta=meta, sr=22050, cut_points=self._cut_points)
 
         # Deterministic windowed embedding
         random.seed(0)

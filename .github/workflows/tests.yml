@@ -36,6 +36,9 @@ jobs:
       - name: Run Golden Audio Feature Tests
         run: pytest tests/test_features_golden.py
 
+      - name: Run Octave Truth Tests
+        run: pytest tests/test_octave_truth.py
+
       - name: Run No-Gates Integrity Tests
         run: pytest tests/test_no_gates.py
 

@@ -247,7 +247,7 @@ async def _detect_track_context(track_info: dict) -> tuple[str | None, str, list
     # 3. Script-based and genre-based language detection (Section 11.5.8)
     if not lang:
         meta_dict = {"title": track_info.get("title", ""), "artist": artist_name, "genre": genre_family}
-        l_code, _ = language_from_meta(meta_dict)
+        l_code, _, _ = language_from_meta(meta_dict)
         if l_code:
             lang = l_code
 

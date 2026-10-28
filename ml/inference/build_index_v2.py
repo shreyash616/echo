@@ -28,6 +28,7 @@ import numpy as np
 # Add backend to path
 sys.path.insert(0, "backend")
 from app.services.recommender import make_track_key
+from app.audio.features import quantize_kick_and_restraint
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("build_index_v2")
@@ -131,7 +132,7 @@ def main():
         theme_mat = np.array(theme_vecs, dtype=np.float32)
         theme_means = np.mean(theme_mat, axis=0)
         theme_stds = np.std(theme_mat, axis=0)
-        theme_stds[theme_stds == 0] = 1.0
+        theme_stds = np.maximum(theme_stds, 0.08)
     else:
         theme_means = np.zeros(len(theme_keys), dtype=np.float32)
         theme_stds = np.ones(len(theme_keys), dtype=np.float32)
@@ -194,23 +195,8 @@ def main():
         lr = r.get("loudness_range", 0.0)
         cf = r.get("crest_factor", 0.0)
 
-        # Quantile-based kick_class
-        if hpb <= cut_points["hits_per_bar"]["p33"]:
-            kc = "sparse_backbeat"
-        elif ls >= cut_points["low_share"]["p66"]:
-            kc = "syncopated_808"
-        elif hpb >= cut_points["hits_per_bar"]["p66"]:
-            kc = "four_on_floor"
-        else:
-            kc = "other"
-
-        # Quantile-based restraint_bucket
-        if lr >= cut_points["loudness_range"]["p66"] and cf >= cut_points["crest_factor"]["p50"]:
-            rb = "restrained"
-        elif lr <= cut_points["loudness_range"]["p33"] and cf <= cut_points["crest_factor"]["p50"]:
-            rb = "saturated"
-        else:
-            rb = "moderate"
+        # Quantile-based kick_class and restraint_bucket (S5)
+        kc, rb = quantize_kick_and_restraint(hpb, ls, lr, cf, cut_points=cut_points)
 
         # Standardized vibes (Section 12.2)
         raw_ac = np.array(all_anchor_cosines[i], dtype=np.float32)
@@ -218,16 +204,22 @@ def main():
         top2_std_idx = np.argsort(std_ac)[::-1][:2]
         std_vibes = [anchor_keys[idx] for idx in top2_std_idx]
 
-        # Standardized theme_vec
+        # Standardized theme_vec & theme assignment (S3)
         raw_tv = r.get("theme_vec", [0.0] * len(theme_keys))
         if r.get("has_lyrics") and len(raw_tv) == len(theme_keys):
-            std_tv = ((np.array(raw_tv, dtype=np.float32) - theme_means) / theme_stds).tolist()
+            z = (np.array(raw_tv, dtype=np.float32) - theme_means) / theme_stds
+            std_tv = z.tolist()
+            max_z = float(np.max(z))
+            argmax_z = int(np.argmax(z))
+            theme_val = theme_keys[argmax_z] if max_z >= 0.5 else None
         else:
             std_tv = [0.0] * len(theme_keys)
+            theme_val = None
 
         r["kick_class"] = kc
         r["restraint_bucket"] = rb
         r["vibes"] = std_vibes
+        r["theme"] = theme_val
         r["theme_vec"] = std_tv
         r["anchor_profile"] = std_ac.tolist()
 
