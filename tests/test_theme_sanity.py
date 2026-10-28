@@ -88,7 +88,11 @@ def test_theme_sanity(base_url: str | None = None):
                         data = resp.json()
                         track_list = data.get("results", data) if isinstance(data, dict) else data
                         if track_list and isinstance(track_list, list):
-                            displayed_theme = track_list[0].get("theme")
+                            # Search hits are undescribed; the displayed theme comes from /api/track
+                            hit = track_list[0]
+                            t_resp = client.get(f"/api/track/{hit.get('id')}", params={"key": hit.get("key")})
+                            if t_resp.status_code == 200:
+                                displayed_theme = t_resp.json().get("theme")
             except Exception as e:
                 print(f"API query failed for {target['title']}: {e}")
 

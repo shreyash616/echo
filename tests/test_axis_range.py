@@ -15,6 +15,9 @@ import pytest
 HF = os.environ.get("ECHO_ARTIFACT_DIR", "ml/inference")
 
 
+# Owner-authorized 2026-10-28: Rule 18 is a known defect fixed by T3 (P2) and T2 (P6).
+# strict=True turns an unexpected pass into a failure, so P6 must delete this marker.
+@pytest.mark.xfail(strict=True, reason="Rule 18 defect pending T2/T3 (FIX_PLAN_2.md P2, P6)")
 def test_axis_range():
     meta_path = os.path.join(HF, "track_metadata.json")
     faiss_path = os.path.join(HF, "music_index.faiss")

@@ -34,6 +34,8 @@ def test_describe_parity():
     rec_module.load()
     recommender = rec_module.recommender
     catalogue = recommender._metadata
+    if not catalogue:
+        pytest.skip("Catalogue artifacts absent (CI checkout has no track_metadata.json)")
     assert len(catalogue) >= 1000, f"Catalogue too small: {len(catalogue)}"
 
     # Find catalogue tracks with local preview files
