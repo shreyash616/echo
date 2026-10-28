@@ -163,6 +163,24 @@ def test_pink_clipped(expected_data):
     _assert_match_expected(desc, expected_data[name], name)
 
 
+def test_fingerpicked_90(expected_data):
+    name = "fingerpicked_90.wav"
+    desc = _load_and_describe(name)
+
+    # FIX_PLAN_2.md T5: thumb bass on every beat, no drums -> not four_on_floor
+    assert desc["kick_class"] != "four_on_floor", f"Fingerpicked fixture classified {desc['kick_class']}"
+
+    _assert_match_expected(desc, expected_data[name], name)
+
+
+def test_saturated_vs_restrained_pair():
+    # FIX_PLAN_2.md T3.1: the saturated fixture scores above the restrained one by at least 0.3
+    sat = _load_and_describe("pink_clipped.wav")["saturation"]
+    res = _load_and_describe("pink_quiet.wav")["saturation"]
+    print(f"\nsaturation: pink_clipped {sat:.3f}, pink_quiet {res:.3f}, gap {sat - res:.3f}")
+    assert sat - res >= 0.3, f"Expected saturation gap >= 0.3, got {sat - res:.3f}"
+
+
 def test_bright_vs_dark_pair(expected_data):
     bright_desc = _load_and_describe("bright.wav")
     dark_desc = _load_and_describe("dark.wav")

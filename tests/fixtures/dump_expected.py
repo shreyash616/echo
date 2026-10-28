@@ -26,6 +26,7 @@ def main():
         "bright.wav",
         "dark.wav",
         "chord_cycle_2s.wav",
+        "fingerpicked_90.wav",
     ]
 
     expected = {}

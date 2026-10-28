@@ -286,14 +286,10 @@ def groove(y: np.ndarray, felt_meta: dict, sr: int = 22050) -> dict:
 
     lag_ms = float(np.mean(lags)) if lags else 0.0
 
-    if beat_low_ratio >= 0.85:
-        kick_class = "four_on_floor"
-    elif off_beat_ratio >= 0.28:
-        kick_class = "syncopated_808"
-    elif beat_low_ratio <= 0.58 and felt_meta.get("pulse_clarity", 0.5) >= 0.5:
-        kick_class = "sparse_backbeat"
-    else:
-        kick_class = "other"
+    kick_class = kick_class_rule(
+        beat_low_ratio, off_beat_ratio, felt_meta.get("pulse_clarity", 0.5), hits_per_bar,
+        DEFAULT_CUT_POINTS["hits_per_bar"]["p33"],
+    )
 
     return {
         "beat_low_ratio": float(beat_low_ratio),
@@ -307,9 +303,10 @@ def groove(y: np.ndarray, felt_meta: dict, sr: int = 22050) -> dict:
     }
 
 
-def darkness(y: np.ndarray, felt_bpm: int = 120, sr: int = 22050) -> dict:
+def darkness(y: np.ndarray, felt_bpm: int = 120, sr: int = 22050, roughness_p95: float | None = None) -> dict:
     """
     11.5.3 Weight / darkness: brightness, low_share, roughness, mode_polarity, mode_undefined, darkness.
+    T3.3: roughness enters darkness rescaled by the catalogue p95 (header `roughness_z`).
     """
     yh, yp = librosa.effects.hpss(y)
 
@@ -376,12 +373,14 @@ def darkness(y: np.ndarray, felt_bpm: int = 120, sr: int = 22050) -> dict:
         mode_polarity = float(np.clip(third_diff + 0.3 * sixth_diff, -1.0, 1.0))
         mode_undefined = bool(abs(mode_polarity) < 0.15 or tonal_stability < 0.05)
 
+    r_p95 = roughness_p95 or DEFAULT_CUT_POINTS["roughness_z"]["p95"]
+    roughness_scaled = float(np.clip(roughness / r_p95, 0.0, 1.0))
     if not mode_undefined:
         minor_term = float(np.clip(-mode_polarity, 0.0, 1.0))
-        darkness_val = 0.30 * (1.0 - brightness) + 0.25 * low_share + 0.25 * roughness + 0.20 * minor_term
+        darkness_val = 0.30 * (1.0 - brightness) + 0.40 * low_share + 0.10 * roughness_scaled + 0.20 * minor_term
     else:
         # Redistribute mode weight when undefined
-        darkness_val = (0.30 * (1.0 - brightness) + 0.25 * low_share + 0.25 * roughness) / 0.80
+        darkness_val = (0.30 * (1.0 - brightness) + 0.40 * low_share + 0.10 * roughness_scaled) / 0.80
 
     darkness_val = float(np.clip(darkness_val, 0.0, 1.0))
 
@@ -407,24 +406,23 @@ def grit(y: np.ndarray, dark_meta: dict | None = None, sr: int = 22050) -> dict:
     if yp is None:
         _, yp = librosa.effects.hpss(y)
 
-    # 1. Saturation via 20ms window sample kurtosis & clipping
-    win_len = int(0.02 * sr)  # ~441 samples
+    # 1. Saturation (T3.1, revised): over non-silent 50 ms windows, the fraction with crest factor
+    #    below 9 dB and the fraction with spectral flatness above 4 kHz over 0.3, averaged.
+    win_len = int(0.05 * sr)
     n_wins = len(y) // win_len
-    flat_count = 0
-    clip_count = 0
-
-    for w in range(n_wins):
-        seg = y[w * win_len : (w + 1) * win_len]
-        if len(seg) > 10 and np.std(seg) > 0.01:
-            k = float(scipy.stats.kurtosis(seg))
-            if k < 2.0:
-                flat_count += 1
-            if np.any(np.abs(seg) > 0.95):
-                clip_count += 1
-
-    flat_frac = flat_count / max(1, n_wins)
-    clip_frac = clip_count / max(1, n_wins)
-    saturation = float(np.clip(0.5 * flat_frac + 0.5 * clip_frac * 10.0, 0.0, 1.0))
+    wins = y[: n_wins * win_len].reshape(n_wins, win_len) if n_wins else np.zeros((0, win_len))
+    rms_w = np.sqrt(np.mean(wins**2, axis=1)) + 1e-12
+    active = rms_w > 1e-4
+    if np.any(active):
+        crest_db = 20.0 * np.log10(np.max(np.abs(wins[active]), axis=1) / rms_w[active])
+        low_crest_frac = float(np.mean(crest_db < 9.0))
+        spec = np.abs(np.fft.rfft(wins[active] * np.hanning(win_len), axis=1)) ** 2 + 1e-12
+        hf = spec[:, np.fft.rfftfreq(win_len, 1.0 / sr) >= 4000]
+        hf_flat = np.exp(np.mean(np.log(hf), axis=1)) / np.mean(hf, axis=1)
+        hf_flat_frac = float(np.mean(hf_flat > 0.3))
+    else:
+        low_crest_frac = hf_flat_frac = 0.0
+    saturation = float(np.clip(0.5 * low_crest_frac + 0.5 * hf_flat_frac, 0.0, 1.0))
 
     # 2. hf_hash: energy 4 to 10 kHz of percussive part yp / total energy of yp
     S_p = np.abs(librosa.stft(yp, n_fft=2048, hop_length=512)) ** 2
@@ -493,7 +491,11 @@ def vocal(y: np.ndarray, felt_bpm: int = 120, dark_meta: dict | None = None, sr:
             runs = np.diff(np.pad(voiced_flag.astype(int), (1, 1)))
             starts = np.where(runs == 1)[0]
             syllable_rate = float(len(starts) / 10.0)
-            sustain_ratio = float(np.mean(f0[voiced_flag] > 0)) if np.any(voiced_flag) else 0.3
+            # T3.2: fraction of voiced frames inside a voiced run longer than 300 ms
+            ends = np.where(runs == -1)[0]
+            run_lens = ends - starts
+            min_frames = 0.300 * sr / 512
+            sustain_ratio = float(np.sum(run_lens[run_lens > min_frames]) / max(1, np.sum(run_lens)))
     except Exception:
         pass
 
@@ -617,11 +619,37 @@ def harmonic_rhythm(dark_meta: dict, felt_bpm: int = 120, sr: int = 22050) -> di
 
 
 DEFAULT_CUT_POINTS = {
-    "hits_per_bar": {"p33": 4.0, "p66": 5.7},
+    "hits_per_bar": {"p33": 4.762, "p66": 7.0},  # header values, 2026-10-28
     "low_share": {"p66": 0.60},
     "loudness_range": {"p33": 1.74, "p66": 3.31},
     "crest_factor": {"p50": 12.46},
+    "roughness_z": {"p95": 0.0159},  # catalogue p95 of roughness, 2026-10-28 (20,000 rows)
 }
+
+
+# T5 thresholds on the raw kick ratios. The Table 11.2 fixtures define the classes; the 808
+# beat_low_ratio ceiling moved from the plan's 0.6 to 0.35 to meet the 50% spread guard (see log).
+KICK_THRESHOLDS = {
+    "four_beat_low_min": 0.8, "four_off_beat_max": 0.35, "four_pulse_clarity_min": 0.5,
+    "s808_off_beat_min": 0.45, "s808_beat_low_max": 0.35,
+    "sparse_off_beat_max": 0.2, "sparse_beat_low_min": 0.3, "sparse_beat_low_max": 0.7,
+}
+
+
+def kick_class_rule(
+    beat_low_ratio: float, off_beat_ratio: float, pulse_clarity: float, hits_per_bar: float, hpb_p33: float
+) -> str:
+    """T5: one kick rule for catalogue rows and cold seeds, applied in order."""
+    t = KICK_THRESHOLDS
+    if (beat_low_ratio >= t["four_beat_low_min"] and off_beat_ratio <= t["four_off_beat_max"]
+            and pulse_clarity >= t["four_pulse_clarity_min"]):
+        return "four_on_floor"
+    if off_beat_ratio >= t["s808_off_beat_min"] and beat_low_ratio <= t["s808_beat_low_max"]:
+        return "syncopated_808"
+    if (off_beat_ratio <= t["sparse_off_beat_max"]
+            and t["sparse_beat_low_min"] <= beat_low_ratio <= t["sparse_beat_low_max"]) or hits_per_bar <= hpb_p33:
+        return "sparse_backbeat"
+    return "other"
 
 
 def quantize_kick_and_restraint(
@@ -630,27 +658,23 @@ def quantize_kick_and_restraint(
     loudness_range: float,
     crest_factor: float,
     cut_points: dict | None = None,
+    *,
+    beat_low_ratio: float | None = None,
+    off_beat_ratio: float | None = None,
+    pulse_clarity: float | None = None,
 ) -> tuple[str, str]:
     """
-    S5: The quantile rule at build_index_v2.py:197-213 is the single unified rule.
+    S5 restraint quantile rule plus the T5 kick rule. `low_share` no longer enters kick_class.
     """
+    if beat_low_ratio is None or off_beat_ratio is None or pulse_clarity is None:
+        raise ValueError("T5 kick_class needs beat_low_ratio, off_beat_ratio and pulse_clarity")
     cp = cut_points or DEFAULT_CUT_POINTS
-    hpb_p33 = cp.get("hits_per_bar", {}).get("p33", 4.0)
-    hpb_p66 = cp.get("hits_per_bar", {}).get("p66", 5.7)
-    ls_p66 = cp.get("low_share", {}).get("p66", 0.60)
+    hpb_p33 = cp.get("hits_per_bar", {}).get("p33", DEFAULT_CUT_POINTS["hits_per_bar"]["p33"])
     lr_p33 = cp.get("loudness_range", {}).get("p33", 1.74)
     lr_p66 = cp.get("loudness_range", {}).get("p66", 3.31)
     cf_p50 = cp.get("crest_factor", {}).get("p50", 12.46)
 
-    # Quantile-based kick_class
-    if hits_per_bar <= hpb_p33:
-        kc = "sparse_backbeat"
-    elif low_share >= ls_p66:
-        kc = "syncopated_808"
-    elif hits_per_bar >= hpb_p66:
-        kc = "four_on_floor"
-    else:
-        kc = "other"
+    kc = kick_class_rule(beat_low_ratio, off_beat_ratio, pulse_clarity, hits_per_bar, hpb_p33)
 
     # Quantile-based restraint_bucket
     if loudness_range >= lr_p66 and crest_factor >= cf_p50:
@@ -813,7 +837,8 @@ def describe_audio(y: np.ndarray, meta: dict | None = None, sr: int = 22050, cut
 
     f_tempo = felt_tempo(y, sr=sr)
     f_groove = groove(y, f_tempo, sr=sr)
-    f_dark = darkness(y, felt_bpm=f_tempo["felt_bpm"], sr=sr)
+    r_p95 = (cut_points or {}).get("roughness_z", {}).get("p95")
+    f_dark = darkness(y, felt_bpm=f_tempo["felt_bpm"], sr=sr, roughness_p95=r_p95)
     f_grit = grit(y, dark_meta=f_dark, sr=sr)
     f_vocal = vocal(y, felt_bpm=f_tempo["felt_bpm"], dark_meta=f_dark, sr=sr)
     f_restraint = restraint(y, pulse_rate=f_tempo["pulse_rate"], sr=sr)
@@ -827,6 +852,9 @@ def describe_audio(y: np.ndarray, meta: dict | None = None, sr: int = 22050, cut
             loudness_range=f_restraint["loudness_range"],
             crest_factor=f_restraint["crest_factor"],
             cut_points=cut_points,
+            beat_low_ratio=f_groove["beat_low_ratio"],
+            off_beat_ratio=f_groove["off_beat_ratio"],
+            pulse_clarity=f_tempo.get("pulse_clarity", 0.5),
         )
         f_groove["kick_class"] = kc
         f_restraint["restraint_bucket"] = rb

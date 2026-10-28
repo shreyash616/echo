@@ -231,6 +231,34 @@ def make_chord_cycle_2s() -> np.ndarray:
     return y
 
 
+def _pluck(freq: float, dur: float, amp: float) -> np.ndarray:
+    # Plucked string: decaying harmonics, brighter partials die faster, 3 ms attack
+    n = int(dur * SR)
+    t = np.arange(n) / SR
+    y = np.zeros(n)
+    for h in range(1, 9):
+        if freq * h < SR / 2:
+            y += (1.0 / h) * np.sin(2 * np.pi * freq * h * t) * np.exp(-t * (2.5 + 1.5 * h))
+    y *= np.minimum(1.0, t / 0.003)
+    return amp * y / (np.max(np.abs(y)) + 1e-8)
+
+
+def make_fingerpicked_90() -> np.ndarray:
+    # T5 fixture: Travis-style fingerpicking at 90 BPM, no drums. Thumb alternates E2/B2 on every
+    # beat; fingers pluck G#3/B3/E4 on the off-beat eighths. Expected kick_class: not four_on_floor.
+    y = np.zeros(TOTAL_SAMPLES, dtype=np.float64)
+    beat_sec = 60.0 / 90.0
+    bass = [82.41, 123.47]
+    treble = [207.65, 246.94, 329.63, 246.94]
+    for b in range(int(DUR / beat_sec)):
+        for t_on, f, amp in [(b * beat_sec, bass[b % 2], 0.6), (b * beat_sec + beat_sec / 2, treble[b % 4], 0.4)]:
+            idx = int(t_on * SR)
+            p = _pluck(f, 1.2, amp)
+            end = min(TOTAL_SAMPLES, idx + len(p))
+            y[idx:end] += p[: end - idx]
+    return (0.8 * y / (np.max(np.abs(y)) + 1e-8)).astype(np.float32)
+
+
 def build_all_fixtures():
     out_dir = "tests/fixtures/audio"
     os.makedirs(out_dir, exist_ok=True)
@@ -266,6 +294,9 @@ def build_all_fixtures():
 
     f10 = make_chord_cycle_2s()
     save_wav(f"{out_dir}/chord_cycle_2s.wav", f10)
+
+    f11 = make_fingerpicked_90()
+    save_wav(f"{out_dir}/fingerpicked_90.wav", f11)
 
     print("All fixtures written to tests/fixtures/audio/")
 

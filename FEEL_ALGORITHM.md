@@ -1348,3 +1348,37 @@ Run these in a browser against the Space after each gate; if any fails, the gate
 - Verification 2026-10-28: `py -m pytest -q tests/` -> 21 passed, 1 xfailed in 195.76s (before the describe-parity skip; that test passed again locally afterwards).
 - Verification 2026-10-28: CI on main `51f6540`: completed success, https://github.com/shreyash616/echo/actions/runs/40647069552. All 12 test steps succeeded, including the six T9 additions; describe parity, offline replica and axis range skip in CI (no artifacts). `gh run list` is unavailable (gh unauthenticated), so the result was read from the public GitHub Actions API.
 - Gate: green run URL logged; every T9 test present; all passing except `test_axis_range`, which is strict-xfail by owner authorization until P6. Status: PACKET P1 READY FOR REVIEW.
+
+### Packet P2: T3 features and T5 kick class (FIX_PLAN_2.md section 5)
+- Started: 2026-10-28 after owner `GO P2`.
+- Files: `backend/app/audio/features.py`, `tests/test_features_golden.py`, `tests/fixtures/expected.json`, `tests/fixtures/describe_sample.py` (new, the 500-row sampler).
+- Done in `features.py`: T3.1 saturation = mean of (fraction of non-silent 50 ms windows with crest < 6 dB, fraction with spectral flatness above 4 kHz > 0.5). T3.2 sustain_ratio = fraction of voiced frames in voiced runs > 300 ms. T3.3 darkness = 0.30 (1 - brightness) + 0.40 low_share + 0.10 roughness/p95 + 0.20 minor, with roughness p95 from cut point `roughness_z` (default 0.0159, catalogue p95).
+- Not done: T3.4 (`riff_flag` override, `recommender.py:718`) because `recommender.py` is not in P2's file list. Writing `roughness_z` to the header is not done because `build_index_v2.py` is not in P2's list. T5 is blocked (see below).
+- Verification 2026-10-28: `py -m pytest -q tests/test_features_golden.py tests/test_octave_truth.py` -> 12 passed in 322.35s. The plan's path `tests/fixtures/test_octave_truth.py` does not exist; the file is `tests/test_octave_truth.py`. The new `test_saturated_vs_restrained_pair` gives pink_clipped 0.500 vs pink_quiet 0.000 (gap 0.50 >= 0.3). `expected.json` was regenerated with `dump_expected.py`; only saturation, sustain_ratio, darkness and grit changed.
+- Verification 2026-10-28: `py tests/fixtures/describe_sample.py --n 500` (seed 42, header cut points, decoded previews):
+  - saturation std 0.041 (mean 0.032): **FAIL** (gate >= 0.08)
+  - sustain_ratio std 0.106, share = 1.0: 15.4%: pass (gate <= 20%)
+  - darkness std 0.116: pass (gate > 0.10)
+  - kick_class (current serving quantile rule): sparse_backbeat 30.6%, syncopated_808 26.0%, other 23.4%, four_on_floor 20.0%: pass (<= 50%), but this is not T5's rule.
+- Blocker T3.1: as written, both terms are near zero on real music. Over 60 previews, the 50 ms window crest has p5/p50/p95 = 6.35 / 9.02 / 11.55 dB and HF flatness has p5/p50/p95 = 0.02 / 0.218 / 0.43, so "crest < 6 dB" and "flatness > 0.5" almost never fire. For reference (not applied): crest < 9 dB with flatness > 0.5 gives std 0.100; crest < 9 dB with flatness > 0.3 gives std 0.155.
+- Blocker T5: with catalogue cut points (beat_low_ratio p75 0.588, off_beat_ratio p50 0.644 and p66 0.681, hits_per_bar p33 4.744), the rule spreads the catalogue acceptably (syncopated_808 34.1%, other 29.8%, four_on_floor 18.5%, sparse_backbeat 17.6%). But it breaks two Table 11.2 golden requirements: click_72_backbeat (blr 0.472, obr 0.0, hpb 8.0) becomes `other` instead of `sparse_backbeat`, and trap_96 (blr 0.229, obr 0.522, hpb 3.917) becomes `sparse_backbeat` instead of `syncopated_808`. No fingerpicked fixture exists. The golden tests call `describe_audio` without cut points, so they also depend on the absolute thresholds T5 deletes.
+- Status: PACKET P2 BLOCKED.
+
+### Packet P2 (reopened under FIX_PLAN_2.md revision c01f7f6)
+- Started: 2026-10-28 after owner review of c01f7f6 (P0 GO, P1 GO, P2 reopened).
+- Files: `backend/app/audio/features.py`, `tests/test_features_golden.py`, `tests/fixtures/make_fixtures.py`, `tests/fixtures/dump_expected.py`, `tests/fixtures/expected.json`, `tests/fixtures/audio/fingerpicked_90.wav`, `tests/fixtures/describe_sample.py`, `FEEL_ALGORITHM.md`.
+- T3.1 revised: crest < 9 dB and HF flatness > 0.3. Golden gap pink_clipped 0.530 vs pink_quiet 0.033 = 0.497 (>= 0.3). Known quirk: pure sine pads score 1.0 (sine crest is 3 dB, and the near-silent HF band reads as flat).
+- T5 revised: `kick_class_rule` in `features.py` is the single rule, used by `groove()` (cold path) and `quantize_kick_and_restraint` (catalogue path; it now requires `beat_low_ratio`, `off_beat_ratio` and `pulse_clarity` as keywords and raises without them, so P3/P4 must pass them at the `build_index_v2.py:269` call). The old thresholds at `features.py:289-296` are deleted. `DEFAULT_CUT_POINTS.hits_per_bar` is set to the header values (p33 4.762, p66 7.0) so cold seeds without cut points use the catalogue p33.
+- T5 final thresholds: four_on_floor when blr >= 0.8 and obr <= 0.35 and pulse_clarity >= 0.5; syncopated_808 when obr >= 0.45 and blr <= **0.35** (moved from 0.6); sparse_backbeat when (obr <= 0.2 and 0.3 <= blr <= 0.7) or hpb <= p33; else other. Why the ceiling moved: on 20,000 stored rows the plan's 0.6 gives syncopated_808 72.0% (0.5 -> 62.8%, 0.4 -> 49.8%, 0.35 -> 42.3%). off_beat_ratio could not move instead, because trap_96 sits at 0.522.
+- Fixture ratios (blr / obr / pulse_clarity / hpb -> class): click_144_fourfloor 0.986 / 0.000 / 1.00 / 6.06 -> four_on_floor; click_72_backbeat 0.472 / 0.000 / 1.00 / 8.00 -> sparse_backbeat; trap_96 0.229 / 0.522 / 1.00 / 3.92 -> syncopated_808; fingerpicked_90 (new: Travis picking, E2/B2 thumb on every beat, G#3/B3/E4 on the off-beats, 90 BPM, no drums) 0.432 / 0.568 / 1.00 / 7.64 -> other.
+- `expected.json` regenerated; changes are only saturation, grit (built from saturation) and kick_class on the non-Table-11.2 fixtures (pads, pink, bright and dark now `other`, pink_quiet `sparse_backbeat`).
+- Verification 2026-10-28: `py -m pytest -q tests/test_features_golden.py tests/test_octave_truth.py` -> 13 passed, 3 warnings in 181.15s.
+- Verification 2026-10-28: `py tests/fixtures/describe_sample.py --n 500` (seed 42, header cut points, decoded previews):
+  - saturation std 0.146 (gate >= 0.08): pass
+  - sustain_ratio std 0.106, share = 1.0: 15.40% (gate <= 20%): pass
+  - darkness std 0.116 (gate > 0.10): pass
+  - kick_class: syncopated_808 43.6%, other 42.2%, sparse_backbeat 13.8%, four_on_floor 0.4% (gate <= 50%): pass
+  - all Table 11.2 fixtures pass (golden suite above)
+- Measured but outside P2's gate: `tests/test_describe_parity.py` locally gives kick_class 9/20, restraint_bucket 20/20, felt_bpm 20/20. The stored catalogue labels come from the pre-T5 rule; re-labelling the stored ratios with the T5 rule agrees with the stored labels on only 8,049/20,000 (40.2%), so the gap is the label definition, not describe drift. T5's 18/20 parity is measured in P4 after the redescribe. Until then this test fails locally (CI skips it with no artifacts).
+- four_on_floor is rare on real music (0.4%) because real off_beat_ratio rarely falls to 0.35 or below (catalogue p5 is 0.40).
+- Status: PACKET P2 READY FOR REVIEW.
