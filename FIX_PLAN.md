@@ -1,4 +1,7 @@
-# Echo: fix plan after the second audit (operative)
+# Echo: fix plan after the second audit (round 1, executed; superseded by `FIX_PLAN_2.md`)
+
+Round 1 was executed on 2026-10-28 and audited; the audit and the round 2 plan are in
+`FIX_PLAN_2.md`, which is now the operative file. This file stays as the record of round 1.
 
 Status: written 2026-10-28 against commit `ed7af17` on `main`, from measurements on the live Space
 (`https://shreyash616-echo-backend.hf.space`) and on the published artifacts. This file is the

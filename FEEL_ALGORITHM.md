@@ -4,12 +4,12 @@ Status: design, written 2026-10-26 against commit `d8cb36e`. Supersedes the scor
 retrieval parts of `VISION_ALIGNMENT.md`; the benchmark-first rule, the language-as-soft-prior
 rule and the "do not" list there still apply. Read this file top to bottom before touching code.
 
-**Implementing agent: `FIX_PLAN.md` is the operative plan.** It was written after the section 12
+**Implementing agent: `FIX_PLAN_2.md` is the operative plan** (`FIX_PLAN.md` is round 1, executed and audited). It was written after the section 12
 implementation was measured on the live Space (its section 1 says exactly what was found). Section 12
-remains the plan it corrects and section 11 the detailed specification; where they disagree, `FIX_PLAN.md`
-wins over 12, and 12 wins over 11. It is the zero-cost, no-human-labelling
+remains the plan it corrects and section 11 the detailed specification; where they disagree, `FIX_PLAN_2.md`
+wins over `FIX_PLAN.md`, which wins over 12, which wins over 11. It is the zero-cost, no-human-labelling
 path and it says exactly what to build, in what order, with what checks. Sections 1 to 10 are the
-reasoning behind it; read them, but execute `FIX_PLAN.md`. Anything in sections 3, 6 or 9 that needs
+reasoning behind it; read them, but execute `FIX_PLAN_2.md`. Anything in sections 3, 6 or 9 that needs
 money, a non-commercial licence, or the owner's labelling hours is deferred and must not be started.
 
 How this was produced: six independent reviews (a musicologist / MIR specialist, a classic-rock and
