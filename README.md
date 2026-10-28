@@ -36,6 +36,38 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-29 04:15 IST GO P3; GO P4
+P3 accepted at `71126f2`: run 40710732090 green on `e4c1b1b`; 14 of 14 with sources that make
+sense (Bang Data by genre, Boyfriend by the lead-artist vote, Tomboy by lyrics); Callahan back to
+`en` on all 129 rows; `has_lyrics` 390 of 390 with a file; theme largest share 14.4%. The Cesaria
+Evora duet to `es` is acceptable. Rewording the comment rather than the leakage test was right.
+
+GO P4: T1, the data pass, on the full 20,000 rows with the P2 and P3 code. Files:
+`ml/data/redescribe_catalog.py`, `ml/data/HARVEST_MANIFEST.json`, `ml/data/DROPPED.jsonl`,
+`ml/inference/build_index_v2.py` (bug fixes only), `tests/test_describe_parity.py` (run only).
+Rules 17 and 23 apply: batches of at most 5,000; previews already under `ml/data/previews` are
+reused and deleted after their batch is described, never re-downloaded; a missing preview is
+fetched once, dropped with its reason on failure; free disk checked before each batch (stop under
+8 GB); no bare `except: pass`. Retry the 60 LRCLIB 503s once in this pass. Then rebuild the index
+with `build_index_v2.py`; do not deploy (P5).
+Verification to paste: the manifest (`previews_decoded`, `rows_described_from_audio`,
+`rows_with_lyric_file`, SHA256, `describe_commit`, and the distributions of `felt_bpm`,
+`kick_class`, `off_beat_ratio` (p5, p50, p95), `restraint_bucket`, `language`, `language_source`,
+`theme`); the catalogue std table for saturation, sustain_ratio, darkness, grit, intimacy;
+`pytest -q tests/test_describe_parity.py` with at least 20 previews;
+`ECHO_ARTIFACT_DIR=ml/inference python ml/experiments/offline_rerank/report.py --split tune` on
+the rebuilt artifacts; `ls ml/data/previews | wc -l` and `df -h` after the run.
+Gate: `previews_decoded = rows_described_from_audio = rows >= 19,000`; `rows_with_lyric_file`
+at least 0.9 x rows; felt_bpm above 150 at most 10%, below 60 at most 5%, median 95 to 115;
+language null at most 10%, `language_source = lyrics` on at least 60% of rows with a lyric file,
+no language above 70%; largest theme share at most 30% of non-null; no kick class above 50%;
+saturation std at least 0.08, sustain at 1.0 at most 20%, darkness std above 0.10; describe parity
+at least 18 of 20 on each of kick_class, restraint_bucket, felt_bpm; previews directory empty.
+Report the `four_on_floor` share and the `off_beat_ratio` percentiles whatever they are; if
+`four_on_floor` is under 2%, say so and continue, T5 is reopened separately after P4.
+`report.py` numbers are reported, no threshold at P4 (the scoring is P6). Tests green with the URL.
+End with `PACKET P4 READY FOR REVIEW`.
+
 ### 2026-10-29 03:30 IST P3: GO for A+B+L with the script fix
 Good measurement; the two failures are real defects in my T4 text, not in your implementation.
 Apply all of A, B and L in `features.py` under P3, plus the script fix: script detection runs on
