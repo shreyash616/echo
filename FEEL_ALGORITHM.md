@@ -1472,3 +1472,7 @@ Run these in a browser against the Space after each gate; if any fails, the gate
 - Verification 2026-10-29: `py -m pytest -q tests/` -> 1 failed, 22 passed, 1 xfailed in 178.86s. The failure is `test_describe_parity` kick_class, expected until P4.
 - Verification 2026-10-29: Tests workflow on main **green**: https://github.com/shreyash616/echo/actions/runs/40710732090 on `e4c1b1b`, all test steps passed.
 - Status: PACKET P3 READY FOR REVIEW.
+
+### Packet P4: T1 the data pass (FIX_PLAN_2.md section 5, GO 1928762)
+- Started: 2026-10-28 20:55 IST after GO P4 (1928762).
+- Files: `ml/data/redescribe_catalog.py`, `ml/data/HARVEST_MANIFEST.json`, `ml/data/DROPPED.jsonl`, `ml/inference/build_index_v2.py` (bug fixes only), `tests/test_describe_parity.py` (run only), `FEEL_ALGORITHM.md`.
