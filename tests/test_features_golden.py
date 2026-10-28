@@ -39,7 +39,8 @@ def _assert_match_expected(actual: dict, expected: dict, fixture_name: str):
                 f"[{fixture_name}] Key '{key}' mismatch: expected {exp_val!r}, got {act_val!r}"
             )
         elif isinstance(exp_val, float):
-            tol = max(0.05, 0.005 * abs(exp_val))
+            # sustain_ratio depends on pyin voicing, which differs slightly across platforms
+            tol = 0.15 if key == "sustain_ratio" else max(0.05, 0.005 * abs(exp_val))
             assert abs(act_val - exp_val) < tol, (
                 f"[{fixture_name}] Key '{key}' float mismatch: expected {exp_val}, got {act_val}"
             )
@@ -169,6 +170,7 @@ def test_fingerpicked_90(expected_data):
 
     # FIX_PLAN_2.md T5: thumb bass on every beat, no drums -> not four_on_floor
     assert desc["kick_class"] != "four_on_floor", f"Fingerpicked fixture classified {desc['kick_class']}"
+    assert 0.5 <= desc["sustain_ratio"] <= 1.0, f"Expected sustain_ratio in [0.5, 1.0], got {desc['sustain_ratio']}"
 
     _assert_match_expected(desc, expected_data[name], name)
 

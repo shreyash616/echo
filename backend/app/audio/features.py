@@ -491,9 +491,11 @@ def vocal(y: np.ndarray, felt_bpm: int = 120, dark_meta: dict | None = None, sr:
             runs = np.diff(np.pad(voiced_flag.astype(int), (1, 1)))
             starts = np.where(runs == 1)[0]
             syllable_rate = float(len(starts) / 10.0)
-            # T3.2: fraction of voiced frames inside a voiced run longer than 300 ms
-            ends = np.where(runs == -1)[0]
-            run_lens = ends - starts
+            # T3.2: fraction of voiced frames inside a voiced run longer than 300 ms. voiced_flag is
+            # median-filtered over 3 frames first, so boundary flicker cannot split a run.
+            voiced_s = scipy.signal.medfilt(voiced_flag.astype(float), 3) > 0.5
+            s_runs = np.diff(np.pad(voiced_s.astype(int), (1, 1)))
+            run_lens = np.where(s_runs == -1)[0] - np.where(s_runs == 1)[0]
             min_frames = 0.300 * sr / 512
             sustain_ratio = float(np.sum(run_lens[run_lens > min_frames]) / max(1, np.sum(run_lens)))
     except Exception:
