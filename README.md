@@ -90,6 +90,32 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-28 15:23 IST P2: CI disagrees on fingerpicked sustain by more than 0.15, stopped
+Your 00:50 decision is applied in `17165b8`: `voiced_flag` with a 3-frame median filter, a 0.15 sustain tolerance, and the 0.5-1.0 range on fingerpicked. `1bebb8f` adds a `::notice::` print in `_load_and_describe`, so a failing CI test shows its values as a public annotation; `gh` is not authenticated here. Pass/fail criteria are unchanged.
+
+```
+py -m pytest -q tests/test_features_golden.py tests/test_octave_truth.py
+13 passed, 3 warnings in 207.66s (0:03:27)
+
+py tests/fixtures/describe_sample.py --n 500
+saturation        0.146   0.425   0.182   0.432   0.676     0.00%
+sustain_ratio     0.102   0.908   0.746   0.933   1.000    18.40%
+darkness          0.116   0.436   0.255   0.431   0.648     0.00%
+kick_class: syncopated_808 43.6%, other 42.2%, sparse_backbeat 13.8%, four_on_floor 0.4%
+
+Tests on main: failure, https://github.com/shreyash616/echo/actions/runs/40667395207 (1bebb8f), step "Run Golden Audio Feature Tests"
+CI annotation:  fingerpicked_90.wav felt_bpm=89 kick_class=other beat_low_ratio=0.432 off_beat_ratio=0.568 sustain_ratio=0.970 saturation=0.938 darkness=0.516 grit=0.422 restraint_bucket=moderate
+this machine:   fingerpicked_90.wav felt_bpm=89 kick_class=other beat_low_ratio=0.432 off_beat_ratio=0.568 sustain_ratio=0.536 saturation=0.938 darkness=0.516 grit=0.422 restraint_bucket=moderate
+```
+
+The two values are **0.536 here and 0.970 in CI**, a gap of 0.434. The range assertion passes on both; the exact compare at 0.15 fails in CI. I stopped there and did not widen the tolerance. The sample gates all pass (sustain 18.40% at 1.0, under 20%).
+
+Every other descriptor matches to 3 decimals, so decoding is identical and the gap is pyin's voicing decision, not the median filter. Local: Python 3.13.12, librosa 1.0.0, numpy 2.4.3, scipy 1.18.1, ffmpeg 9.0.2. CI: Python 3.11 with `librosa>=0.10.2` unpinned (exact version not visible without authenticated logs).
+
+Noticed, not acted on: pinning librosa (and numpy) in `backend/requirements.txt`, or matching CI's Python to the box, would make sustain reproducible. Neither file is in P2's list. Serving and P4's redescribe also depend on the same version question.
+
+PACKET P2 BLOCKED
+
 ### 2026-10-28 15:07 IST P2 rework: item 2 done, item 1 BLOCKED
 Item 2 is done: `79ff91c` makes `deploy.yml` `workflow_dispatch` only. No Deploy run fired on that push. The Space still serves the P2 describe code that run 40663584549 deployed from `1023545`. Rolling it back is a dispatch, which rule 20a reserves for a packet entry, so I have not rolled it back. Say if you want one.
 
