@@ -126,6 +126,9 @@ T2 to T7 are evaluated before anything is deployed.
     lower.
 19. Units are checked before a number is logged: a timing test asserts on a value whose unit it
     has read from the code that writes it.
+20b. One audio stack: `backend/requirements.txt` pins exact versions of the audio and model
+    libraries to the describing machine's `pip freeze`; CI, the Space image and the harvester install
+    the same pins. A descriptor computed on two stacks is two descriptors.
 20a. Deploys are explicit: `.github/workflows/deploy.yml` is `workflow_dispatch` only, dispatched
     in P5 (and in `SCALE_PLAN.md` WP2 and WP7) and named in that packet's entry. A push never
     deploys.

@@ -36,6 +36,30 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-29 01:20 IST P2: pin the audio stack to the box; file list extended
+Correct stop. The gap is the library, not the filter: CI run 40667395207 installed Python 3.11.17,
+librosa 0.11.0, scipy 1.17.1 (numpy resolved twice, 1.26.4 then 2.4.6); your box has librosa
+1.0.0, scipy 1.18.1, numpy 2.4.3 on Python 3.13; the Space is `python:3.11-slim` on the same
+unpinned `backend/requirements.txt` as CI, so it almost certainly runs 0.11.0 too. pyin changed
+between those librosa versions. Since the million-song describe runs on your box and the Space must
+describe cold seeds identically, the box's versions are the reference.
+
+Do, inside P2 (file list extended to `backend/requirements.txt`, `.github/workflows/tests.yml`,
+`backend/Dockerfile`, `ml/data/requirements-harvest.txt` if it exists):
+1. Pin exact versions in `backend/requirements.txt` to what `pip freeze` shows on the box for:
+   librosa, numpy, scipy, numba, soundfile, torch, torchaudio, transformers, laion_clap,
+   sentence-transformers, lingua-language-detector, pyloudnorm, faiss-cpu. Paste that `pip freeze`
+   excerpt in the log entry. Keep the CPU torch index line.
+2. Push and read the Tests run. If the fingerpicked `sustain_ratio` in the CI annotation is within
+   0.15 of your 0.536, stop there. If not, the remaining difference is the interpreter: set
+   `python-version: "3.13"` in `tests.yml` and `FROM python:3.13-slim` in `backend/Dockerfile`
+   (deploy stays dispatch-only; the image change takes effect at P5), push, read again.
+3. If it still disagrees after both, paste both values and end `BLOCKED`; do not touch tolerances.
+Gate for P2 is unchanged plus: Tests workflow green on main with the run URL, and the pinned
+versions recorded. This also closes your "Noticed" item: pinning is now required, because the
+replica, cold seeds and the catalogue must come from one stack. End with
+`PACKET P2 READY FOR REVIEW`.
+
 ### 2026-10-29 00:50 IST P2 item 1 decided: your proposal, GO to finish
 Your probe settles it: my item 1 was wrong for real music (voiced_probs p50 0.01 to 0.15 on seven of
 nine real previews), and the 70% pile-up at zero is the constant-feature defect T3.2 exists to
