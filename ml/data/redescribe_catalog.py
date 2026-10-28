@@ -1,10 +1,18 @@
 """
-ml/data/redescribe_catalog.py: Fast parallel re-description of the 20,000 catalogue previews.
-Implements:
-- S2: Felt tempo with backbeat ACF vote, candidate penalty > 150 BPM, groove metrics.
-- S3: Standardized theme projection with chunked MiniLM lyrics embeddings.
-- S4: Lingua language detection from lyrics/script/genre/artist majority vote.
-- S5: Raw metrics preservation for single quantile bucketing in build_index_v2.py.
+ml/data/redescribe_catalog.py: T1, the full data pass over the catalogue (FIX_PLAN_2.md section 4).
+
+For every row: reuse the preview in ml/data/previews (fetch it once from previewUrl, re-resolving
+through iTunes when the URL is dead, only when absent), decode it with the pinned decoder, run
+describe_audio with the header cut points, compute the 10 s CLAP windows, then the T8 theme from the
+lyric file (fetched from LRCLIB when absent) and the T4 language. Rows without a decoded preview are
+dropped to DROPPED.jsonl with the reason (rule 17).
+
+Disk: previews are described and deleted in batches of at most 5,000; free disk is checked before
+each batch (stop under 8 GB). Each batch is checkpointed in ml/data/redescribe_work/ before its
+previews are deleted, so a rerun resumes. The final batch's previews are kept for the describe
+parity test until `--delete-remaining-previews`.
+
+Outputs: catalog_features.jsonl, clap.npy (row-aligned), DROPPED.jsonl, HARVEST_MANIFEST.json.
 """
 from __future__ import annotations
 
@@ -15,27 +23,30 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 
+import argparse
+import asyncio
+import hashlib
 import json
 import logging
 import multiprocessing as mp
 import re
+import shutil
 import subprocess
 import sys
+import threading
 import time
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
 import numpy as np
 
 # Add backend to path
 sys.path.insert(0, os.path.abspath("backend"))
 
-from app.audio.features import (
-    felt_tempo,
-    groove,
-    language_from_meta,
-    lead_artist,
-)
+from app.audio.decode import decode_preview
+from app.audio.features import describe_audio, language_from_meta, lead_artist
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("redescribe_catalog")
@@ -44,6 +55,18 @@ CATALOG_PATH = Path("ml/data/catalog_features.jsonl")
 PREVIEWS_DIR = Path("ml/data/previews")
 LYRICS_DIR = Path("ml/data/lyrics")
 THEME_PROMPTS_PATH = Path("ml/inference/theme_prompts.json")
+ANCHORS_PATH = Path("ml/inference/anchors.json")
+TRACK_METADATA_PATH = Path("ml/inference/track_metadata.json")
+CLAP_NPY_PATH = Path("ml/data/clap.npy")
+DROPPED_PATH = Path("ml/data/DROPPED.jsonl")
+MANIFEST_PATH = Path("ml/data/HARVEST_MANIFEST.json")
+WORK_DIR = Path("ml/data/redescribe_work")
+CLAP_CKPT = Path(os.path.expanduser("~/.cache/clap/music_audioset_epoch_15_esc_90.14.pt"))
+
+BATCH_SIZE = 5000
+MIN_FREE_BYTES = 8 * 1024**3
+MIN_CREST_DB = 6.0  # silent or corrupt previews, as at harvest (section 11.4)
+USER_AGENT = "echo-redescribe/1.0 (feel-based music discovery)"
 
 
 def _chunk_lyrics_on_lines(text: str, max_words: int = 40) -> list[str]:
@@ -131,242 +154,447 @@ def apply_lyric_theme(row: dict, minilm, theme_embs: np.ndarray) -> None:
     row["has_lyrics"] = True
 
 
+def preview_candidates(row: dict) -> list[Path]:
+    return [PREVIEWS_DIR / f"{row.get('id')}.m4a", PREVIEWS_DIR / f"{row.get('itunes_id')}.m4a",
+            PREVIEWS_DIR / f"it_{row.get('itunes_id')}.m4a"]
+
+
+def existing_preview(row: dict) -> Path | None:
+    return next((p for p in preview_candidates(row) if p.exists()), None)
+
+
+def fetch_preview(row: dict, client: httpx.Client) -> tuple[Path | None, str]:
+    """
+    A preview missing from disk is fetched once (one retry) from previewUrl; a dead URL is
+    re-resolved through iTunes US. Returns (path, "") or (None, reason).
+    """
+    dest = PREVIEWS_DIR / f"{re.sub(r'[^a-zA-Z0-9_-]', '_', row.get('id', ''))}.m4a"
+
+    def _download(url: str) -> str:
+        last = ""
+        for _ in range(2):
+            try:
+                r = client.get(url, timeout=12.0)
+            except httpx.HTTPError as e:
+                last = type(e).__name__
+                continue
+            if r.status_code == 200 and len(r.content) > 5000:
+                dest.write_bytes(r.content)
+                return ""
+            last = f"HTTP {r.status_code}, {len(r.content)} bytes"
+        return last
+
+    reason = _download(row["previewUrl"]) if row.get("previewUrl") else "no previewUrl"
+    if not reason:
+        return dest, ""
+    from harvest_v2 import resolve_itunes_preview
+
+    async def _resolve():
+        async with httpx.AsyncClient(headers={"User-Agent": USER_AGENT}) as ac:
+            return await resolve_itunes_preview(ac, row.get("title", ""), row.get("artist", ""),
+                                                expected_key=row.get("key"))
+
+    rec = asyncio.run(_resolve())
+    if not rec or not rec.get("previewUrl"):
+        return None, f"preview fetch failed ({reason}); iTunes re-resolve found nothing"
+    reason2 = _download(rec["previewUrl"])
+    if reason2:
+        return None, f"preview fetch failed ({reason}); re-resolved URL failed ({reason2})"
+    row["previewUrl"] = rec["previewUrl"]
+    return dest, ""
+
+
 def _worker_init():
-    import os
-    os.environ["OMP_NUM_THREADS"] = "1"
-    os.environ["MKL_NUM_THREADS"] = "1"
-    os.environ["OPENBLAS_NUM_THREADS"] = "1"
-    os.environ["NUMEXPR_NUM_THREADS"] = "1"
+    import scipy.fft
+    scipy.fft.set_global_backend("scipy")
+
+
+def _describe_one(args: tuple[str, str, dict]) -> dict:
+    """Decode with the pinned decoder and describe. Failures come back as drops with the reason."""
+    key, path, cut_points = args
     try:
-        import scipy.fft
-        scipy.fft.set_global_backend('scipy')
-        from app.audio.features import felt_tempo
-        _ = felt_tempo(np.zeros(22050 * 5, dtype=np.float32), sr=22050)
-    except Exception:
-        pass
-
-
-def _decode_preview_from_file(file_path: str | Path, target_sr: int = 22050, target_len: int = 22050 * 30) -> np.ndarray:
-    """Fast direct PyAV decode with fallback to ffmpeg."""
+        y = decode_preview(Path(path).read_bytes())
+    except (OSError, ValueError) as e:
+        return {"key": key, "drop": f"decode failed: {type(e).__name__}: {e}"}
+    if float(np.max(np.abs(y))) < 1e-6:
+        return {"key": key, "drop": "decode failed: ffmpeg returned no audio"}
     try:
-        import av
-        container = av.open(str(file_path))
-        resampler = av.AudioResampler(format="flt", layout="mono", rate=target_sr)
-        frames = []
-        for frame in container.decode(audio=0):
-            for r in resampler.resample(frame):
-                frames.append(r.to_ndarray())
-        for r in resampler.resample(None):
-            frames.append(r.to_ndarray())
-        container.close()
-        if frames:
-            audio = np.concatenate(frames, axis=1).squeeze()
-            if len(audio) > target_len:
-                audio = audio[:target_len]
-            elif len(audio) < target_len:
-                audio = np.pad(audio, (0, target_len - len(audio)))
-            return audio.astype(np.float32)
-    except Exception:
-        pass
-
-    # Fallback to ffmpeg subprocess
-    cmd = [
-        "ffmpeg",
-        "-nostdin",
-        "-loglevel",
-        "error",
-        "-i",
-        str(file_path),
-        "-ac",
-        "1",
-        "-ar",
-        str(target_sr),
-        "-t",
-        "30",
-        "-f",
-        "f32le",
-        "pipe:1",
-    ]
-    try:
-        out = subprocess.check_output(cmd)
-        if not out:
-            return np.zeros(target_len, dtype=np.float32)
-        audio = np.frombuffer(out, dtype=np.float32).copy()
-        if len(audio) > target_len:
-            audio = audio[:target_len]
-        elif len(audio) < target_len:
-            audio = np.pad(audio, (0, target_len - len(audio)))
-        return audio
-    except Exception:
-        return np.zeros(target_len, dtype=np.float32)
+        dsp = describe_audio(y, meta={}, sr=22050, cut_points=cut_points)
+    except (ValueError, FloatingPointError, IndexError, ZeroDivisionError) as e:
+        return {"key": key, "drop": f"describe failed: {type(e).__name__}: {e}"}
+    if dsp.get("crest_factor", 0.0) < MIN_CREST_DB:
+        return {"key": key, "drop": f"silent or corrupt preview: crest_factor "
+                                    f"{dsp.get('crest_factor', 0.0):.2f} < {MIN_CREST_DB}"}
+    for k in ("language", "language_conf", "language_source"):
+        dsp.pop(k, None)
+    return {"key": key, "dsp": dsp, "y": y}
 
 
-def _worker_process_audio_and_meta(row: dict) -> dict:
-    cand_id = row.get("id", "")
-    itunes_id = row.get("itunes_id", "")
+def load_clap():
+    import laion_clap
+    import torch
+    model = laion_clap.CLAP_Module(enable_fusion=False, amodel="HTSAT-base")
+    model.load_ckpt(str(CLAP_CKPT))
+    model.eval()
+    if torch.cuda.is_available():
+        model.to("cuda")
+    return model
 
-    # 1. Resolve preview audio file
-    p_path = None
-    for cand in [PREVIEWS_DIR / f"{cand_id}.m4a", PREVIEWS_DIR / f"{itunes_id}.m4a", PREVIEWS_DIR / f"it_{itunes_id}.m4a"]:
-        if cand.exists():
-            p_path = cand
-            break
 
-    # If audio exists, recompute S2 tempo and groove
-    if p_path is not None:
+def clap_windows(model, y_22k: np.ndarray) -> np.ndarray:
+    """10 s windows at 48 kHz, embedded, averaged, L2-normalised (as harvest_v2.embed_clap_windows)."""
+    import librosa
+    import torch
+    from app.services.recommender import _window_audio_frames
+    y_48k = librosa.resample(y_22k, orig_sr=22050, target_sr=48000, res_type="soxr_hq")
+    embs = []
+    with torch.no_grad():
+        for win in _window_audio_frames(y_48k, 48000, window_sec=10.0):
+            embs.append(model.get_audio_embedding_from_data(x=win[None, :], use_tensor=False)[0])
+    mean_emb = np.mean(embs, axis=0).astype(np.float32)
+    norm = np.linalg.norm(mean_emb)
+    return mean_emb / norm if norm > 1e-8 else mean_emb
+
+
+class LyricFetcher(threading.Thread):
+    """
+    LRCLIB pass for rows without a lyric file, alongside the audio batches. Rows LRCLIB has no
+    lyrics for are remembered in the work dir; rows that still fail after fetch_lyrics' retries are
+    retried once at the end of the pass, then counted as no lyrics.
+    """
+
+    def __init__(self, rows: list[dict], work_dir: Path):
+        super().__init__(daemon=True)
+        self.rows = rows
+        self.none_path = work_dir / "lyrics_none.txt"
+        self.counts: Counter = Counter()
+        self.failure: BaseException | None = None
+
+    def _pass(self, todo, client, none_f):
+        failed = []
+        for i, r in enumerate(todo):
+            try:
+                text = fetch_lyrics(r, client)
+            except httpx.HTTPError as e:
+                failed.append(r)
+                self.counts["error"] += 1
+                logger.info("LRCLIB error on %s: %s", r["key"], str(e)[:100])
+                continue
+            if text:
+                self.counts["fetched"] += 1
+            else:
+                self.counts["none"] += 1
+                none_f.write(r["key"] + "\n")
+                none_f.flush()
+            if (i + 1) % 500 == 0:
+                logger.info("Lyrics: %d/%d %s", i + 1, len(todo), dict(self.counts))
+        return failed
+
+    def run(self):
         try:
-            y = _decode_preview_from_file(p_path)
-            f_tempo = felt_tempo(y, sr=22050)
-            f_groove = groove(y, f_tempo, sr=22050)
+            self._run()
+        except BaseException as e:  # surfaced by main() after join
+            self.failure = e
+            raise
 
-            # Update S2 fields
-            row["felt_bpm"] = f_tempo["felt_bpm"]
-            row["felt_bpm_dist"] = f_tempo["felt_bpm_dist"]
-            row["tatum_bpm"] = f_tempo["tatum_bpm"]
-            row["pulse_rate"] = f_tempo["pulse_rate"]
-            row["hat_subdivision"] = f_tempo["hat_subdivision"]
-            row["pulse_clarity"] = f_tempo["pulse_clarity"]
+    def _run(self):
+        none_keys = set(self.none_path.read_text(encoding="utf-8").split()) if self.none_path.exists() else set()
+        seen: set[Path] = set()
+        todo = []
+        for r in self.rows:
+            lp = lyric_path(r)
+            if r["key"] in none_keys or lp.exists() or lp in seen:
+                continue
+            seen.add(lp)
+            todo.append(r)
+        self.counts["to_fetch"] = len(todo)
+        logger.info("Lyrics: %d rows without a lyric file to fetch from LRCLIB", len(todo))
+        with httpx.Client(headers={"User-Agent": USER_AGENT}) as client, \
+                open(self.none_path, "a", encoding="utf-8") as none_f:
+            failed = self._pass(todo, client, none_f)
+            logger.info("Lyrics: first pass %s; retrying %d errors once", dict(self.counts), len(failed))
+            self.counts["retried"] = len(failed)
+            self.counts["first_pass_errors"] = self.counts.pop("error", 0)
+            still = self._pass(failed, client, none_f)
+        self.counts["error_after_retry"] = len(still)
+        self.counts.pop("error", None)
+        logger.info("Lyrics: done %s", dict(self.counts))
 
-            row["hits_per_bar"] = f_groove["hits_per_bar"]
-            row["beat_low_ratio"] = f_groove["beat_low_ratio"]
-            row["off_beat_ratio"] = f_groove["off_beat_ratio"]
-            row["backbeat"] = f_groove["backbeat"]
-            row["lag_ms"] = f_groove["lag_ms"]
-        except Exception:
-            pass
 
-    # 2. S4/T4 Language resolution
-    lyr_path = lyric_path(row)
-    lyrics_text = lyr_path.read_text(encoding="utf-8") if lyr_path.exists() else None
+def run_batch(b: int, batch: list[dict], cut_points: dict, clap_model, anchor_keys, anchor_matrix,
+              pool, http: httpx.Client, work_dir: Path) -> None:
+    """Describe one batch and checkpoint it: batch_<b>_clap.npy, then batch_<b>.jsonl as the marker."""
+    free = shutil.disk_usage(PREVIEWS_DIR).free
+    if free < MIN_FREE_BYTES:
+        raise SystemExit(f"Stopping before batch {b}: {free / 1024**3:.1f} GB free < 8 GB")
+    logger.info("Batch %d: %d rows, %.1f GB free", b, len(batch), free / 1024**3)
 
-    lang_code, lang_conf, lang_source = language_from_meta(row, lyrics=lyrics_text)
+    by_key: dict[str, dict] = {}
+    jobs = []
+    for r in batch:
+        rec = by_key.setdefault(r["key"], {"key": r["key"]})
+        p = existing_preview(r)
+        if p is None:
+            p, reason = fetch_preview(r, http)
+            if p is None:
+                rec["drop"] = reason
+                continue
+            rec.update(fetched=True, previewUrl=r["previewUrl"])
+        jobs.append((r["key"], str(p), cut_points))
 
-    row["language"] = lang_code
-    row["language_conf"] = float(lang_conf)
-    row["language_source"] = lang_source
+    embs = []
+    t0 = time.time()
+    for i, res in enumerate(pool.imap(_describe_one, jobs, chunksize=4)):
+        rec = by_key[res["key"]]
+        if "drop" in res:
+            rec["drop"] = res["drop"]
+        else:
+            emb = clap_windows(clap_model, res["y"])
+            if not np.isfinite(emb).all() or np.linalg.norm(emb) < 1e-4:
+                rec["drop"] = "CLAP embedding empty"
+            else:
+                cos = (anchor_matrix @ emb).tolist()
+                rec.update(dsp=res["dsp"], anchor_cosines=cos, clap_idx=len(embs),
+                           vibes=[anchor_keys[j] for j in np.argsort(cos)[::-1][:2]])
+                embs.append(emb)
+        if (i + 1) % 500 == 0 or i + 1 == len(jobs):
+            logger.info("Batch %d: %d/%d described | %.2f rows/s", b, i + 1, len(jobs),
+                        (i + 1) / max(time.time() - t0, 0.1))
 
-    return row
+    np.save(work_dir / f"batch_{b}_clap.npy", np.array(embs, dtype=np.float32).reshape(len(embs), -1))
+    tmp = work_dir / f"batch_{b}.jsonl.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        for r in batch:
+            f.write(json.dumps(by_key[r["key"]]) + "\n")
+    tmp.replace(work_dir / f"batch_{b}.jsonl")
+
+
+def delete_previews(paths) -> int:
+    n = 0
+    for p in paths:
+        if p.exists():
+            p.unlink()
+            n += 1
+    return n
+
+
+def theme_labels(rows: list[dict], theme_keys: list[str]) -> list[str | None]:
+    """The build_index_v2.py rule (std floor 0.08, argmax z when max z >= 0.5), for the manifest."""
+    tv = [r["theme_vec"] for r in rows if r.get("has_lyrics")]
+    if not tv:
+        return [None] * len(rows)
+    mat = np.array(tv, dtype=np.float32)
+    means, stds = mat.mean(0), np.maximum(mat.std(0), 0.08)
+    out: list[str | None] = []
+    for r in rows:
+        if not r.get("has_lyrics"):
+            out.append(None)
+            continue
+        z = (np.array(r["theme_vec"]) - means) / stds
+        out.append(theme_keys[int(np.argmax(z))] if z.max() >= 0.5 else None)
+    return out
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _dist(values) -> dict:
+    c = Counter(str(v) for v in values)
+    n = max(1, sum(c.values()))
+    return {k: {"count": v, "share": round(v / n, 4)} for k, v in c.most_common()}
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--limit", type=int, default=0,
+                    help="dry run on the first N rows: own work dir, no deletes, no catalogue write")
+    ap.add_argument("--workers", type=int, default=min(10, max(1, (os.cpu_count() or 4) - 2)))
+    ap.add_argument("--delete-remaining-previews", action="store_true",
+                    help="after the parity test: delete every file left in ml/data/previews and exit")
+    args = ap.parse_args()
+
+    if args.delete_remaining_previews:
+        n = delete_previews(list(PREVIEWS_DIR.iterdir()))
+        logger.info("Deleted %d remaining previews; %d files left", n, len(list(PREVIEWS_DIR.iterdir())))
+        return
+
     t0 = time.time()
-    logger.info("Starting catalogue re-description pass (S2, S3, S4, S5)...")
+    dry = args.limit > 0
+    work_dir = WORK_DIR / "dry_run" if dry else WORK_DIR
+    work_dir.mkdir(parents=True, exist_ok=True)
+    # the pass reads the catalogue as it was when the pass started, so a resumed run matches its checkpoints
+    source = work_dir / "catalog_features.source.jsonl"
+    if not source.exists():
+        shutil.copyfile(CATALOG_PATH, source)
+        shutil.copyfile(CLAP_NPY_PATH, work_dir / "clap.source.npy")
+    rows = [json.loads(l) for l in open(source, encoding="utf-8") if l.strip()]
+    if dry:
+        rows = rows[: args.limit]
+    logger.info("Loaded %d rows (%s), %d workers", len(rows), "dry run" if dry else "full pass", args.workers)
 
-    if not CATALOG_PATH.exists():
-        raise FileNotFoundError(f"Missing {CATALOG_PATH}")
+    with open(TRACK_METADATA_PATH, encoding="utf-8") as f:
+        cut_points = json.load(f)["header"]["cut_points"]
+    with open(ANCHORS_PATH, encoding="utf-8") as f:
+        anchors_raw = json.load(f)
+    anchors = anchors_raw["prompts"] if "prompts" in anchors_raw else anchors_raw  # bundle, as build_index_v2
+    anchor_keys = list(anchors)
+    anchor_matrix = np.array([anchors[k] for k in anchor_keys], dtype=np.float32)
 
-    rows: list[dict] = []
-    with open(CATALOG_PATH, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
+    lyrics = LyricFetcher(rows, work_dir)
+    lyrics.start()
 
-    N = len(rows)
-    logger.info(f"Loaded {N} records from {CATALOG_PATH}")
+    batches = [rows[i:i + BATCH_SIZE] for i in range(0, len(rows), BATCH_SIZE)]
+    # a preview shared by several rows (duplicate ids) is deleted after the last batch that reads it
+    last_use: dict[Path, int] = {}
+    for b, batch in enumerate(batches):
+        for r in batch:
+            for p in preview_candidates(r):
+                last_use[p] = b
 
-    # 1. Load sentence-transformers MiniLM for theme projection (S3)
+    clap_model = load_clap()
+    with mp.Pool(args.workers, initializer=_worker_init) as pool, \
+            httpx.Client(headers={"User-Agent": USER_AGENT}, follow_redirects=True) as http:
+        for b, batch in enumerate(batches):
+            if (work_dir / f"batch_{b}.jsonl").exists():
+                logger.info("Batch %d: checkpoint present, skipped", b)
+            else:
+                run_batch(b, batch, cut_points, clap_model, anchor_keys, anchor_matrix, pool, http, work_dir)
+            if not dry and b < len(batches) - 1:
+                n = delete_previews(p for p, lb in last_use.items() if lb == b)
+                logger.info("Batch %d: deleted %d previews", b, n)
+
+    logger.info("Audio batches done in %.0fs; waiting for the lyric pass", time.time() - t0)
+    lyrics.join()
+    if lyrics.failure is not None:
+        raise RuntimeError("lyric pass failed") from lyrics.failure
+
+    # Assemble: drop rows without a described preview, attach DSP, CLAP, theme and language
     from sentence_transformers import SentenceTransformer
-    logger.info("Loading sentence-transformers MiniLM model...")
     minilm = SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-
-    # Load 10 canonical theme prompts (bundle-aware)
-    with open(THEME_PROMPTS_PATH, "r", encoding="utf-8") as f:
+    with open(THEME_PROMPTS_PATH, encoding="utf-8") as f:
         tp_raw = json.load(f)
     theme_prompts = tp_raw.get("prompts", tp_raw)
-    theme_keys = list(theme_prompts.keys())
-    theme_texts = list(theme_prompts.values())
-    theme_embs = minilm.encode(theme_texts, normalize_embeddings=True)
+    theme_keys = list(theme_prompts)
+    theme_embs = minilm.encode(list(theme_prompts.values()), normalize_embeddings=True)
 
-    # 2. T8: theme_vec from the lyric file only; no lyric file -> has_lyrics False, no theme_vec
-    logger.info("Computing theme vectors from lyric files (chunked MiniLM)...")
-    for r in rows:
+    kept, dropped, embs = [], [], []
+    fetched_previews = 0
+    for b, batch in enumerate(batches):
+        clap_b = np.load(work_dir / f"batch_{b}_clap.npy")
+        recs = {}
+        for line in open(work_dir / f"batch_{b}.jsonl", encoding="utf-8"):
+            rec = json.loads(line)
+            recs[rec["key"]] = rec
+        for r in batch:
+            rec = recs[r["key"]]
+            fetched_previews += bool(rec.get("fetched"))
+            if "drop" in rec:
+                dropped.append({"key": r["key"], "id": r.get("id"), "title": r.get("title"),
+                                "artist": r.get("artist"), "reason": rec["drop"]})
+                continue
+            if rec.get("previewUrl"):
+                r["previewUrl"] = rec["previewUrl"]
+            r.update(rec["dsp"])
+            r["anchor_cosines"] = rec["anchor_cosines"]
+            r["vibes"] = rec["vibes"]
+            embs.append(clap_b[rec["clap_idx"]])
+            kept.append(r)
+    logger.info("Assembled %d rows, dropped %d", len(kept), len(dropped))
+
+    for r in kept:
         apply_lyric_theme(r, minilm, theme_embs)
+        if r["has_lyrics"]:
+            words = len(lyric_path(r).read_text(encoding="utf-8").split())
+            r["lyric_words_per_minute"] = float(words / max(0.5, (r.get("durationMs") or 30000) / 60000.0))
+        else:
+            r["lyric_words_per_minute"] = 0.0
 
-    # 3. Build artist majority vote map for S4
     artist_langs: dict[str, list[str]] = {}
-    for r in rows:
-        art = lead_artist(r.get("artist"))
+    for r in kept:
         code, conf, src = language_from_meta(r)
-        if code and conf >= 0.7 and src in ["lyrics", "script", "genre"]:
-            artist_langs.setdefault(art, []).append(code)
+        if code and conf >= 0.7 and src in ("lyrics", "script", "genre"):
+            artist_langs.setdefault(lead_artist(r.get("artist")), []).append(code)
+    for r in kept:
+        row = dict(r)
+        votes = artist_langs.get(lead_artist(r.get("artist")))
+        if votes:
+            row["_artist_majority_lang"] = Counter(votes).most_common(1)[0][0]
+        p = lyric_path(r)
+        text = p.read_text(encoding="utf-8") if p.exists() else None
+        code, conf, src = language_from_meta(row, lyrics=text)
+        r["language"], r["language_conf"], r["language_source"] = code, float(conf), src
 
-    for r in rows:
-        art = lead_artist(r.get("artist"))
-        if art in artist_langs and artist_langs[art]:
-            majority = Counter(artist_langs[art]).most_common(1)[0][0]
-            r["_artist_majority_lang"] = majority
+    write_outputs(kept, dropped, np.array(embs, dtype=np.float32), lyrics, fetched_previews, theme_keys, dry, t0)
 
-    # 4. Run parallel audio and metadata processing
-    num_workers = min(12, os.cpu_count() or 4)
-    logger.info(f"Processing audio and metadata for {N} tracks using {num_workers} parallel workers...")
-    sys.stdout.flush()
-    sys.stderr.flush()
 
-    t_pool_start = time.time()
-    updated_rows = []
-    chunk_size = 10
-    with mp.Pool(num_workers, initializer=_worker_init) as pool:
-        for idx, res in enumerate(pool.imap(_worker_process_audio_and_meta, rows, chunksize=chunk_size)):
-            if "_artist_majority_lang" in res:
-                del res["_artist_majority_lang"]
-            updated_rows.append(res)
-            if (idx + 1) % 1000 == 0 or (idx + 1) == N:
-                elapsed = time.time() - t_pool_start
-                rate = (idx + 1) / max(0.1, elapsed)
-                logger.info(f"Progress: {idx + 1}/{N} ({((idx+1)/N*100):.1f}%) | {rate:.1f} tracks/s | Elapsed: {elapsed:.1f}s")
-                sys.stdout.flush()
-                sys.stderr.flush()
+def write_outputs(kept, dropped, embs, lyrics, fetched_previews, theme_keys, dry, t0):
+    N = len(kept)
+    bpm = np.array([r["felt_bpm"] for r in kept], dtype=float)
+    obr = np.array([r["off_beat_ratio"] for r in kept], dtype=float)
+    sustain = np.array([r["sustain_ratio"] for r in kept], dtype=float)
+    themes = theme_labels(kept, theme_keys)
+    with_file = [r for r in kept if lyric_path(r).exists()]
+    lyr_src = sum(1 for r in with_file if r["language_source"] == "lyrics")
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    dirty = subprocess.check_output(["git", "status", "--porcelain", "--", "ml/data/redescribe_catalog.py",
+                                     "backend/app/audio"], text=True).strip()
 
-    # Step S2 Distribution checks
-    bpms = [r.get("felt_bpm", 120) for r in updated_rows]
-    gt_150 = sum(1 for b in bpms if b > 150) / N
-    lt_60 = sum(1 for b in bpms if b < 60) / N
-    med_bpm = float(np.median(bpms))
+    manifest = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "command_line": "py " + " ".join(sys.argv),
+        "describe_commit": commit + (" (dirty)" if dirty else ""),
+        "rows": N,
+        "previews_decoded": N,
+        "rows_described_from_audio": N,
+        "rows_with_lyric_file": len(with_file),
+        "rows_dropped": len(dropped),
+        "previews_fetched": fetched_previews,
+        "lyrics_pass": dict(lyrics.counts),
+        "felt_bpm": {"share_gt_150": round(float(np.mean(bpm > 150)), 4),
+                     "share_lt_60": round(float(np.mean(bpm < 60)), 4),
+                     "median": float(np.median(bpm)),
+                     "histogram_20bpm": {f"{lo}-{lo + 19}": int(np.sum((bpm >= lo) & (bpm < lo + 20)))
+                                         for lo in range(40, 220, 20)}},
+        "kick_class": _dist(r["kick_class"] for r in kept),
+        "off_beat_ratio": {f"p{q}": round(float(np.percentile(obr, q)), 4) for q in (5, 50, 95)},
+        "restraint_bucket": _dist(r["restraint_bucket"] for r in kept),
+        "language": _dist(r["language"] for r in kept),
+        "language_source": _dist(r["language_source"] for r in kept),
+        "language_source_lyrics_share_of_lyric_files": round(lyr_src / max(1, len(with_file)), 4),
+        "theme": _dist(t for t in themes if t is not None),
+        "theme_null": sum(1 for t in themes if t is None),
+        "feature_std": {k: round(float(np.std([r[k] for r in kept])), 4)
+                        for k in ("saturation", "sustain_ratio", "darkness", "grit", "intimacy")},
+        "sustain_ratio_share_at_1": round(float(np.mean(sustain >= 0.9999)), 4),
+        "elapsed_s": round(time.time() - t0, 1),
+    }
 
-    high_prob_count = 0
-    for r in updated_rows:
-        dist = r.get("felt_bpm_dist", {})
-        if dist:
-            top_p = max(dist.values())
-            if top_p >= 0.70:
-                high_prob_count += 1
-    high_prob_share = high_prob_count / N
+    if dry:
+        print(json.dumps(manifest, indent=2))
+        print("dry run drops:", json.dumps(dropped[:10], indent=2))
+        return
 
-    # Step S4 Language checks
-    null_langs = sum(1 for r in updated_rows if r.get("language") is None) / N
-    lang_sources = Counter(r.get("language_source") for r in updated_rows)
-
-    print("\n" + "=" * 80)
-    print("STEP 2 RE-DESCRIPTION SUMMARY & GATES:")
-    print("=" * 80)
-    print(f"Total Rows Processed:                {N}")
-    print(f"Elapsed Time:                        {time.time() - t0:.1f}s")
-    print(f"\n[S2] Felt Tempo Distribution:")
-    print(f"  Share > 150 BPM:                   {gt_150*100:.2f}% (Gate Required <= 10.0%) -> {'PASS' if gt_150 <= 0.10 else 'FAIL'}")
-    print(f"  Share < 60 BPM:                    {lt_60*100:.2f}% (Gate Required <= 5.0%)  -> {'PASS' if lt_60 <= 0.05 else 'FAIL'}")
-    print(f"  Median Felt BPM:                   {med_bpm:.1f} (Gate Required 95..115)     -> {'PASS' if 95 <= med_bpm <= 115 else 'FAIL'}")
-    print(f"  Top Probability >= 0.70 Share:     {high_prob_share*100:.2f}% (Gate Required >= 50.0%) -> {'PASS' if high_prob_share >= 0.50 else 'FAIL'}")
-    print(f"\n[S4] Language Coverage:")
-    print(f"  Language = null Share:             {null_langs*100:.2f}% (Gate Required <= 10.0%) -> {'PASS' if null_langs <= 0.10 else 'FAIL'}")
-    print(f"  Language Sources:                  {dict(lang_sources)}")
-    print("=" * 80)
-
-    assert gt_150 <= 0.10, f"S2 Gate Failed: Share > 150 BPM is {gt_150*100:.2f}% > 10%"
-    assert lt_60 <= 0.05, f"S2 Gate Failed: Share < 60 BPM is {lt_60*100:.2f}% > 5%"
-    assert 95 <= med_bpm <= 115, f"S2 Gate Failed: Median BPM {med_bpm} outside [95, 115]"
-    assert high_prob_share >= 0.50, f"S2 Gate Failed: Top prob >= 0.70 is only {high_prob_share*100:.2f}% < 50%"
-    assert null_langs <= 0.10, f"S4 Gate Failed: Language null share is {null_langs*100:.2f}% > 10%"
-
-    # Write atomically
-    out_tmp = CATALOG_PATH.with_suffix(".tmp")
-    with open(out_tmp, "w", encoding="utf-8") as f:
-        for r in updated_rows:
+    tmp = CATALOG_PATH.with_suffix(".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        for r in kept:
             f.write(json.dumps(r) + "\n")
-
-    # Atomic replace
-    out_tmp.replace(CATALOG_PATH)
-    logger.info(f"Successfully wrote {N} updated tracks to {CATALOG_PATH}")
+    tmp.replace(CATALOG_PATH)
+    np.save(CLAP_NPY_PATH, embs)
+    with open(DROPPED_PATH, "w", encoding="utf-8") as f:
+        for d in dropped:
+            f.write(json.dumps(d) + "\n")
+    manifest["catalog_features_file"] = CATALOG_PATH.name
+    manifest["catalog_features_sha256"] = sha256(CATALOG_PATH)
+    manifest["clap_npy_sha256"] = sha256(CLAP_NPY_PATH)
+    with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
+    print(json.dumps(manifest, indent=2))
+    logger.info("Wrote %d rows, clap.npy %s, %d dropped", N, embs.shape, len(dropped))
 
 
 if __name__ == "__main__":
