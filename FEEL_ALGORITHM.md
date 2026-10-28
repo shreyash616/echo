@@ -1330,3 +1330,11 @@ Run these in a browser against the Space after each gate; if any fails, the gate
 - Verification 2026-10-28: `py -m pytest -q tests/` -> 1 failed, 21 passed in 199.49s. Failure: `tests/test_axis_range.py::test_axis_range`, Rule 18 violated, axes with pool std < 0.05 on 3 or more TUNE seeds: `s_pulse` 6, `s_dark` 7, `s_grit` 9, `s_intimacy` 9, `s_harm` 3, `s_mode` 6. This is the section 1 defect that T2/T3 (P2, P6) fix; it is outside P1's file list, so it was not fixed here and the check was not edited.
 - Verification 2026-10-28: `gh run list --branch main --limit 1` -> not run: gh CLI not authenticated on this machine. No green-run URL yet; nothing pushed.
 - Status: PACKET P1 BLOCKED (gate "every test in the T9 list present and passing" not met).
+
+### Packet P0: Baseline (FIX_PLAN_2.md section 5)
+- Started: 2026-10-28 (after P1 was logged as blocked; owner asked for P0 first).
+- Files: `FEEL_ALGORITHM.md`.
+- Verification 2026-10-28: `ECHO_ARTIFACT_DIR=ml/inference py ml/experiments/offline_rerank/report.py --split tune --validate-live https://shreyash616-echo-backend.hf.space` (exit 0). Pools: Simple Man 1061, Waiting Around to Die 1030, Bang Data 1031, Boyfriend 996, Hurt 1057, Tum Hi Ho 1040, Mask Off 1071, Get Lucky 1064, Tomboy 1029. Inert axes (pool std < 0.02): grit on 7 of 9 seeds, mode on 6, harm on 3, intimacy on 2.
+  - `SUMMARY split=tune: positives 81, pooled 20, not pooled 61, hits@10 0, hits@20 0, MRR 0.0011, negatives in top10 0`
+  - `LIVE VALIDATION: max axis deviation vs https://shreyash616-echo-backend.hf.space = 0.0000 (must be < 0.001)`
+- Gate (pooled 20 of 81, hits 0 and 0, deviation 0.0000): met. Status: PACKET P0 READY FOR REVIEW.
