@@ -679,9 +679,10 @@ async def run_harvest(
     logger.info("Loading sentence-transformers MiniLM for lyrics theme projection...")
     minilm = SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
-    # Load 10 canonical theme prompts
+    # Load 10 canonical theme prompts through the same reader as build_index_v2.py (bundle or plain map)
     with open(THEME_PROMPTS_PATH, "r", encoding="utf-8") as f:
-        theme_prompts = json.load(f)
+        themes_raw = json.load(f)
+    theme_prompts = themes_raw["prompts"] if isinstance(themes_raw, dict) and "prompts" in themes_raw else themes_raw
     theme_keys = list(theme_prompts.keys())
     theme_texts = list(theme_prompts.values())
     theme_embs = minilm.encode(theme_texts, normalize_embeddings=True)
@@ -758,7 +759,8 @@ async def run_harvest(
         if not preview_url:
             return
 
-        lyrics_cache_file = LYRICS_DIR / f"{re.sub(r'[^\\w\\-]', '_', cand_id)}.txt"
+        # Same safe-id rule as redescribe_catalog.py, so both scripts read and write the same lyric file
+        lyrics_cache_file = LYRICS_DIR / f"{re.sub(r'[^a-zA-Z0-9_\-]', '_', cand_id)}.txt"
 
         async def get_lyrics():
             if lyrics_cache_file.exists():
@@ -812,11 +814,11 @@ async def run_harvest(
         top2_anchor_idx = np.argsort(anchor_cosines)[::-1][:2]
         vibes = [anchor_keys[i] for i in top2_anchor_idx]
 
-        # Theme Projection
+        # Theme projection (T8): theme_vec only from a lyric file; the theme label is assigned by
+        # build_index_v2.py from standardized vectors, never at harvest.
         has_lyrics = bool(lyrics_text and len(lyrics_text.strip()) > 20)
         lyric_wpm = 0.0
-        theme_vec = [0.0] * 10
-        top_theme = "resignation"
+        theme_vec = None
 
         if has_lyrics:
             word_count = len(lyrics_text.split())
@@ -825,12 +827,9 @@ async def run_harvest(
 
             # MiniLM Theme projection
             lyric_emb = minilm.encode([lyrics_text], normalize_embeddings=True)[0]
-            theme_cosines = (theme_embs @ lyric_emb).tolist()
-            theme_vec = [float(c) for c in theme_cosines]
-            top_theme_idx = int(np.argmax(theme_cosines))
-            top_theme = theme_keys[top_theme_idx]
+            theme_vec = [float(c) for c in (theme_embs @ lyric_emb).tolist()]
 
-        lang_code, lang_conf = language_from_meta(meta_dict)
+        lang_code, lang_conf, lang_source = language_from_meta(meta_dict, lyrics=lyrics_text if has_lyrics else None)
 
         record = {
             "id": cand_id,
@@ -848,11 +847,12 @@ async def run_harvest(
             "genre": cand.get("genre", ""),
             "language": lang_code,
             "language_conf": float(lang_conf),
+            "language_source": lang_source,
             "vibes": vibes,
-            "theme": top_theme,
+            "theme": None,
             "has_lyrics": has_lyrics,
             "lyric_words_per_minute": lyric_wpm,
-            "theme_vec": theme_vec,
+            **({"theme_vec": theme_vec} if theme_vec is not None else {}),
             "anchor_cosines": anchor_cosines,
             **dsp,
         }

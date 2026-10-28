@@ -35,6 +35,7 @@ class TrackResult(BaseModel):
     riff_flag: bool | None = None
     language: str | None = None
     language_conf: float | None = None
+    language_source: str | None = None
 
 
 class IdentifyResponse(BaseModel):

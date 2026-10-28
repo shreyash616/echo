@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import re
 import unicodedata
 import numpy as np
 import scipy.signal
@@ -705,7 +707,8 @@ def _get_lingua_detector():
                 Language.CATALAN, Language.KOREAN, Language.JAPANESE, Language.CHINESE,
                 Language.ENGLISH, Language.GERMAN, Language.DUTCH, Language.SWEDISH,
                 Language.DANISH, Language.BOKMAL, Language.NYNORSK, Language.ARABIC,
-                Language.PERSIAN, Language.TURKISH, Language.RUSSIAN
+                Language.PERSIAN, Language.TURKISH, Language.RUSSIAN,
+                Language.POLISH, Language.INDONESIAN, Language.TAGALOG,
             ]
             _LINGUA_DETECTOR = LanguageDetectorBuilder.from_languages(*langs).build()
             _LINGUA_ISO_MAP = {
@@ -718,36 +721,86 @@ def _get_lingua_detector():
                 Language.DUTCH: "nl", Language.SWEDISH: "sv", Language.DANISH: "da",
                 Language.BOKMAL: "no", Language.NYNORSK: "no", Language.ARABIC: "ar",
                 Language.PERSIAN: "fa", Language.TURKISH: "tr", Language.RUSSIAN: "ru",
+                Language.POLISH: "pl", Language.INDONESIAN: "id", Language.TAGALOG: "tl",
             }
         except Exception:
             _LINGUA_DETECTOR = False
     return _LINGUA_DETECTOR, _LINGUA_ISO_MAP
 
 
+# T4: lingua's answer on lyrics is trusted only where it is reliable on romanised text
+LATIN_LYRIC_LANGS = {"es", "fr", "pt", "it", "de", "nl", "sv", "pl", "tr", "id", "tl"}
+LATIN_MIN_CONF = 0.9
+LATIN_MIN_WORDS = 60
+EN_MIN_LIST_SHARE = 0.55
+_ENGLISH_WORDS: set[str] | None = None
+
+
+def _english_words() -> set[str]:
+    global _ENGLISH_WORDS
+    if _ENGLISH_WORDS is None:
+        path = os.path.join(os.path.dirname(__file__), "english_words.txt")
+        with open(path, encoding="utf-8") as f:
+            _ENGLISH_WORDS = {w.strip().lower() for w in f if w.strip() and not w.startswith("#")}
+    return _ENGLISH_WORDS
+
+
+def _lyric_tokens(text: str) -> list[str]:
+    """Lowercase words with punctuation stripped (apostrophes removed, so "don't" -> "dont")."""
+    return re.findall(r"[^\W\d_]+", re.sub(r"['’]", "", text.lower()))
+
+
+def english_list_share(text: str) -> float:
+    """Share of lyric tokens found in the bundled English word list."""
+    tokens = _lyric_tokens(text)
+    if not tokens:
+        return 0.0
+    words = _english_words()
+    return sum(1 for t in tokens if t in words) / len(tokens)
+
+
+def _non_latin_share(text: str) -> float:
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters:
+        return 0.0
+    return sum(1 for ch in letters if "LATIN" not in unicodedata.name(ch, "")) / len(letters)
+
+
 def language_from_lyrics(text: str) -> tuple[str | None, float]:
-    """Detect language from lyrics text using Lingua, restricted to affinity languages."""
+    """Lingua's best guess on lyrics text (restricted to affinity languages), before acceptance."""
     if not text or len(text.strip()) < 15:
         return None, 0.0
     detector, iso_map = _get_lingua_detector()
     if not detector or not iso_map:
         return None, 0.0
-    try:
-        conf_vals = detector.compute_language_confidence_values(text)
-        if conf_vals:
-            best = conf_vals[0]
-            code = iso_map.get(best.language)
-            conf = float(best.value)
-            if code and conf >= 0.6:
-                return code, conf
-    except Exception:
-        pass
-    return None, 0.0
+    conf_vals = detector.compute_language_confidence_values(text)
+    if not conf_vals:
+        return None, 0.0
+    best = conf_vals[0]
+    return iso_map.get(best.language), float(best.value)
+
+
+def accept_lyrics_language(text: str, code: str | None, conf: float) -> bool:
+    """
+    T4 acceptance: (a) the lyric script is non-Latin, or (b) a listed Latin-script language at
+    confidence >= 0.9 with >= 60 words, or (c) English with >= 55% of tokens in the English list.
+    """
+    if not code:
+        return False
+    if _non_latin_share(text) > 0.5:
+        return True
+    tokens = _lyric_tokens(text)
+    if code in LATIN_LYRIC_LANGS:
+        return conf >= LATIN_MIN_CONF and len(tokens) >= LATIN_MIN_WORDS
+    if code == "en":
+        return english_list_share(text) >= EN_MIN_LIST_SHARE
+    return False
 
 
 def language_from_meta(meta: dict, lyrics: str | None = None) -> tuple[str | None, float, str]:
     """
-    S4 Resolution order per row:
-    lyrics (if has_lyrics) -> script -> genre map -> artist_vote (in catalogue pass) -> None.
+    S4/T4 resolution order per row:
+    lyrics (only when `accept_lyrics_language` holds) -> script -> genre map -> artist_vote -> None.
     Returns (language_code, confidence, source)
     """
     # 1. Lyrics
@@ -755,6 +808,8 @@ def language_from_meta(meta: dict, lyrics: str | None = None) -> tuple[str | Non
     lyr_conf = 0.0
     if lyrics and len(lyrics.strip()) > 15:
         lyr_code, lyr_conf = language_from_lyrics(lyrics)
+        if not accept_lyrics_language(lyrics, lyr_code, lyr_conf):
+            lyr_code, lyr_conf = None, 0.0
 
     # 2. Script detection
     script_code = None
@@ -808,15 +863,6 @@ def language_from_meta(meta: dict, lyrics: str | None = None) -> tuple[str | Non
         if g_key in genre_str:
             genre_code, genre_conf = code, conf
             break
-
-    # S4 Weak spot rule: when lingua returns "en" with confidence under 0.8
-    # and genre or script says Indic, Indic answer wins.
-    indic_langs = {"hi", "pa", "ur", "bn", "mr", "gu", "ta", "te", "ml", "kn"}
-    if lyr_code == "en" and lyr_conf < 0.8:
-        if script_code in indic_langs:
-            return script_code, script_conf, "script"
-        if genre_code in indic_langs:
-            return genre_code, genre_conf, "genre"
 
     if lyr_code:
         return lyr_code, lyr_conf, "lyrics"

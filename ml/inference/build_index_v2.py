@@ -252,9 +252,13 @@ def main():
             "p66": float(np.percentile(crest_factor_arr, 66.7)),
             "p75": float(np.percentile(crest_factor_arr, 75)),
         },
+        # T3.3: darkness rescales roughness by its catalogue p95
+        "roughness_z": {
+            "p95": float(np.percentile(np.array([r.get("roughness", 0.0) for r in raw_tracks]), 95)),
+        },
     }
 
-    # Assign kick_class and restraint_bucket using catalogue quantiles
+    # Assign kick_class (T5 rule) and restraint_bucket (catalogue quantiles)
     kick_classes = []
     restraint_buckets = []
     final_tracks = []
@@ -265,8 +269,12 @@ def main():
         lr = r.get("loudness_range", 0.0)
         cf = r.get("crest_factor", 0.0)
 
-        # Quantile-based kick_class and restraint_bucket (S5)
-        kc, rb = quantize_kick_and_restraint(hpb, ls, lr, cf, cut_points=cut_points)
+        # T5 kick_class from the raw ratios, S5 restraint_bucket from quantiles
+        kc, rb = quantize_kick_and_restraint(
+            hpb, ls, lr, cf, cut_points=cut_points,
+            beat_low_ratio=r["beat_low_ratio"], off_beat_ratio=r["off_beat_ratio"],
+            pulse_clarity=r["pulse_clarity"],
+        )
 
         # Standardized vibes (Section 12.2)
         raw_ac = np.array(all_anchor_cosines[i], dtype=np.float32)

@@ -93,6 +93,7 @@ def _to_track(meta: dict) -> TrackResult:
         riff_flag=bool(meta["riff_flag"]) if meta.get("riff_flag") is not None else None,
         language=str(meta["language"]) if meta.get("language") is not None else None,
         language_conf=float(meta["language_conf"]) if meta.get("language_conf") is not None else None,
+        language_source=str(meta["language_source"]) if meta.get("language_source") is not None else None,
     )
 
 

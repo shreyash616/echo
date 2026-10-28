@@ -43,7 +43,6 @@ CATALOG_PATH = Path("ml/data/catalog_features.jsonl")
 PREVIEWS_DIR = Path("ml/data/previews")
 LYRICS_DIR = Path("ml/data/lyrics")
 THEME_PROMPTS_PATH = Path("ml/inference/theme_prompts.json")
-ANCHOR_PROMPTS_PATH = Path("ml/inference/anchor_prompts.json")
 
 
 def _chunk_lyrics_on_lines(text: str, max_words: int = 40) -> list[str]:
@@ -63,6 +62,72 @@ def _chunk_lyrics_on_lines(text: str, max_words: int = 40) -> list[str]:
     if curr:
         chunks.append("\n".join(curr))
     return chunks or [text]
+
+
+def lyric_path(row: dict) -> Path:
+    safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "_", row.get("id", ""))
+    return LYRICS_DIR / f"{safe_id}.txt"
+
+
+_LRCLIB_LAST = [0.0]
+
+
+def fetch_lyrics(row: dict, client) -> str | None:
+    """
+    Fetch plain lyrics from LRCLIB (same endpoints and acceptance as harvest_v2.fetch_lrclib_lyrics,
+    at most 2 requests per second) and write them to the row's lyric file. Returns the text, or
+    None when LRCLIB has no lyrics. HTTP errors other than 404 raise.
+    """
+    def _get(url: str, params: dict):
+        # 429 and 5xx are transient on LRCLIB: retry twice with backoff, then return the response
+        for backoff in (5.0, 20.0, 60.0, None):
+            wait = 0.55 - (time.time() - _LRCLIB_LAST[0])
+            if wait > 0:
+                time.sleep(wait)
+            _LRCLIB_LAST[0] = time.time()
+            resp = client.get(url, params=params, timeout=10.0)
+            if backoff is None or not (resp.status_code == 429 or resp.status_code >= 500):
+                return resp
+            time.sleep(backoff)
+
+    title, artist = row.get("title", ""), row.get("artist", "")
+    text = None
+    r = _get("https://lrclib.net/api/get", {"track_name": title, "artist_name": artist})
+    if r.status_code == 200:
+        text = r.json().get("plainLyrics")
+    elif r.status_code == 404:
+        r2 = _get("https://lrclib.net/api/search", {"q": f"{title} {artist}"})
+        r2.raise_for_status()
+        norm_art = re.sub(r"[^a-z0-9]", "", artist.lower())
+        for h in r2.json():
+            if norm_art and norm_art in re.sub(r"[^a-z0-9]", "", (h.get("artistName") or "").lower()):
+                text = h.get("plainLyrics")
+                if text:
+                    break
+    else:
+        r.raise_for_status()
+    if not text or len(text.strip()) <= 20:
+        return None
+    lyric_path(row).write_text(text.strip(), encoding="utf-8")
+    return text.strip()
+
+
+def apply_lyric_theme(row: dict, minilm, theme_embs: np.ndarray) -> None:
+    """T8 and rule 17: has_lyrics is true only when a lyric file was read; theme_vec only then."""
+    path = lyric_path(row)
+    row["theme"] = None
+    if not path.exists():
+        row["has_lyrics"] = False
+        row.pop("theme_vec", None)
+        return
+    txt = path.read_text(encoding="utf-8")
+    c_embs = minilm.encode(_chunk_lyrics_on_lines(txt, max_words=40), normalize_embeddings=True)
+    mean_emb = np.mean(c_embs, axis=0)
+    norm = np.linalg.norm(mean_emb)
+    if norm > 0:
+        mean_emb = mean_emb / norm
+    row["theme_vec"] = [float(c) for c in (theme_embs @ mean_emb).tolist()]
+    row["has_lyrics"] = True
 
 
 def _worker_init():
@@ -169,15 +234,9 @@ def _worker_process_audio_and_meta(row: dict) -> dict:
         except Exception:
             pass
 
-    # 2. S4 Language resolution
-    safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "_", cand_id)
-    lyr_path = LYRICS_DIR / f"{safe_id}.txt"
-    lyrics_text = None
-    if lyr_path.exists():
-        try:
-            lyrics_text = lyr_path.read_text(encoding="utf-8")
-        except Exception:
-            pass
+    # 2. S4/T4 Language resolution
+    lyr_path = lyric_path(row)
+    lyrics_text = lyr_path.read_text(encoding="utf-8") if lyr_path.exists() else None
 
     lang_code, lang_conf, lang_source = language_from_meta(row, lyrics=lyrics_text)
     if not lang_code and row.get("_artist_majority_lang"):
@@ -188,9 +247,6 @@ def _worker_process_audio_and_meta(row: dict) -> dict:
     row["language"] = lang_code
     row["language_conf"] = float(lang_conf)
     row["language_source"] = lang_source
-
-    # 3. S3 Theme: Reset theme to None at catalogue level
-    row["theme"] = None
 
     return row
 
@@ -225,49 +281,10 @@ def main():
     theme_texts = list(theme_prompts.values())
     theme_embs = minilm.encode(theme_texts, normalize_embeddings=True)
 
-    # Load 24 anchors for projection
-    with open(ANCHOR_PROMPTS_PATH, "r", encoding="utf-8") as f:
-        anchors = json.load(f)
-    anchor_keys = list(anchors.keys())
-    anchor_texts = list(anchors.values())
-    anchor_embs = minilm.encode(anchor_texts, normalize_embeddings=True)
-
-    # 24 x 10 cross-similarity matrix between anchors and themes, calibrated
-    M_anchor_theme = anchor_embs @ theme_embs.T
-    M_cal = M_anchor_theme - np.mean(M_anchor_theme, axis=0, keepdims=True)
-
-    # 2. Compute S3 theme_vec for all tracks
-    logger.info("Computing S3 theme vectors (chunked MiniLM for lyrics, calibrated cross-projection for anchors)...")
+    # 2. T8: theme_vec from the lyric file only; no lyric file -> has_lyrics False, no theme_vec
+    logger.info("Computing theme vectors from lyric files (chunked MiniLM)...")
     for r in rows:
-        cand_id = r.get("id", "")
-        safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "_", cand_id)
-        lyr_path = LYRICS_DIR / f"{safe_id}.txt"
-        if lyr_path.exists():
-            try:
-                txt = lyr_path.read_text(encoding="utf-8")
-                chunks = _chunk_lyrics_on_lines(txt, max_words=40)
-                c_embs = minilm.encode(chunks, normalize_embeddings=True)
-                mean_emb = np.mean(c_embs, axis=0)
-                norm = np.linalg.norm(mean_emb)
-                if norm > 0:
-                    mean_emb = mean_emb / norm
-                tv = (theme_embs @ mean_emb).tolist()
-                r["theme_vec"] = [float(c) for c in tv]
-                r["has_lyrics"] = True
-                continue
-            except Exception:
-                pass
-
-        # For tracks without individual cached lyrics, project via anchor_cosines @ M_cal
-        ac = r.get("anchor_cosines")
-        if ac and len(ac) == len(anchor_keys):
-            ac_arr = np.array(ac, dtype=np.float32)
-            tv = (ac_arr @ M_cal).tolist()
-            r["theme_vec"] = [float(c) for c in tv]
-            r["has_lyrics"] = True
-        else:
-            r["theme_vec"] = [0.0] * 10
-            r["has_lyrics"] = False
+        apply_lyric_theme(r, minilm, theme_embs)
 
     # 3. Build artist majority vote map for S4
     artist_langs: dict[str, list[str]] = {}
