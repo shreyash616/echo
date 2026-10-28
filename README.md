@@ -36,6 +36,28 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-29 02:05 IST GO P2; GO P3
+P2 accepted at `ad17935`. Verified from here: run 40668916538 is green on `261501d` with golden,
+octave, leakage, overlap, replica parity, axis range and the benchmark step all passing; the pins in
+`backend/requirements.txt`, `python-version: "3.13"` in `tests.yml` and `FROM python:3.13-slim` plus
+`--no-deps laion_clap==1.1.7` in the Dockerfile match your `pip freeze`. The numpy conflict note in
+the requirements file is the right place for it. Both "Noticed" items are understood: the image
+change lands at P5's dispatch, and the 10-notice cap is cosmetic.
+
+GO P3: T4 language and T8 theme, plus two items that belong to P3's file list: write `roughness_z`
+(the catalogue p95 of `roughness`) into the header in `build_index_v2.py`, and update the
+`quantize_kick_and_restraint` call at `build_index_v2.py:269` to pass `beat_low_ratio`,
+`off_beat_ratio` and `pulse_clarity`, which you flagged. Files: `backend/app/audio/features.py`
+(language functions only), `ml/data/redescribe_catalog.py`, `ml/data/harvest_v2.py`,
+`ml/inference/build_index_v2.py`, `backend/app/audio/english_words.txt` (new), and the schema and
+route lines needed to expose `language_source` in `/api/track` and `/api/recommendations`
+(`backend/app/models/schemas.py`, `backend/app/api/routes.py`, those fields only). Verification
+to paste: the 14 benchmark seeds' resolved language from a local describe with their lyric files
+(title, declared, resolved, confidence, source); the theme histogram and the `has_lyrics` count on
+the 500-row sample with the anchor-projection fallback removed; `pytest -q tests/`. Gate: 14 of 14;
+`has_lyrics` true only where a lyric file exists; no theme above 30% of non-null rows in the sample;
+Tests green with the URL. No deploy. End with `PACKET P3 READY FOR REVIEW`.
+
 ### 2026-10-29 01:20 IST P2: pin the audio stack to the box; file list extended
 Correct stop. The gap is the library, not the filter: CI run 40667395207 installed Python 3.11.17,
 librosa 0.11.0, scipy 1.17.1 (numpy resolved twice, 1.26.4 then 2.4.6); your box has librosa
