@@ -34,6 +34,7 @@ from app.audio.features import (
     felt_tempo,
     groove,
     language_from_meta,
+    lead_artist,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -239,10 +240,6 @@ def _worker_process_audio_and_meta(row: dict) -> dict:
     lyrics_text = lyr_path.read_text(encoding="utf-8") if lyr_path.exists() else None
 
     lang_code, lang_conf, lang_source = language_from_meta(row, lyrics=lyrics_text)
-    if not lang_code and row.get("_artist_majority_lang"):
-        lang_code = row["_artist_majority_lang"]
-        lang_conf = 0.65
-        lang_source = "artist_vote"
 
     row["language"] = lang_code
     row["language_conf"] = float(lang_conf)
@@ -289,13 +286,13 @@ def main():
     # 3. Build artist majority vote map for S4
     artist_langs: dict[str, list[str]] = {}
     for r in rows:
-        art = (r.get("artist") or "").lower().strip()
+        art = lead_artist(r.get("artist"))
         code, conf, src = language_from_meta(r)
         if code and conf >= 0.7 and src in ["lyrics", "script", "genre"]:
             artist_langs.setdefault(art, []).append(code)
 
     for r in rows:
-        art = (r.get("artist") or "").lower().strip()
+        art = lead_artist(r.get("artist"))
         if art in artist_langs and artist_langs[art]:
             majority = Counter(artist_langs[art]).most_common(1)[0][0]
             r["_artist_majority_lang"] = majority

@@ -732,7 +732,7 @@ def _get_lingua_detector():
 LATIN_LYRIC_LANGS = {"es", "fr", "pt", "it", "de", "nl", "sv", "pl", "tr", "id", "tl"}
 LATIN_MIN_CONF = 0.9
 LATIN_MIN_WORDS = 60
-EN_MIN_LIST_SHARE = 0.55
+EN_MIN_LIST_SHARE = 0.70  # one step below the evidence; see the P3 entry in FEEL_ALGORITHM.md
 _ENGLISH_WORDS: set[str] | None = None
 
 
@@ -783,7 +783,7 @@ def language_from_lyrics(text: str) -> tuple[str | None, float]:
 def accept_lyrics_language(text: str, code: str | None, conf: float) -> bool:
     """
     T4 acceptance: (a) the lyric script is non-Latin, or (b) a listed Latin-script language at
-    confidence >= 0.9 with >= 60 words, or (c) English with >= 55% of tokens in the English list.
+    confidence >= 0.9 with >= 60 words, or (c) English with >= 70% of tokens in the English list.
     """
     if not code:
         return False
@@ -797,10 +797,43 @@ def accept_lyrics_language(text: str, code: str | None, conf: float) -> bool:
     return False
 
 
+SCRIPT_LANGS = (
+    ("DEVANAGARI", "hi"), ("GURMUKHI", "pa"), ("TAMIL", "ta"), ("TELUGU", "te"), ("HANGUL", "ko"),
+    ("HIRAGANA", "ja"), ("KATAKANA", "ja"), ("CJK", "ja"), ("ARABIC", "ar"), ("CYRILLIC", "ru"),
+)
+SCRIPT_MIN_LETTERS = 3
+SCRIPT_MIN_SHARE = 0.5
+GENRE_VOTE_FLOOR = 0.7  # genre matches below this (the broad en genres) yield to the artist vote
+
+
+def script_language(text: str) -> tuple[str | None, float]:
+    """A script counts only with >= 3 of its letters and >= 50% of the alphabetic characters."""
+    letters = [ch for ch in text if ch.isalpha()]
+    counts: dict[str, int] = {}
+    for ch in letters:
+        name = unicodedata.name(ch, "")
+        for key, code in SCRIPT_LANGS:
+            if key in name:
+                counts[code] = counts.get(code, 0) + 1
+                break
+    if not counts:
+        return None, 0.0
+    code, n = max(counts.items(), key=lambda kv: kv[1])
+    if n >= SCRIPT_MIN_LETTERS and n / len(letters) >= SCRIPT_MIN_SHARE:
+        return code, 0.95
+    return None, 0.0
+
+
+def lead_artist(artist: str | None) -> str:
+    """Artist-vote key: the lead artist, split on &, comma, feat, ft, x, with."""
+    return re.split(r"\s*(?:&|,|\bfeat\b\.?|\bft\b\.?|\bx\b|\bwith\b)\s*", (artist or "").lower().strip())[0].strip()
+
+
 def language_from_meta(meta: dict, lyrics: str | None = None) -> tuple[str | None, float, str]:
     """
     S4/T4 resolution order per row:
-    lyrics (only when `accept_lyrics_language` holds) -> script -> genre map -> artist_vote -> None.
+    lyrics (only when `accept_lyrics_language` holds) -> script (title and artist) -> genre map at
+    >= 0.7 -> artist_vote (lead artist) -> broad genre below 0.7 -> None.
     Returns (language_code, confidence, source)
     """
     # 1. Lyrics
@@ -811,28 +844,8 @@ def language_from_meta(meta: dict, lyrics: str | None = None) -> tuple[str | Non
         if not accept_lyrics_language(lyrics, lyr_code, lyr_conf):
             lyr_code, lyr_conf = None, 0.0
 
-    # 2. Script detection
-    script_code = None
-    script_conf = 0.0
-    text = f"{meta.get('title', '')} {meta.get('artist', '')} {meta.get('album', '')}"
-    for ch in text:
-        name = unicodedata.name(ch, '')
-        if 'DEVANAGARI' in name:
-            script_code, script_conf = "hi", 0.95; break
-        if 'GURMUKHI' in name:
-            script_code, script_conf = "pa", 0.95; break
-        if 'TAMIL' in name:
-            script_code, script_conf = "ta", 0.95; break
-        if 'TELUGU' in name:
-            script_code, script_conf = "te", 0.95; break
-        if 'HANGUL' in name:
-            script_code, script_conf = "ko", 0.95; break
-        if 'HIRAGANA' in name or 'KATAKANA' in name or 'CJK' in name:
-            script_code, script_conf = "ja", 0.95; break
-        if 'ARABIC' in name:
-            script_code, script_conf = "ar", 0.95; break
-        if 'CYRILLIC' in name:
-            script_code, script_conf = "ru", 0.95; break
+    # 2. Script detection on title and artist (album excluded: stylised album titles carry stray letters)
+    script_code, script_conf = script_language(f"{meta.get('title', '')} {meta.get('artist', '')}")
 
     # 3. Genre detection
     genre_code = None
@@ -864,14 +877,17 @@ def language_from_meta(meta: dict, lyrics: str | None = None) -> tuple[str | Non
             genre_code, genre_conf = code, conf
             break
 
+    vote = meta.get("_artist_majority_lang") if meta else None
     if lyr_code:
         return lyr_code, lyr_conf, "lyrics"
     if script_code:
         return script_code, script_conf, "script"
+    if genre_code and genre_conf >= GENRE_VOTE_FLOOR:
+        return genre_code, genre_conf, "genre"
+    if vote:
+        return vote, 0.65, "artist_vote"
     if genre_code:
         return genre_code, genre_conf, "genre"
-    if meta and meta.get("_artist_majority_lang"):
-        return meta["_artist_majority_lang"], 0.65, "artist_vote"
 
     return None, 0.0, "none"
 
