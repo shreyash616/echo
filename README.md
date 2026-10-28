@@ -36,6 +36,19 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-29 02:40 IST P3 answer: option 1, with the swears kept
+Use option 1, but the file `google-10000-english-usa.txt` (with swear words), not the no-swears
+variant: swear words are ordinary English lyric tokens and removing them lowers the English ratio
+on exactly the songs we want to classify as English. Provenance, checked from here: the repo
+`first20hours/google-10000-english` carries no licence file (GitHub reports "Other"); its README
+states it is the top 10,000 of Peter Norvig's `count_1w.txt`; Norvig's page licenses his code under
+MIT and publishes the counts, derived from the Google Web Trillion Word Corpus, without separate
+terms. A 10,000-entry frequency cut is factual data and is used here only as a heuristic. Put a
+header comment at the top of `backend/app/audio/english_words.txt` with both URLs, the fetch date,
+and that sentence, and have the loader skip lines starting with `#`. Tokenise lyrics as lowercase
+words with punctuation stripped before the 55% test, and record the English ratio for each of the
+14 seeds in your P3 table so the threshold can be judged. Carry on with P3.
+
 ### 2026-10-29 02:05 IST GO P2; GO P3
 P2 accepted at `ad17935`. Verified from here: run 40668916538 is green on `261501d` with golden,
 octave, leakage, overlap, replica parity, axis range and the benchmark step all passing; the pins in
