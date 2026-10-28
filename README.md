@@ -77,6 +77,40 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-28 15:07 IST P2 rework: item 2 done, item 1 BLOCKED
+Item 2 is done: `79ff91c` makes `deploy.yml` `workflow_dispatch` only. No Deploy run fired on that push. The Space still serves the P2 describe code that run 40663584549 deployed from `1023545`. Rolling it back is a dispatch, which rule 20a reserves for a packet entry, so I have not rolled it back. Say if you want one.
+
+Item 1, as written, makes `sustain_ratio` near-constant at 0. On real previews pyin's `voiced_probs` rarely exceeds 0.5, even where `voiced_flag` (the HMM decision) is true:
+
+```
+probe (pyin on the 200 Hz-3.5 kHz harmonic band, first 10 s):
+major_triad_pad.wav          voiced_flag 1.00 | probs p50 0.01 p90 0.01 max 0.01 | frac>0.5 0.00
+click_72_backbeat.wav        voiced_flag 0.08 | probs p50 0.00 p90 0.00 max 0.42 | frac>0.5 0.00
+fingerpicked_90.wav          voiced_flag 0.87 | probs p50 0.83 p90 0.98 max 0.98 | frac>0.5 0.65
+Badshah, Karan Aujla & Hiten voiced_flag 0.76 | probs p50 0.08 p90 0.69 max 0.89 | frac>0.5 0.20
+Whitesnake:Dog               voiced_flag 0.11 | probs p50 0.01 p90 0.01 max 0.11 | frac>0.5 0.00
+David Bowie:The Man Who Sold voiced_flag 0.64 | probs p50 0.01 p90 0.15 max 0.55 | frac>0.5 0.00
+Tim McGraw:Red Ragtop        voiced_flag 0.69 | probs p50 0.02 p90 0.32 max 0.69 | frac>0.5 0.03
+Jet:Black Hearts (On Fire)   voiced_flag 0.62 | probs p50 0.01 p90 0.18 max 0.69 | frac>0.5 0.01
+U2:Ordinary Love (Extraordin voiced_flag 0.82 | probs p50 0.15 p90 0.76 max 0.95 | frac>0.5 0.22
+
+40 real previews (seed 11), sustain_ratio by definition:
+voiced_flag raw (P2 as pushed)   std 0.106 mean 0.895 share=0 0%  share=1 15%
+probs>0.5 + medfilt (item 1)     std 0.234 mean 0.140 share=0 70% share=1 0%
+voiced_flag + medfilt 3 frames   std 0.107 mean 0.899 share=0 0%  share=1 18%
+
+py tests/fixtures/describe_sample.py --n 500, with item 1 applied:
+sustain_ratio     0.233   0.123   0.000   0.000   0.670     0.40%
+```
+
+With item 1, the median row is 0.000 and every pad fixture goes from 1.0 to 0.0. The std gate passes only because of the pile-up at zero, which is the constant-feature defect T3.2 exists to remove. I have not committed item 1; the tree is at `79ff91c`, and the variant is saved as a local patch.
+
+Proposal (not applied): keep `voiced_flag` and apply the 3-frame median filter to it. That keeps the spread (std 0.107, 18% at 1.0, under the 20% gate) and smooths the boundary flicker. Whether it closes the CI gap (0.536 here, 0.788 in CI) can only be shown by a CI run. The `sustain_ratio` tolerance of 0.15 in `_assert_match_expected`, together with the 0.5-1.0 range on fingerpicked, would still fail on that gap (0.25), so the CI gap may come from library versions (pyin or ffmpeg resampling) rather than flicker. A pinned-version check in CI would settle it.
+
+Tests on `79ff91c` will stay red on `test_fingerpicked_90` until item 1 is decided.
+
+PACKET P2 BLOCKED
+
 ### 2026-10-28 14:51 IST P2
 Done under the c01f7f6 revision in commit `1023545` (`Packet P2: T3.1 to T3.3 features and T5 kick class`). The full log entry is in `FEEL_ALGORITHM.md`, "Packet P2 (reopened ...)".
 
