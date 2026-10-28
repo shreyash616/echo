@@ -464,6 +464,20 @@ class MusicRecommender:
             return ((raw - self._feel_mean) / self._feel_std) * self._feel_weights_vec
         return raw
 
+    def update_feel_weights(self, new_weights: list[float] | np.ndarray) -> None:
+        """Dynamically update feel weights and re-index feel space in memory."""
+        if self._feel_weights_vec is None or self._feel_matrix is None:
+            return
+        if not hasattr(self, "_feel_unweighted_matrix") or self._feel_unweighted_matrix is None:
+            safe_div = np.where(self._feel_weights_vec != 0, self._feel_weights_vec, 1.0)
+            self._feel_unweighted_matrix = self._feel_matrix / safe_div
+        new_vec = np.array(new_weights, dtype=np.float32)
+        self._feel_weights_vec = new_vec
+        self._feel_matrix = (self._feel_unweighted_matrix * new_vec).astype(np.float32)
+        new_idx = faiss.IndexFlatL2(len(new_vec))
+        new_idx.add(self._feel_matrix)
+        self._feel_index = new_idx
+
     def get_clap_vector(self, track: dict | None) -> np.ndarray:
         """Retrieve unit-norm 512-d CLAP vector for catalogue or described track."""
         if not track:
@@ -594,20 +608,46 @@ class MusicRecommender:
         else:
             s_anchor = 0.5
 
-        # 3. s_tempo
+        # 3. s_tempo (Section 11.5.1 / 11.7)
         dist_a = seed.get("felt_bpm_dist") or {}
         dist_b = cand.get("felt_bpm_dist") or {}
         if dist_a and dist_b:
-            overlap = sum(min(dist_a.get(k, 0.0), dist_b.get(k, 0.0)) for k in dist_a)
-            overlap_half = sum(min(dist_a.get(k, 0.0), dist_b.get(str(int(k) // 2), 0.0)) for k in dist_a if k.isdigit())
-            overlap_double = sum(min(dist_a.get(k, 0.0), dist_b.get(str(int(k) * 2), 0.0)) for k in dist_a if k.isdigit())
-            s_tempo = float(np.clip(overlap + 0.5 * overlap_half + 0.5 * overlap_double, 0.0, 1.0))
+            log2_1_5 = 0.5849625
+            d = 0.0
+            for k_a, p_a in dist_a.items():
+                try:
+                    bpm_a = float(k_a)
+                except ValueError:
+                    continue
+                for k_b, p_b in dist_b.items():
+                    try:
+                        bpm_b = float(k_b)
+                    except ValueError:
+                        continue
+                    if bpm_a > 0 and bpm_b > 0:
+                        x = abs(float(np.log2(bpm_a / bpm_b)))
+                        if abs(x - 1.0) <= 0.25:
+                            fold_x = min(x, 0.4)
+                        elif abs(x - log2_1_5) <= 0.15:
+                            fold_x = 0.7
+                        else:
+                            fold_x = min(1.0, x)
+                        d += float(p_a) * float(p_b) * fold_x
+            s_tempo = float(np.clip(1.0 - d, 0.0, 1.0))
         else:
             bpm_a = float(seed.get("felt_bpm") or seed.get("bpm", 120))
             bpm_b = float(cand.get("felt_bpm") or cand.get("bpm", 120))
-            ratio = bpm_a / max(1.0, bpm_b)
-            diff_octave = min(abs(ratio - 1.0), abs(ratio - 0.5), abs(ratio - 2.0))
-            s_tempo = float(np.clip(1.0 - diff_octave / 0.25, 0.0, 1.0))
+            if bpm_a > 0 and bpm_b > 0:
+                x = abs(float(np.log2(bpm_a / bpm_b)))
+                if abs(x - 1.0) <= 0.25:
+                    fold_x = min(x, 0.4)
+                elif abs(x - 0.5849625) <= 0.15:
+                    fold_x = 0.7
+                else:
+                    fold_x = min(1.0, x)
+                s_tempo = float(np.clip(1.0 - fold_x, 0.0, 1.0))
+            else:
+                s_tempo = 0.5
 
         # 4. s_pulse
         s_pulse = float(np.clip(1.0 - abs(float(seed.get("pulse_rate", 0.5)) - float(cand.get("pulse_rate", 0.5))), 0.0, 1.0))

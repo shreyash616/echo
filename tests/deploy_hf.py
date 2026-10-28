@@ -28,6 +28,7 @@ artifacts_to_upload = [
     ("ml/inference/track_id_map.json", "track_id_map.json"),
     ("ml/inference/anchors.json", "anchors.json"),
     ("ml/inference/theme_prompts.json", "theme_prompts.json"),
+    ("ml/inference/rerank_weights.json", "rerank_weights.json"),
     ("ml/data/HARVEST_MANIFEST.json", "HARVEST_MANIFEST.json"),
 ]
 
