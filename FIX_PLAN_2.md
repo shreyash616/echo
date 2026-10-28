@@ -168,15 +168,19 @@ T2 to T7 are evaluated before anything is deployed.
 - Problem: section 1, items 2 and 4.
 - Change, all in `backend/app/audio/features.py` unless stated:
   1. `saturation` (`:427`): replace with the fraction of 50 ms windows whose crest factor is below
-     6 dB plus the fraction whose spectral flatness above 4 kHz exceeds 0.5, each 0 to 1, averaged.
-     Done when catalogue std is at least 0.08 and the golden "saturated" fixture scores above the
-     golden "restrained" fixture by at least 0.3.
+     9 dB plus the fraction whose spectral flatness above 4 kHz exceeds 0.3, each 0 to 1, averaged.
+     (Revised 2026-10-28 from 6 dB and 0.5 after P2 measured real previews: window crest p5 is
+     6.35 dB and flatness p95 is 0.43, so the first thresholds almost never fired; the revised pair
+     measured std 0.155 on a 500-row sample.) Done when catalogue std is at least 0.08 and the
+     golden "saturated" fixture scores above the golden "restrained" fixture by at least 0.3.
   2. `sustain_ratio` (`:496`): the fraction of voiced frames that belong to a voiced run longer than
      300 ms. Done when catalogue std is at least 0.10 and it is not 1.0 on more than 20% of rows.
   3. `roughness` (`:329`): keep spectral flatness but rescale by the catalogue p95 at index time
-     (`roughness_z` in the header), and drop its weight inside `darkness` to 0.10, moving 0.15 to
+     (`roughness_z` in the header, written by `build_index_v2.py`, which is in P3's file list, so
+     the header write happens in P3), and drop its weight inside `darkness` to 0.10, moving 0.15 to
      `low_share`. Done when `darkness` std rises above 0.10.
-  4. `riff_flag` (`recommender.py:718`): delete the override. `s_harm` is always the
+  4. (Done in P6, not P2: it changes scoring and must be mirrored in `score_lib.py`.) `riff_flag`
+     (`recommender.py:718`): delete the override. `s_harm` is always the
      `changes_per_bar` and `loop_bars` similarity, with a `riff_flag` equality term at 0.2 inside
      it. `s_mode` when either mode is undefined becomes 0.7, not 1.0. Done when `report.py` shows
      `s_harm` and `s_mode` pool std above 0.05 on at least three TUNE seeds.
@@ -200,12 +204,22 @@ T2 to T7 are evaluated before anything is deployed.
 **T5. Kick class from the kick, not from the hit count.**
 - Problem: `features.py:650` labels `four_on_floor` when `hits_per_bar >= p66`, so fingerpicked
   folk and No Surprises are four-on-the-floor.
-- Change in `quantize_kick_and_restraint`: `four_on_floor` when `beat_low_ratio >= p75` and
-  `off_beat_ratio <= p50`; `syncopated_808` when `off_beat_ratio >= p66`; `sparse_backbeat` when
-  `hits_per_bar <= p33`; else `other`. Delete the absolute thresholds at `features.py:289-296`.
-- Done when: no class holds more than 50% of rows; the golden four-on-the-floor fixture classifies
-  as `four_on_floor` and the fingerpicked fixture does not; `tests/test_describe_parity.py` 18 of
-  20 or better.
+- Change (revised 2026-10-28 after P2 found the quantile rule breaks two Table 11.2 fixtures): the
+  Table 11.2 fixtures define the classes and stay as they are (`click_144_fourfloor` is
+  `four_on_floor`, `click_72_backbeat` is `sparse_backbeat`, `trap_96` is `syncopated_808`). The
+  rule uses the raw ratios with absolute thresholds, in this order, and the catalogue quantiles only
+  as the spread guard: `four_on_floor` when `beat_low_ratio >= 0.8` and `off_beat_ratio <= 0.35`
+  and `pulse_clarity >= 0.5`; `syncopated_808` when `off_beat_ratio >= 0.45` and
+  `beat_low_ratio <= 0.6`; `sparse_backbeat` when `off_beat_ratio <= 0.2` and
+  `0.3 <= beat_low_ratio <= 0.7`, or `hits_per_bar <= p33`; else `other`. The implementer may move
+  a threshold to satisfy both the fixtures and the spread guard, and records the final values and
+  the fixture ratios in the log. One rule for catalogue rows and cold seeds. Delete the old
+  absolute thresholds at `features.py:289-296`. Add a fingerpicked fixture to
+  `tests/fixtures/make_fixtures.py` (plucked arpeggio, no drums, 90 BPM) with expected class not
+  `four_on_floor`.
+- Done when: all Table 11.2 fixtures pass; the fingerpicked fixture is not `four_on_floor`; no
+  class holds more than 50% of rows; `tests/test_describe_parity.py` 18 of 20 or better on the
+  Windows box, where previews exist.
 
 **T6. Pool sizes and the latency test.**
 - Change: `config.py` `candidates_clap = 300`, `candidates_feel = 1500`. `tests/test_candidate_pool.py:80`
@@ -261,17 +275,30 @@ be done as written, end with `PACKET <id> BLOCKED` and the evidence; do not impr
 |---|---|---|---|---|
 | P0 | Baseline | `FEEL_ALGORITHM.md` | `report.py --split tune --validate-live <space>` | pooled 20 of 81, hits 0 and 0, deviation 0.0000 |
 | P1 | T9 tests and workflow, T10 log corrections | `tests/*.py` listed in T9, `.github/workflows/tests.yml`, `FEEL_ALGORITHM.md` | `gh run list --branch main --limit 1`, `pytest -q tests/` | green run URL; every test in the T9 list present and passing |
-| P2 | T3 features and T5 kick class | `backend/app/audio/features.py`, `tests/test_features_golden.py`, `tests/fixtures/` | `pytest -q tests/test_features_golden.py tests/fixtures/test_octave_truth.py`; the catalogue std table from a 500-row describe sample | T3 and T5 "done when" on the sample: saturation std at least 0.08, sustain not 1.0 on more than 20%, darkness std above 0.10, no kick class above 50% |
+| P2 | T3.1 to T3.3 features and T5 kick class (T3.4 is P6; the `roughness_z` header write is P3) | `backend/app/audio/features.py`, `tests/test_features_golden.py`, `tests/fixtures/` | `pytest -q tests/test_features_golden.py tests/test_octave_truth.py`; the catalogue std table from a 500-row describe sample | T3 and T5 "done when" on the sample: saturation std at least 0.08, sustain not 1.0 on more than 20%, darkness std above 0.10, all Table 11.2 fixtures pass, no kick class above 50% |
 | P3 | T4 language and T8 theme | `backend/app/audio/features.py` (language only), `ml/data/redescribe_catalog.py`, `ml/data/harvest_v2.py`, `ml/inference/build_index_v2.py`, `backend/app/audio/english_words.txt` | the 14-seed language table from a local describe; theme histogram on the 500-row sample | 14 of 14; `has_lyrics` true only with a lyric file |
-| P4 | T1 the data pass (batched, delete after describe) | `ml/data/redescribe_catalog.py`, `ml/data/HARVEST_MANIFEST.json`, `ml/data/DROPPED.jsonl` | manifest printed; `report.py` on the rebuilt artifacts | rule 17 counts; T1, T3, T4, T5, T8 "done when" on the full catalogue |
+| P4 | T1 the data pass (batched, delete after describe; previews already on disk are reused, never re-downloaded, and deleted batch by batch; free disk at least 8 GB before each batch) | `ml/data/redescribe_catalog.py`, `ml/data/HARVEST_MANIFEST.json`, `ml/data/DROPPED.jsonl` | manifest printed; `report.py` on the rebuilt artifacts | rule 17 counts; T1, T3, T4, T5, T8 "done when" on the full catalogue |
 | P5 | Deploy and validate | `tests/deploy_hf.py` | health, `report.py --validate-live`, `test_live_overlap.py`, `feel_benchmark.py --split tune --base-url` | deviation under 0.001; overlap passes; numbers pasted |
-| P6 | T2 z-scored similarities | `backend/app/services/recommender.py`, `ml/inference/build_index_v2.py` (header std), `ml/experiments/offline_rerank/score_lib.py` | `report.py` before and after; `--validate-live` after deploy | rule 18: no feel axis under 0.05 on three or more TUNE seeds; replica at or above the section 2 floor |
+| P6 | T2 z-scored similarities and T3.4 (`riff_flag` override removed, `s_mode` 0.7 when undefined); remove the `xfail` marker from `tests/test_axis_range.py` | `backend/app/services/recommender.py`, `ml/inference/build_index_v2.py` (header std), `ml/experiments/offline_rerank/score_lib.py`, `tests/test_axis_range.py` | `report.py` before and after; `--validate-live` after deploy | rule 18: no feel axis under 0.05 on three or more TUNE seeds; replica at or above the section 2 floor |
 | P7 | T6 pools and latency test | `backend/app/config.py`, `tests/test_candidate_pool.py` | `report.py` pooled counts; `test_candidate_pool.py --base-url` | at least 8 of 11 owner and 35 of 81 TUNE positives pooled; p95 parsed as seconds |
 | P8 | T7 weight search | `ml/training/search_weights.py`, `ml/inference/rerank_weights.json`, `ml/inference/WEIGHTS_REPORT.md`, `ml/training/weight_search_log.jsonl` | the report; `report.py` with the new weights; live benchmark | at least 500 evaluations; live within one hit of the replica; no regression below P6 |
 | P9 | Section 6 acceptance | `FEEL_ALGORITHM.md` | every row of section 6 with its command | every row measured; failures stated as failures |
 
 Ordering stays as before: tests first, then the four descriptor fixes and the data pass together,
 then the scoring, then pools, then weights. Weights are not touched before P8.
+
+### Review decisions (owner, 2026-10-28)
+
+- P0: GO. Re-run from the owner's machine: pooled 20 of 81, hits 0 and 0, MRR 0.0011, live
+  deviation 0.0000.
+- P1: GO. CI run 40647069552 green on `51f6540` with all eleven tests listed. Accepted deviations:
+  `tests/test_axis_range.py` carries `xfail(strict=True)` until P6 removes it; `test_describe_parity`
+  skips below 20 local previews and must run with at least 20 in P4 on the Windows box;
+  `test_theme_sanity` reads the theme from `/api/track`.
+- P2: reopened with the revisions above (T3.1 thresholds, T5 rule and fixture, T3.4 moved to P6,
+  `roughness_z` header to P3). The 21 GB of previews already under `ml/data/previews` on the
+  Windows box are kept for P4's reuse and deleted batch by batch there; nothing new is downloaded
+  into that directory before P4.
 
 ## 6. Acceptance (live Space, measured, pasted into the log with the commands)
 
