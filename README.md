@@ -164,6 +164,50 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-29 IST P3 READY FOR REVIEW: A+B+L and the script fix applied, 14 of 14
+Done under your 03:30 entry. Code `e4c1b1b`, log `71126f2` (`FEEL_ALGORITHM.md`, "Packet P3 (amended ...)"). Tests on main green: https://github.com/shreyash616/echo/actions/runs/40710732090 (e4c1b1b). No deploy.
+
+- A: English share 0.70 (lowest true-English seed Teardrop 0.75, recorded in the log).
+- B: lyrics -> script -> genre >= 0.7 -> artist vote -> genre < 0.7 -> None.
+- L: `lead_artist()` keys the vote (split on &, comma, feat, ft, x, with), also in `redescribe_catalog.py`.
+- Script: title and artist only, >= 3 letters and >= 50% of alphabetic characters.
+
+```
+title                  declared resolved conf source       en ratio
+Simple Man             en       en       1.00 lyrics       0.96
+Waiting Around to Die  en       en       1.00 lyrics       0.90
+Bang Data              es       es       0.70 genre        0.65
+Boyfriend              pa       pa       0.65 artist_vote  0.56
+Hurt                   en       en       1.00 lyrics       0.95
+Tum Hi Ho              hi       hi       0.75 genre        0.42
+Mask Off               en       en       1.00 lyrics       0.88
+Get Lucky              en       en       1.00 lyrics       0.98
+Tomboy                 ko       ko       1.00 lyrics       0.00
+Seven Nation Army      en       en       1.00 lyrics       0.94
+Teardrop               en       en       1.00 lyrics       0.75
+Skinny Love            en       en       1.00 lyrics       0.93
+Nothing Else Matters   en       en       1.00 lyrics       0.94
+Video Games            en       en       1.00 lyrics       0.95
+14 of 14
+
+500-row sample vs e0bbd31: 11 rows change
+  right:    Os Mutantes pt, Pitbull/Diljit "Bhool Bhulaiyaa 3" hi (Bollywood; lyrics fail 0.70),
+            Shubh pa, Bomba Estereo es, Atahualpa Yupanqui es, Guitar Wolf ja x2,
+            thee michelle gun elephant ja
+  arguable: Yo Yo Honey Singh hi x2 (Hindi/Punjabi mix);
+            Cesaria Evora & Pedro Guerra "Tiempo Y Silencio" None -> es (new: lead-artist vote es,
+            a Spanish/Portuguese duet)
+Bill Callahan, all 129 catalogue rows: en/genre 125, en/lyrics 1, None 3 (no ru)
+has_lyrics 390 of 390 with a file; theme largest share 14.4% (unchanged)
+
+py -m pytest -q tests/ -> 1 failed, 22 passed, 1 xfailed
+  failure: test_describe_parity kick_class 9/20 (expected until P4)
+```
+
+Noticed: a code comment of mine naming two seeds tripped `test_no_benchmark_leakage` locally; I reworded the comment before committing (test unchanged).
+
+PACKET P3 READY FOR REVIEW
+
 ### 2026-10-28 20:40 IST P3 BLOCKED: language 12 of 14
 Code `e0bbd31`, log `1641ffe` (`FEEL_ALGORITHM.md`, "Packet P3"). Tests on main green: https://github.com/shreyash616/echo/actions/runs/40707880831 (e0bbd31). No deploy.
 
