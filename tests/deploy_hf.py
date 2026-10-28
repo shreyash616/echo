@@ -30,6 +30,9 @@ artifacts_to_upload = [
     ("ml/inference/theme_prompts.json", "theme_prompts.json"),
     ("ml/inference/rerank_weights.json", "rerank_weights.json"),
     ("ml/data/HARVEST_MANIFEST.json", "HARVEST_MANIFEST.json"),
+    ("ml/data/clap.npy", "ml/data/clap.npy"),
+    ("ml/data/catalog_features.jsonl", "ml/data/catalog_features.jsonl"),
+    ("ml/data/playlist_membership.jsonl", "ml/data/playlist_membership.jsonl"),
 ]
 
 print("--- Uploading artifacts to dataset:", dataset_id, "---")

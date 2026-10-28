@@ -116,9 +116,11 @@ def extract_raw_feel(r: dict) -> list[float]:
 def main():
     logger.info("=== Starting Step R4: Index Build & Quantile Bucketing ===")
 
-    # 1. Load catalog features
+    # 1. Load catalog features (download from HF dataset if absent)
     if not CATALOG_FEATURES_PATH.exists():
-        raise FileNotFoundError(f"Missing {CATALOG_FEATURES_PATH}. Run harvest_v2.py first.")
+        logger.info("Downloading catalog_features.jsonl from HF dataset shreyash616/echo-ml-artifacts...")
+        from huggingface_hub import hf_hub_download
+        hf_hub_download(repo_id="shreyash616/echo-ml-artifacts", filename="ml/data/catalog_features.jsonl", repo_type="dataset", local_dir=".")
 
     raw_tracks: list[dict] = []
     with open(CATALOG_FEATURES_PATH, "r", encoding="utf-8") as f:
@@ -131,9 +133,11 @@ def main():
     if N < 20000:
         raise ValueError(f"Expected at least 20,000 tracks, got {N}")
 
-    # 2. Load CLAP embeddings
+    # 2. Load CLAP embeddings (download from HF dataset if absent)
     if not CLAP_NPY_PATH.exists():
-        raise FileNotFoundError(f"Missing {CLAP_NPY_PATH}")
+        logger.info("Downloading clap.npy from HF dataset shreyash616/echo-ml-artifacts...")
+        from huggingface_hub import hf_hub_download
+        hf_hub_download(repo_id="shreyash616/echo-ml-artifacts", filename="ml/data/clap.npy", repo_type="dataset", local_dir=".")
 
     embs = np.load(CLAP_NPY_PATH)
     if embs.ndim == 3:

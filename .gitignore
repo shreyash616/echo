@@ -26,8 +26,16 @@
 /ml/experiments/cache
 /ml/checkpoints
 
-# ml/inference artifacts are tracked via Git LFS — do not ignore them
-/ml/inference/embeddings.npy
+# Large binaries (HF dataset shreyash616/echo-ml-artifacts is the single home)
+ml/inference/music_index.faiss
+ml/inference/track_metadata.json
+ml/data/clap.npy
+ml/data/catalog_features.jsonl
+ml/data/playlist_membership.jsonl
+ml/inference/feel_matrix.npy
+ml/inference/feel_index.faiss
+ml/inference/embeddings.npy
+scratch/
 
 # Python cache
 __pycache__

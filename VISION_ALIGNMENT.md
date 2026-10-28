@@ -1,5 +1,7 @@
 # Echo: aligning the engine with the "feel" vision
 
+> This document is superseded by FEEL_ALGORITHM.md and FIX_PLAN.md. Its phase list and line numbers are historical.
+
 Status: plan, written 2026-10-26 against commit `ee863aa` on `main`. All `file:line`
 references are from that commit. Re-grep before editing; do not trust a line number blindly.
 

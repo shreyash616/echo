@@ -3,8 +3,7 @@ ml/training/train_adapter.py: Step R7 Linear Adapter from Playlist Co-occurrence
 
 Model: Linear(512, 128) on the frozen official LAION CLAP vector, L2-normalised output.
 Loss: InfoNCE with temperature 0.07, in-batch negatives.
-Output: ml/inference/adapter.npz (W, b), with MANIFEST entry: pairs used, epochs, TUNE before/after.
-Gate: on the 11.9 TUNE split, recall@20 with the adapter must be >= recall@20 without it.
+Output: ml/inference/adapter.npz (W, b), with MANIFEST entry: pairs used, epochs, final loss.
 """
 from __future__ import annotations
 
