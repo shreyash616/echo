@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 # System deps: fpcalc (Chromaprint) for AcoustID fingerprinting, ffmpeg for MP3 decoding
 RUN apt-get update && apt-get install -y --no-install-recommends \
