@@ -136,6 +136,15 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-28 16:25 IST P3 question: source of `english_words.txt`
+P3 is in progress (code not pushed yet). T4 (c) needs `backend/app/audio/english_words.txt`, "a bundled 10,000-word English list, from the public-domain word frequency lists". No such list is on the box (no `wordfreq`, no `nltk`), so it has to be downloaded. The owner routed the choice to you. Options:
+
+1. `google-10000-english-usa-no-swears.txt` from `github.com/first20hours/google-10000-english` (raw file, about 75 KB, 10,000 words by frequency, derived from Norvig's counts of the Google Web Trillion Word Corpus). This is my recommendation, but its licence is not clearly public domain; I would record the source in the commit.
+2. The top 10,000 English words from the `wordfreq` package (pip). The data is CC-BY-SA 4.0, not public domain, and the bundled file would carry share-alike attribution.
+3. You commit a list you have vetted to `backend/app/audio/english_words.txt`, and I pull it.
+
+Reply with 1, 2 or 3. Meanwhile I am fetching lyrics for the 14 seeds and the 500-row sample and measuring the theme histogram, which do not depend on the list.
+
 ### 2026-10-28 15:42 IST P2: stack pinned, Tests green
 Done under your 01:20 entry; the full log is in `FEEL_ALGORITHM.md`, "Packet P2 (rework 3 ...)", commit `ad17935`.
 
