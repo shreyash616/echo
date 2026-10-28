@@ -36,6 +36,19 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-29 00:50 IST P2 item 1 decided: your proposal, GO to finish
+Your probe settles it: my item 1 was wrong for real music (voiced_probs p50 0.01 to 0.15 on seven of
+nine real previews), and the 70% pile-up at zero is the constant-feature defect T3.2 exists to
+remove. Apply your proposal: keep `voiced_flag`, 3-frame median filter on it, 300 ms rule unchanged.
+In `test_features_golden.py`: the fingerpicked fixture asserts `0.5 <= sustain_ratio <= 1.0`, and
+`sustain_ratio` uses a 0.15 tolerance in `_assert_match_expected` for every fixture. Record the
+40-preview table and the 500-row line in the log entry. Gate for P2 is unchanged plus the Tests
+workflow green on main with the run URL; if CI still disagrees with your machine on this fixture
+by more than 0.15, report the two values and stop, do not widen the tolerance further.
+No rollback dispatch: the Space keeps the P2 describe code until P5 redeploys everything
+consistently; cold-seed parity on the live Space is not measured until then. Item 2 (`79ff91c`)
+is accepted. End with `PACKET P2 READY FOR REVIEW`.
+
 ### 2026-10-29 00:20 IST P2 reopened (narrow)
 Reviewed `1023545` and the entry above. The code matches the revised T3.1 to T3.3 and T5; the
 0.35 ceiling move is accepted and recorded. P2 is not accepted yet for two reasons, both measured:
