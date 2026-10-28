@@ -1403,3 +1403,36 @@ Run these in a browser against the Space after each gate; if any fails, the gate
 - Local verification is unchanged since `17165b8` (no feature code changed): golden plus octave 13 passed; 500-row sample saturation std 0.146, sustain std 0.102 with 18.40% at 1.0, darkness std 0.116, max kick class 43.6%.
 - The Dockerfile change (Python 3.13, `--no-deps` laion_clap) takes effect at P5's dispatch; the Space still runs its 1023545 image.
 - Status: PACKET P2 READY FOR REVIEW.
+
+### Packet P3: T4 language, T8 theme from lyrics, build_index header (FIX_PLAN_2.md section 5, GO 10f9070)
+- Started: 2026-10-28 after GO P3 (10f9070); word-list source settled in 0456d3e.
+- Files: `backend/app/audio/features.py` (language only), `backend/app/audio/english_words.txt` (new), `backend/app/models/schemas.py` and `backend/app/api/routes.py` (`language_source` only), `ml/data/harvest_v2.py`, `ml/data/redescribe_catalog.py`, `ml/inference/build_index_v2.py`, `FEEL_ALGORITHM.md`. Code in `e0bbd31`.
+- T4: lyrics are accepted only when (a) > 50% of lyric letters are non-Latin, (b) lingua gives a listed Latin-script language (es fr pt it de nl sv pl tr id tl) at >= 0.9 with >= 60 words, or (c) lingua gives en and >= 55% of tokens are in `english_words.txt`. Otherwise script -> genre map -> artist vote -> None. lingua gains pl, id, tl. The old Indic override is removed. `language_source` is stored and returned by the API.
+- T8: theme comes only from lyrics; the anchor-prompt fallback is removed from `redescribe_catalog.py`. `has_lyrics` is true only when a lyric file exists. Lyrics come from LRCLIB (<= 2 req/s, retry with backoff on 429/5xx). In `harvest_v2.py`: lyric filenames fixed (the old f-string regex produced underscore-only names); the 3-value `language_from_meta` unpack fixed.
+- build_index_v2: header `cut_points.roughness_z.p95`; the `quantize_kick_and_restraint` call passes beat_low_ratio, off_beat_ratio and pulse_clarity.
+- Verification 2026-10-28, lyric fetch for the 14 seeds + 500-row sample (514 rows): had 20, fetched 384, none on LRCLIB 50, 60 still 503 after retries (counted as no lyrics below).
+- Verification 2026-10-28, 14 seeds, local describe with lyric files (en ratio = share of tokens in the English list):
+
+  | title | declared | resolved | conf | source | en ratio |
+  |---|---|---|---|---|---|
+  | Simple Man | en | en | 1.00 | lyrics | 0.96 |
+  | Waiting Around to Die | en | en | 1.00 | lyrics | 0.90 |
+  | Bang Data | es | **en** | 1.00 | lyrics | 0.65 |
+  | Boyfriend | pa | **en** | 1.00 | lyrics | 0.56 |
+  | Hurt | en | en | 1.00 | lyrics | 0.95 |
+  | Tum Hi Ho | hi | hi | 0.75 | genre | 0.42 |
+  | Mask Off | en | en | 1.00 | lyrics | 0.88 |
+  | Get Lucky | en | en | 1.00 | lyrics | 0.98 |
+  | Tomboy | ko | ko | 1.00 | lyrics | 0.00 |
+  | Seven Nation Army | en | en | 1.00 | lyrics | 0.94 |
+  | Teardrop | en | en | 1.00 | lyrics | 0.75 |
+  | Skinny Love | en | en | 1.00 | lyrics | 0.93 |
+  | Nothing Else Matters | en | en | 1.00 | lyrics | 0.94 |
+  | Video Games | en | en | 1.00 | lyrics | 0.95 |
+
+  **12 of 14 (gate 14 of 14): fail.** Bang Data: the Google 10k list holds common Spanish tokens (y, mi, que, te). Boyfriend: LRCLIB has a 48-token fragment; genre "Pop" maps to en; the artist field is "Karan Aujla & Ikky", so the full-string artist vote finds no votes.
+- Measured, not applied (scratch only, features.py unchanged): A = English share 0.70; B = artist vote ahead of genre matches below 0.7 confidence; L = vote keyed on the lead artist (split on &, comma, feat, ft, x, with). Seeds: as written 12/14, A 13/14, A+B (full-string key) 13/14, **A+B+L 14/14**. 500-row sample with A+B+L: 11 rows change, all from en: Os Mutantes pt, Shubh pa, Bomba Estereo es, Atahualpa Yupanqui es, Guitar Wolf ja x2, thee michelle gun elephant ja, Yo Yo Honey Singh hi x2, Pitbull/Diljit "Bhool Bhulaiyaa 3" hi, Bill Callahan **ru (wrong)**. The ru comes from the script rule: 11 Bill Callahan rows carry a Cyrillic letter in the album title (YTI⅃AƎЯ), which B spreads through the vote.
+- Verification 2026-10-28, 500-row sample, theme from lyrics only: lyric files 390; has_lyrics true 390; has_lyrics without a file 0. Theme non-null 320, null 180. Histogram of non-null: celebration 14.4%, escape 13.4%, swagger 11.9%, wonder 11.9%, defiance 11.6%, longing 10.9%, heartbreak 7.2%, grief 6.6%, resignation 6.6%, devotion 5.6%. Largest 14.4% (gate <= 30%): pass.
+- Verification 2026-10-28: Tests workflow on main **green**: https://github.com/shreyash616/echo/actions/runs/40707880831 on `e0bbd31`, all test steps passed.
+- Verification 2026-10-28: `py -m pytest -q tests/` -> 1 failed, 22 passed, 1 xfailed in 174.22s. The failure is `test_describe_parity` kick_class 9/20 (restraint and felt_bpm pass): stored labels predate T5, as recorded in P2; measured in P4 after the redescribe. CI skips it.
+- Status: PACKET P3 BLOCKED (language gate 12 of 14).
