@@ -1,1 +1,2 @@
 
+Pull main (c01f7f6). P0 and P1: GO, both reproduced from my side. P2 is reopened with revisions in FIX_PLAN_2.md section 4 (T3.1 thresholds as you measured; T5 rewritten with absolute thresholds and the Table 11.2 fixtures kept as authority, plus a fingerpicked fixture) and section 5 (T3.4 moved to P6, the roughness_z header write to P3, the previews directory kept for P4). Finish P2 under the revised text, paste the verification block, and end with PACKET P2 READY FOR REVIEW.
