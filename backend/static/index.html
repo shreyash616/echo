@@ -1050,7 +1050,6 @@
 
           <div class="hero-stats" id="heroStats">
             <span id="statBpm" class="stat-pill" style="display:none;"></span>
-            <span id="statKey" class="stat-pill" style="display:none;"></span>
             <span id="statEnergy" class="stat-pill" style="display:none;"></span>
             <span id="statEra" class="stat-pill" style="display:none; color:var(--teal); font-weight:700;"></span>
           </div>
@@ -1569,22 +1568,11 @@
       // Hero Acoustic Stats (BPM, Key, Energy, Era)
       const statBpm = document.getElementById('statBpm');
       if (statBpm) {
-        if (hero.felt_bpm || hero.bpm) {
-          statBpm.textContent = hero.felt_bpm ? `🎵 ${hero.bpm} BPM (Felt ${hero.felt_bpm})` : `🎵 ${hero.bpm} BPM`;
+        if (hero.felt_bpm) {
+          statBpm.textContent = `🎵 ${hero.felt_bpm} BPM`;
           statBpm.style.display = 'inline-flex';
         } else {
           statBpm.style.display = 'none';
-        }
-      }
-
-      const statKey = document.getElementById('statKey');
-      if (statKey) {
-        if (hero.key && hero.key !== '—') {
-          const camelotPart = hero.camelotKey ? ` (${hero.camelotKey})` : '';
-          statKey.textContent = `🎹 ${hero.key}${camelotPart}`;
-          statKey.style.display = 'inline-flex';
-        } else {
-          statKey.style.display = 'none';
         }
       }
 

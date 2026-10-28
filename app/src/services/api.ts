@@ -2,7 +2,7 @@ const BASE_URL = 'https://shreyash616-echo-backend.hf.space';
 
 export interface TrackResult {
   id: string;
-  key?: string;
+  key?: string; // canonical artist:title catalogue key, never displayed
   title: string;
   artist: string;
   album: string;
@@ -14,11 +14,8 @@ export interface TrackResult {
   theme?: string; // canonical human emotional theme (Section 12.3)
   matchReasons?: string[];
   languageAffinity?: number;
-  bpm: number;
   felt_bpm?: number;
-  key: string;
-  energy: number; // 0-1
-  valence: number; // 0-1
+  energy?: number; // 0-1
 }
 
 export interface IdentifyResponse {

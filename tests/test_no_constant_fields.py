@@ -73,6 +73,8 @@ def run_no_constant_fields_test(base_url: str):
     s_resp = client.get("/api/search?q=Simple Man Lynyrd Skynyrd")
     assert s_resp.status_code == 200
     s_data = s_resp.json()
+    if isinstance(s_data, dict):
+        s_data = s_data.get("results", [])
     assert s_data, "Simple Man not found in search"
     sm_id = s_data[0]["id"]
     sm_key = s_data[0].get("key")

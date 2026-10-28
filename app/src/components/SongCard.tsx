@@ -58,12 +58,14 @@ export const SongCard: React.FC<Props> = ({
               {track.theme ? <VibeTag label={`Theme: ${track.theme}`} /> : null}
             </View>
           )}
-          {track.bpm > 0 && (
+          {((track.felt_bpm && track.felt_bpm > 0) || track.energy !== undefined) && (
             <View style={styles.statsRow}>
-              <Stat label="BPM" value={String(track.bpm)} />
-              {track.key && track.key !== '—' && <Stat label="KEY" value={track.key} />}
-              <Stat label="ENERGY" value={`${Math.round(track.energy * 100)}%`} />
-              <Stat label="VALENCE" value={track.valence > 0.5 ? 'Happy' : 'Dark'} />
+              {track.felt_bpm && track.felt_bpm > 0 ? (
+                <Stat label="BPM" value={String(track.felt_bpm)} />
+              ) : null}
+              {track.energy !== undefined ? (
+                <Stat label="ENERGY" value={`${Math.round(track.energy * 100)}%`} />
+              ) : null}
             </View>
           )}
         </View>

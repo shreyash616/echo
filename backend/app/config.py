@@ -7,9 +7,6 @@ class Settings(BaseSettings):
     # AcoustID (audio fingerprinting) — https://acoustid.org/login
     acoustid_api_key: str = ""
 
-    # Last.fm API — https://www.last.fm/api/account/create (free)
-    lastfm_api_key: str = ""
-
     # Spotify Developer App (for 1-click playlist creation) — https://developer.spotify.com/dashboard
     spotify_client_id: str = ""
     spotify_redirect_uri: str = ""

@@ -44,82 +44,25 @@ Echo computes all musical, emotional, and similarity metrics directly from the r
 
    * **Vibe Tags (`vibes`)**: Automatically derived from the track's computed acoustic and emotional dimensions (`"adrenaline"`, `"energetic"`, `"driving"`, `"soothing"`, `"dark"`, `"uplifting"`, `"melodic"`, `"bass-heavy"`, etc.).
 
-4. **Composite Similarity Scoring & Strict Genre + Language Matching (`backend/app/api/routes.py`)**:
+4. **Feel Scoring Pipeline (`backend/app/services/recommender.py`)**:
 
-   * **Genre & Language Gate**: Detects the source song's language and canonical genre family using Deezer album genres, Last.fm artist tags, Unicode script detection (Devanagari, Gurmukhi, Tamil, Telugu, Hangul, Kana, Arabic, Cyrillic), and Deezer's `/artist/{id}/related` scene graph—avoiding statistical `langdetect` false positives on short English titles.
+   * **No Hard Gates / Soft Language Prior**: Echo has no hard genre, artist, or language gates. Recommendations are retrieved via candidate pool union (CLAP top 500 + Feel top 600) and reranked using the feel descriptor table (Section 12.6 of `FEEL_ALGORITHM.md`), with a soft empirical language affinity prior (`language_affinity.json`) and supply-scaled cross-language budget via MMR.
 
-   * **Composite Score**: Ranks genre- and language-matched candidates using:
+   * **Multi-Axis Feel Scoring**: Ranks candidate pool using continuous audio descriptors:
+     * Official LAION CLAP acoustic embedding cosine similarity
+     * Anchor vibes profile similarity
+     * Felt-tempo distribution overlap with octave invariance
+     * Groove and kick-class compatibility
+     * Darkness, grit, vocal presence, intimacy, and restraint matching
+     * Standardized whole-lyric semantic theme similarity
 
-     * `65%` `CnnMusicEncoder` multi-crop neural cosine similarity,
+## 2. Indexing Workflow
 
-     * `15%` self-computed `(energy, valence)` proximity,
+The catalog is built from decoded 30s previews described by DSP feature extractors and embedded with official LAION CLAP:
 
-     * `10%` self-computed `bpm` tempo compatibility (with double-time / half-time octave equivalence),
-
-     * `10%` self-computed `key` compatibility on the Circle of Fifths.
-
-## 2. Training & Indexing Workflows
-
-### Option A: Harvest Raw 30s Previews of Recognizable Mainstream Songs (Recommended)
-
-To train and build your FAISS index on real commercial songs while still generating 100% of the spectrograms, embeddings, and audio metrics yourself:
-
-```
-# 1. Harvest raw 30s preview audio & extract fixed-floor .npy spectrograms
-python ml/data/harvest_deezer_previews.py \
-    --output-specs ml/data/deezer_spectrograms \
-    --output-json  ml/data/deezer_catalog.json \
-    --tracks-per-query 50
-
-# 2. Train CnnMusicEncoder with emotion-preserving contrastive augmentations
-python ml/training/train.py \
-    --spec-dir ml/data/deezer_spectrograms \
-    --output   ml/checkpoints \
-    --epochs   60 \
-    --batch    256
-
-# 3. Export trained encoder to ONNX
-python ml/inference/export_onnx.py \
-    --checkpoint ml/checkpoints/best_model.pt \
-    --output     ml/inference/music_encoder.onnx
-
-# 4. Build FAISS index with multi-crop pooling & self-generated audio metrics
-python ml/inference/build_index.py \
-    --spec-dir     ml/data/deezer_spectrograms \
-    --catalog-json ml/data/deezer_catalog.json \
-    --onnx-model   ml/inference/music_encoder.onnx \
-    --output-dir   ml/inference
-
-```
-
-### Option B: Train & Index on FMA Audio
-
-```
-# 1. Preprocess FMA audio to fixed-floor mel spectrograms
-python ml/data/preprocess.py \
-    --audio-dir  ml/data/fma_large/fma_large \
-    --output-dir ml/data/spectrograms \
-    --sr         22050
-
-# 2. Train CnnMusicEncoder
-python ml/training/train.py \
-    --spec-dir ml/data/spectrograms \
-    --output   ml/checkpoints \
-    --epochs   60 \
-    --batch    256
-
-# 3. Export to ONNX
-python ml/inference/export_onnx.py \
-    --checkpoint ml/checkpoints/best_model.pt \
-    --output     ml/inference/music_encoder.onnx
-
-# 4. Build FAISS index (always pass --tracks-csv so titles/artists/genres are populated)
-python ml/inference/build_index.py \
-    --spec-dir   ml/data/spectrograms \
-    --tracks-csv ml/data/fma_metadata/fma_metadata/tracks.csv \
-    --onnx-model ml/inference/music_encoder.onnx \
-    --output-dir ml/inference
-
+```bash
+# Build FAISS index, feel matrix, and metadata bundles
+python ml/inference/build_index_v2.py
 ```
 
 ## 3. Running the Backend & Mobile App

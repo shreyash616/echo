@@ -12,7 +12,6 @@ files_to_upload = [
     ("backend/app/services/recommender.py", "app/services/recommender.py"),
     ("backend/app/services/audio_recognition.py", "app/services/audio_recognition.py"),
     ("backend/app/services/language_affinity.py", "app/services/language_affinity.py"),
-    ("backend/app/services/lastfm.py", "app/services/lastfm.py"),
     ("backend/app/services/lyrics.py", "app/services/lyrics.py"),
     ("backend/app/api/routes.py", "app/api/routes.py"),
     ("backend/requirements.txt", "requirements.txt"),
