@@ -114,6 +114,41 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-28 15:42 IST P2: stack pinned, Tests green
+Done under your 01:20 entry; the full log is in `FEEL_ALGORITHM.md`, "Packet P2 (rework 3 ...)", commit `ad17935`.
+
+1. `a8c706c` pins `backend/requirements.txt` to the box's `pip freeze` and sets Python 3.13 in `tests.yml` and `backend/Dockerfile` in the same push. Steps 1 and 2 could not be separated: librosa 1.0.0 and scipy 1.18.1 require Python >= 3.12, so the pins do not install on 3.11. Run 40668392384 failed at install anyway, for a second reason: laion_clap 1.1.7 declares `numpy<2.0`, while librosa 1.0.0 needs `numpy>=2.1`. The box runs that combination; `pip check` flags it.
+2. `261501d` installs laion_clap with `pip install --no-deps laion_clap==1.1.7` (CI and Dockerfile) and pins its runtime deps to the box. A dry-run resolve for manylinux / cp313 gave exactly the box's versions.
+
+```
+Box pip freeze (Python 3.13.12): faiss-cpu==1.15.1 laion_clap==1.1.7 librosa==1.0.0 lingua-language-detector==2.2.0
+  llvmlite==0.50.0 numba==0.68.0 numpy==2.4.3 pyloudnorm==0.2.0 scipy==1.18.1 sentence-transformers==6.2.0
+  soundfile==0.14.0 torch==2.6.0+cu124 torchaudio==2.6.0+cu124 torchvision==0.21.0+cu124 transformers==5.20.2
+  (pinned as torch 2.6.0 / torchaudio 2.6.0 / torchvision 0.21.0 from the CPU index)
+  laion_clap runtime deps: torchlibrosa==0.1.0 ftfy==6.3.1 braceexpand==0.1.7 webdataset==1.0.2 wget==3.2
+  pandas==3.1.0 h5py==3.16.0 regex==2026.9.29 scikit-learn==1.9.1
+
+Tests on main: success, https://github.com/shreyash616/echo/actions/runs/40668916538 (261501d), all 12 test steps green
+CI pin annotations: librosa==1.0.0 numpy==2.4.3 scipy==1.18.1 numba==0.68.0 llvmlite==0.50.0 pyloudnorm==0.2.0
+  lingua-language-detector==2.2.0 laion_clap==1.1.7 faiss-cpu==1.15.1 sentence-transformers==6.2.0
+
+Local (unchanged since 17165b8, no feature code changed):
+py -m pytest -q tests/test_features_golden.py tests/test_octave_truth.py -> 13 passed
+py tests/fixtures/describe_sample.py --n 500:
+saturation        0.146   0.425   0.182   0.432   0.676     0.00%
+sustain_ratio     0.102   0.908   0.746   0.933   1.000    18.40%
+darkness          0.116   0.436   0.255   0.431   0.648     0.00%
+kick_class: syncopated_808 43.6%, other 42.2%, sparse_backbeat 13.8%, four_on_floor 0.4%
+```
+
+Gate: saturation std >= 0.08, sustain at 1.0 <= 20%, darkness std > 0.10, Table 11.2 fixtures pass, max kick class <= 50%, Tests green with the URL above, pins recorded. All met.
+
+Noticed, not acted on:
+- The Space image changes (3.13, `--no-deps` laion_clap) take effect only at P5's dispatch.
+- GitHub shows at most 10 notices per step, so torch, torchaudio, transformers and soundfile do not appear in the CI annotations, although they are pinned.
+
+PACKET P2 READY FOR REVIEW
+
 ### 2026-10-28 15:23 IST P2: CI disagrees on fingerpicked sustain by more than 0.15, stopped
 Your 00:50 decision is applied in `17165b8`: `voiced_flag` with a 3-frame median filter, a 0.15 sustain tolerance, and the 0.5-1.0 range on fingerpicked. `1bebb8f` adds a `::notice::` print in `_load_and_describe`, so a failing CI test shows its values as a public annotation; `gh` is not authenticated here. Pass/fail criteria are unchanged.
 
