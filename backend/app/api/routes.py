@@ -521,8 +521,7 @@ async def _resolve_and_describe_track(track_id: str, key: str | None = None) -> 
             promise = _describe_promises[dedup_key]
         else:
             loop = asyncio.get_running_loop()
-            create_f = getattr(loop, "create_" + "fut" + "ure")
-            promise = create_f()
+            promise = loop.create_future()
             _describe_promises[dedup_key] = promise
             is_initiator = True
 
@@ -601,24 +600,57 @@ async def get_track_detail(
     return _to_track(rec)
 
 
-@router.get("/recommendations/{track_id}", response_model=list[TrackResult])
+@router.get("/recommendations/{track_id}")
 async def get_recommendations(
     track_id: str,
     key: str | None = Query(None, description="Canonical artist:title key"),
     diversity: float = Query(0.70, ge=0.0, le=1.0, description="MMR trade-off: 1.0=pure match, 0.5=high discovery"),
     cross_language_max: int = Query(6, ge=0, le=20, description="Maximum cross-language tracks allowed in final slate"),
-) -> list[TrackResult]:
+    debug: int = Query(0, description="Debug mode: return axes, weights, pool_source, and candidate pool"),
+):
     """
     Step 11.7 / 12.5 Serving Path:
     If track_id or key is in catalogue or extra_records, recommend directly in < 300 ms.
     If cold seed, resolve/describe once with in-flight deduplication, and recommend.
+    If debug=1, return axes, weights, pool_source, and candidate_pool.
     """
     t0 = time.perf_counter()
-    logger.info("recommendations | track_id=%s key=%s diversity=%.2f", track_id, key, diversity)
+    logger.info("recommendations | track_id=%s key=%s diversity=%.2f debug=%d", track_id, key, diversity, debug)
 
     seed_rec = recommender.get_track_record(track_id=track_id, key=key)
     if seed_rec is None:
         seed_rec = await _resolve_and_describe_track(track_id=track_id, key=key)
+
+    if debug == 1:
+        recs, pool = await asyncio.to_thread(
+            recommender.recommend,
+            seed=seed_rec,
+            k=settings.max_recommendations,
+            cross_language_max=cross_language_max,
+            diversity=diversity,
+            debug=True,
+            return_pool=True,
+        )
+        debug_results = []
+        for r in recs:
+            td = _to_track(r).model_dump(exclude_none=True)
+            td["axes"] = r.get("axes", {})
+            td["weights"] = r.get("weights", {})
+            td["pool_source"] = r.get("pool_source", "clap")
+            debug_results.append(td)
+        logger.info("recommendations | track_id=%s key=%s debug=1 elapsed=%.3fs", track_id, key, time.perf_counter() - t0)
+        return {
+            "results": debug_results,
+            "candidate_pool": [
+                {
+                    "id": str(c.get("id", "")),
+                    "title": str(c.get("title", "")),
+                    "artist": str(c.get("artist", "")),
+                    "pool_source": str(c.get("pool_source", "")),
+                }
+                for c in pool
+            ],
+        }
 
     recs = await asyncio.to_thread(
         recommender.recommend,
@@ -626,6 +658,8 @@ async def get_recommendations(
         k=settings.max_recommendations,
         cross_language_max=cross_language_max,
         diversity=diversity,
+        debug=False,
+        return_pool=False,
     )
     logger.info("recommendations | track_id=%s key=%s elapsed=%.3fs", track_id, key, time.perf_counter() - t0)
     return [_to_track(r) for r in recs]

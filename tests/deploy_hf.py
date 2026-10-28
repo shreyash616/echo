@@ -23,6 +23,8 @@ files_to_upload = [
 dataset_id = "shreyash616/echo-ml-artifacts"
 artifacts_to_upload = [
     ("ml/inference/music_index.faiss", "music_index.faiss"),
+    ("ml/inference/feel_matrix.npy", "feel_matrix.npy"),
+    ("ml/inference/feel_index.faiss", "feel_index.faiss"),
     ("ml/inference/track_metadata.json", "track_metadata.json"),
     ("ml/inference/track_id_map.json", "track_id_map.json"),
     ("ml/inference/anchors.json", "anchors.json"),

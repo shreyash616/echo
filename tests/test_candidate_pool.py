@@ -20,8 +20,18 @@ BENCHMARK_PATH = os.path.abspath("tests/feel_benchmark_v2.json")
 
 
 def _norm(s: str) -> str:
+    import unicodedata
     import re
-    return re.sub(r"[^\w\s]", "", str(s).lower()).strip()
+    clean = "".join(c for c in unicodedata.normalize("NFKD", str(s)) if not unicodedata.combining(c))
+    return re.sub(r"[^\w\s]", "", clean.lower()).strip()
+
+
+OWNER_POSITIVES_MAP = {
+    "Simple Man": ["When the Levee Breaks", "Stairway to Heaven", "Rooster"],
+    "Waiting Around to Die": ["No Surprises", "Me Gustas Tu", "Black"],
+    "Bang Data": ["Tidal Wave"],
+    "Boyfriend": ["Antidote", "For A Reason", "Baller", "Roll With Me"],
+}
 
 
 def run_candidate_pool_test(base_url: str | None = None):
@@ -29,16 +39,20 @@ def run_candidate_pool_test(base_url: str | None = None):
         benchmark = json.load(f)
 
     tune_seeds = [item for item in benchmark if item.get("split") == "tune"]
+    # Filter to the 4 operative tune seeds if benchmark has more
+    tune_seeds = [item for item in tune_seeds if item["seed"]["title"] in OWNER_POSITIVES_MAP]
     assert len(tune_seeds) == 4, f"Expected 4 tune seeds, found {len(tune_seeds)}"
 
     client = httpx.Client(base_url=base_url or "http://localhost:8000", timeout=30.0)
 
     total_owner_positives = 0
     positives_in_pool = 0
+    all_benchmark_positives = 0
+    all_in_pool = 0
     process_times = []
 
     print("\n" + "=" * 95)
-    print(f"CANDIDATE POOL MEASUREMENT (S1)")
+    print("CANDIDATE POOL MEASUREMENT (S1)")
     print("=" * 95)
 
     for item in tune_seeds:
@@ -46,12 +60,14 @@ def run_candidate_pool_test(base_url: str | None = None):
         seed_title = seed["title"]
         seed_artist = seed["artist"]
         positives = item.get("positives", [])
+        owner_targets = [_norm(t) for t in OWNER_POSITIVES_MAP.get(seed_title, [])]
 
-        # Fetch recommendations with debug=1 to inspect candidate pool
         # First resolve seed ID
         search_res = client.get("/api/search", params={"q": f"{seed_title} {seed_artist}"})
         assert search_res.status_code == 200, f"Search failed for {seed_title}: {search_res.text}"
         results = search_res.json()
+        if isinstance(results, dict):
+            results = results.get("results", [])
         assert results, f"No track found for {seed_title}"
         track_id = results[0]["id"]
         track_key = results[0].get("key") or f"{_norm(seed_artist)}:{_norm(seed_title)}"
@@ -64,26 +80,44 @@ def run_candidate_pool_test(base_url: str | None = None):
             process_times.append(float(pt.replace("ms", "").strip()))
 
         rec_data = rec_res.json()
-        pool_tracks = rec_data if isinstance(rec_data, list) else rec_data.get("results", [])
+        pool_tracks = (
+            rec_data.get("candidate_pool")
+            if (isinstance(rec_data, dict) and "candidate_pool" in rec_data)
+            else (rec_data if isinstance(rec_data, list) else rec_data.get("results", []))
+        )
 
-        pool_titles_artists = [(_norm(t.get("title", "")), _norm(t.get("artist", ""))) for t in pool_tracks]
+        pool_titles_artists = [(_norm(t.get("title", "")), _norm(t.get("artist", "")), t.get("pool_source", "")) for t in pool_tracks]
 
-        print(f"\nSeed: {seed_title} by {seed_artist}")
-        print(f"  Positives:")
+        print(f"\nSeed: {seed_title} by {seed_artist} (Pool size: {len(pool_tracks)})")
+        print("  Positives:")
         for pos in positives:
-            total_owner_positives += 1
+            all_benchmark_positives += 1
             pos_t = _norm(pos["title"])
             pos_a = _norm(pos["artist"])
-            found = any(pos_t in pt and (pos_a in pa or pa in pos_a) for pt, pa in pool_titles_artists)
-            if found:
-                positives_in_pool += 1
-                print(f"    [X] {pos['title']} - {pos['artist']} (IN POOL)")
+            is_owner = any(target in pos_t or pos_t in target for target in owner_targets)
+            if is_owner:
+                total_owner_positives += 1
+
+            matched_source = None
+            for pt, pa, psrc in pool_titles_artists:
+                if (pos_t in pt or pt in pos_t) and (pos_a in pa or pa in pos_a):
+                    matched_source = psrc or "in_pool"
+                    break
+
+            if matched_source:
+                all_in_pool += 1
+                if is_owner:
+                    positives_in_pool += 1
+                mark = "[X] (OWNER)" if is_owner else "[X]"
+                print(f"    {mark} {pos['title']} - {pos['artist']} -> {matched_source.upper()}")
             else:
-                print(f"    [ ] {pos['title']} - {pos['artist']} (not in pool)")
+                mark = "[ ] (OWNER)" if is_owner else "[ ]"
+                print(f"    {mark} {pos['title']} - {pos['artist']} -> NOT IN POOL")
 
     print("\n" + "=" * 95)
-    print(f"Summary:")
-    print(f"  Owner Positives in Union Pool: {positives_in_pool} / {total_owner_positives} (Required >= 6)")
+    print("Summary:")
+    print(f"  Owner Positives in Union Pool: {positives_in_pool} / {total_owner_positives} (Required >= 6 of 11)")
+    print(f"  All Positives in Union Pool:   {all_in_pool} / {all_benchmark_positives}")
     if process_times:
         p95 = np.percentile(process_times, 95)
         print(f"  Server-side p95 Process Time:  {p95:.2f} ms (Required < 300 ms)")

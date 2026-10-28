@@ -45,6 +45,72 @@ OUT_METADATA_PATH = INFERENCE_DIR / "track_metadata.json"
 OUT_ANCHORS_PATH = INFERENCE_DIR / "anchors.json"
 OUT_THEMES_PATH = INFERENCE_DIR / "theme_prompts.json"
 OUT_ID_MAP_PATH = INFERENCE_DIR / "track_id_map.json"
+OUT_FEEL_MATRIX_PATH = INFERENCE_DIR / "feel_matrix.npy"
+OUT_FEEL_FAISS_PATH = INFERENCE_DIR / "feel_index.faiss"
+
+FEEL_AXES = [
+    "log2_felt_bpm",
+    "pulse_rate",
+    "hits_per_bar",
+    "darkness",
+    "brightness",
+    "low_share",
+    "grit",
+    "roughness",
+    "intimacy",
+    "reverb_tail",
+    "loudness_range",
+    "crest_factor",
+    "lag_ms",
+    "swing",
+    "syllable_rate",
+    "sustain_ratio",
+    "mode_polarity",
+]
+FEEL_WEIGHTS = {
+    "log2_felt_bpm": 1.5,
+    "pulse_rate": 0.8,
+    "hits_per_bar": 0.8,
+    "darkness": 1.0,
+    "brightness": 0.6,
+    "low_share": 0.5,
+    "grit": 0.8,
+    "roughness": 0.8,
+    "intimacy": 0.8,
+    "reverb_tail": 0.5,
+    "loudness_range": 0.6,
+    "crest_factor": 0.4,
+    "lag_ms": 0.5,
+    "swing": 0.4,
+    "syllable_rate": 0.6,
+    "sustain_ratio": 0.6,
+    "mode_polarity": 0.5,
+}
+
+
+def extract_raw_feel(r: dict) -> list[float]:
+    bpm = float(r.get("felt_bpm") or 100.0)
+    log2_bpm = float(np.log2(max(bpm, 10.0)))
+    mode_pol = 0.0 if r.get("mode_undefined", False) else float(r.get("mode_polarity") or 0.0)
+    return [
+        log2_bpm,
+        float(r.get("pulse_rate") or 0.0),
+        float(r.get("hits_per_bar") or 0.0),
+        float(r.get("darkness") or 0.0),
+        float(r.get("brightness") or 0.0),
+        float(r.get("low_share") or 0.0),
+        float(r.get("grit") or 0.0),
+        float(r.get("roughness") or 0.0),
+        float(r.get("intimacy") or 0.0),
+        float(r.get("reverb_tail") or 0.0),
+        float(r.get("loudness_range") or 0.0),
+        float(r.get("crest_factor") or 0.0),
+        float(r.get("lag_ms") or 0.0),
+        float(r.get("swing") or 0.0),
+        float(r.get("syllable_rate") or 0.0),
+        float(r.get("sustain_ratio") or 0.0),
+        mode_pol,
+    ]
 
 
 def main():
@@ -246,7 +312,24 @@ def main():
         )
     logger.info("kick_class passed mandatory assertion: %d classes each have >= 10%% share", len(kc_shares))
 
-    # 6. Save track_metadata.json with Header
+    # 6. Build Feel Matrix and Feel Index (S1)
+    raw_feel_mat = np.array([extract_raw_feel(r) for r in final_tracks], dtype=np.float32)
+    feel_means = np.mean(raw_feel_mat, axis=0)
+    feel_stds = np.std(raw_feel_mat, axis=0)
+    feel_stds[feel_stds == 0] = 1.0
+    feel_weights_vec = np.array([FEEL_WEIGHTS[a] for a in FEEL_AXES], dtype=np.float32)
+
+    feel_mat = ((raw_feel_mat - feel_means) / feel_stds) * feel_weights_vec
+    feel_mat = feel_mat.astype(np.float32)
+    np.save(OUT_FEEL_MATRIX_PATH, feel_mat)
+    logger.info("Saved feel matrix to %s, shape %s", OUT_FEEL_MATRIX_PATH, feel_mat.shape)
+
+    feel_index = faiss.IndexFlatL2(len(FEEL_AXES))
+    feel_index.add(feel_mat)
+    faiss.write_index(feel_index, str(OUT_FEEL_FAISS_PATH))
+    logger.info("Saved FAISS IndexFlatL2 feel index to %s with %d entries", OUT_FEEL_FAISS_PATH, feel_index.ntotal)
+
+    # 7. Save track_metadata.json with Header
     header = {
         "version": "2.0",
         "total_tracks": N,
@@ -257,6 +340,10 @@ def main():
         "anchor_stds": {anchor_keys[i]: float(anchor_stds[i]) for i in range(len(anchor_keys))},
         "theme_means": {theme_keys[i]: float(theme_means[i]) for i in range(len(theme_keys))},
         "theme_stds": {theme_keys[i]: float(theme_stds[i]) for i in range(len(theme_keys))},
+        "feel_axes": FEEL_AXES,
+        "feel_mean": {FEEL_AXES[i]: float(feel_means[i]) for i in range(len(FEEL_AXES))},
+        "feel_std": {FEEL_AXES[i]: float(feel_stds[i]) for i in range(len(FEEL_AXES))},
+        "feel_weights": FEEL_WEIGHTS,
     }
 
     metadata_payload = {
@@ -317,9 +404,10 @@ def main():
         raise RuntimeError(f"Catalogue diversity assertion failed: mean pairwise cosine={mean_50_cos:.4f} (must be < 0.90)")
 
     print("\n" + "=" * 60)
-    print("STEP R4 INDEX BUILD COMPLETED SUCCESSFULLY")
+    print("STEP R4 / S1 INDEX BUILD COMPLETED SUCCESSFULLY")
     print(f"Total Catalogue Rows:       {N}")
-    print(f"FAISS Index Total:          {index.ntotal} (dim {dim})")
+    print(f"CLAP FAISS Index Total:     {index.ntotal} (dim {dim})")
+    print(f"Feel FAISS Index Total:     {feel_index.ntotal} (dim {len(FEEL_AXES)})")
     print(f"ID Map Entries:             {len(id_map)}")
     print(f"Anchor Max Cosine:          {max_anchor_cos:.4f} (< 0.95)")
     print(f"Anchor Min Cosine:          {min_anchor_cos:.4f} (< 0.70)")

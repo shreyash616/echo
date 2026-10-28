@@ -117,6 +117,32 @@ def make_track_key(artist: str, title: str) -> str:
     return f"{_norm_artist(artist)}:{_norm_text(title)}"
 
 
+def extract_raw_feel(r: dict) -> list[float]:
+    """Extract raw 17-dimensional feel features in canonical S1 order."""
+    bpm = float(r.get("felt_bpm") or 100.0)
+    log2_bpm = float(np.log2(max(bpm, 10.0)))
+    mode_pol = 0.0 if r.get("mode_undefined", False) else float(r.get("mode_polarity") or 0.0)
+    return [
+        log2_bpm,
+        float(r.get("pulse_rate") or 0.0),
+        float(r.get("hits_per_bar") or 0.0),
+        float(r.get("darkness") or 0.0),
+        float(r.get("brightness") or 0.0),
+        float(r.get("low_share") or 0.0),
+        float(r.get("grit") or 0.0),
+        float(r.get("roughness") or 0.0),
+        float(r.get("intimacy") or 0.0),
+        float(r.get("reverb_tail") or 0.0),
+        float(r.get("loudness_range") or 0.0),
+        float(r.get("crest_factor") or 0.0),
+        float(r.get("lag_ms") or 0.0),
+        float(r.get("swing") or 0.0),
+        float(r.get("syllable_rate") or 0.0),
+        float(r.get("sustain_ratio") or 0.0),
+        mode_pol,
+    ]
+
+
 def _window_audio_frames(audio: np.ndarray, sr: int, window_sec: float) -> list[np.ndarray]:
     """Splits normalised audio into non-overlapping windows of window_sec duration. Drops final window < half duration."""
     win_len = int(sr * window_sec)
@@ -164,6 +190,20 @@ class MusicRecommender:
         self._extra_records: dict[str, dict] = {}
         self._extra_records_path: Path = Path("ml/data/extra_records.jsonl")
         self._describe_locks: dict[str, asyncio.Lock] = {}
+
+        # Feel matrix & index (S1)
+        self._feel_index: faiss.IndexFlatL2 | None = None
+        self._feel_matrix: np.ndarray | None = None
+        self._feel_axes: list[str] = [
+            "log2_felt_bpm", "pulse_rate", "hits_per_bar", "darkness", "brightness",
+            "low_share", "grit", "roughness", "intimacy", "reverb_tail",
+            "loudness_range", "crest_factor", "lag_ms", "swing", "syllable_rate",
+            "sustain_ratio", "mode_polarity"
+        ]
+        self._feel_mean: np.ndarray | None = None
+        self._feel_std: np.ndarray | None = None
+        self._feel_weights_vec: np.ndarray | None = None
+
         self._loaded: bool = False
 
     def load(self) -> None:
@@ -234,6 +274,37 @@ class MusicRecommender:
                     logger.info("Extracted CLAP matrix from FAISS index: shape %s", self._clap_matrix.shape)
             except Exception as exc:
                 logger.warning("Could not read FAISS index from %s: %s", index_path, exc)
+
+        # 4b. Feel Matrix and Feel Index (S1)
+        feel_mat_path = _resolve("ml/inference/feel_matrix.npy")
+        if feel_mat_path.exists():
+            try:
+                self._feel_matrix = np.load(str(feel_mat_path))
+                logger.info("Loaded feel matrix from %s: shape %s", feel_mat_path, self._feel_matrix.shape)
+            except Exception as exc:
+                logger.warning("Could not load feel matrix: %s", exc)
+
+        feel_idx_path = _resolve("ml/inference/feel_index.faiss")
+        if feel_idx_path.exists():
+            try:
+                self._feel_index = faiss.read_index(str(feel_idx_path))
+                logger.info("Loaded FAISS feel index from %s with %d entries", feel_idx_path, self._feel_index.ntotal)
+            except Exception as exc:
+                logger.warning("Could not load feel index: %s", exc)
+
+        # Header feel metadata
+        if self._metadata_header:
+            if "feel_axes" in self._metadata_header:
+                self._feel_axes = self._metadata_header["feel_axes"]
+            mean_dict = self._metadata_header.get("feel_mean", {})
+            std_dict = self._metadata_header.get("feel_std", {})
+            weights_dict = self._metadata_header.get("feel_weights", {})
+            if mean_dict and std_dict:
+                self._feel_mean = np.array([mean_dict.get(a, 0.0) for a in self._feel_axes], dtype=np.float32)
+                self._feel_std = np.array([std_dict.get(a, 1.0) for a in self._feel_axes], dtype=np.float32)
+                self._feel_std[self._feel_std == 0] = 1.0
+            if weights_dict:
+                self._feel_weights_vec = np.array([weights_dict.get(a, 1.0) for a in self._feel_axes], dtype=np.float32)
 
         # 5. Anchors
         anchors_path = _resolve("ml/inference/anchors.json")
@@ -371,6 +442,28 @@ class MusicRecommender:
             return self._extra_records[key]
         return None
 
+    def get_track_index(self, record: dict) -> int | None:
+        """Returns catalogue row index if record is in-catalogue, else None."""
+        if not self._loaded:
+            self.load()
+        k = record.get("key") or make_track_key(str(record.get("artist", "")), str(record.get("title", "")))
+        if k in self._track_id_map:
+            return self._track_id_map[k]
+        tid = record.get("id")
+        if tid and str(tid) in self._track_id_map:
+            return self._track_id_map[str(tid)]
+        return None
+
+    def get_feel_vector(self, record: dict) -> np.ndarray:
+        """Returns 17-dimensional weighted standardised feel vector (S1)."""
+        idx = self.get_track_index(record)
+        if idx is not None and self._feel_matrix is not None and idx < len(self._feel_matrix):
+            return self._feel_matrix[idx]
+        raw = np.array(extract_raw_feel(record), dtype=np.float32)
+        if self._feel_mean is not None and self._feel_std is not None and self._feel_weights_vec is not None:
+            return ((raw - self._feel_mean) / self._feel_std) * self._feel_weights_vec
+        return raw
+
     def get_clap_vector(self, track: dict | None) -> np.ndarray:
         """Retrieve unit-norm 512-d CLAP vector for catalogue or described track."""
         if not track:
@@ -472,7 +565,7 @@ class MusicRecommender:
         desc["raw_anchor_cosines"] = raw_anchor_cosines
         return desc
 
-    def _compute_pair_score(self, seed: dict, cand: dict) -> tuple[float, list[str]]:
+    def _compute_pair_score(self, seed: dict, cand: dict, return_debug: bool = False):
         """Compute Section 12.6 reranking features and weighted score."""
         w = self._weights
 
@@ -632,6 +725,8 @@ class MusicRecommender:
         weighted_terms.sort(key=lambda x: x[0], reverse=True)
         reasons = [FEATURE_DISPLAY_NAMES.get(k, k) for _, k in weighted_terms[:3]]
 
+        if return_debug:
+            return total_score, reasons, features, w_eff
         return total_score, reasons
 
     def recommend(
@@ -641,7 +736,9 @@ class MusicRecommender:
         cross_language_max: int = 6,
         diversity: float = 0.70,
         key: str | None = None,
-    ) -> list[dict]:
+        debug: bool = False,
+        return_pool: bool = False,
+    ):
         """
         Step 12 Recommend Path:
         1. Retrieve seed record by key or id (stored in catalogue or extra records).
@@ -700,16 +797,25 @@ class MusicRecommender:
         seed_clap = self.get_clap_vector(seed_record)
         seed_clap_2d = seed_clap.reshape(1, -1)
 
-        # 2. Retrieve candidates: ANN search k=500
-        candidate_indices: set[int] = set()
+        # 2. Retrieve candidates: Union of CLAP (500) and Feel (600) + Side Index (S1)
+        clap_indices: set[int] = set()
+        feel_indices: set[int] = set()
         side_indices: set[int] = set()
 
         if self._index is not None and self._index.ntotal > 0:
-            k_search = min(500, self._index.ntotal)
+            k_search = min(settings.candidates_clap, self._index.ntotal)
             _, I = self._index.search(seed_clap_2d, k_search)
             for idx in I[0]:
                 if idx >= 0:
-                    candidate_indices.add(int(idx))
+                    clap_indices.add(int(idx))
+
+        if self._feel_index is not None and self._feel_index.ntotal > 0:
+            seed_feel = self.get_feel_vector(seed_record).reshape(1, -1).astype(np.float32)
+            k_feel = min(settings.candidates_feel, self._feel_index.ntotal)
+            _, I_feel = self._feel_index.search(seed_feel, k_feel)
+            for idx in I_feel[0]:
+                if idx >= 0:
+                    feel_indices.add(int(idx))
 
         if self._side_index is not None and self._side_index.ntotal > 0:
             k_side = min(100, self._side_index.ntotal)
@@ -718,15 +824,22 @@ class MusicRecommender:
                 if s_idx >= 0:
                     side_indices.add(int(s_idx))
 
+        union_indices = clap_indices | feel_indices
         candidates_raw: list[dict] = []
-        for idx in candidate_indices:
+        for idx in union_indices:
             if idx < len(self._metadata):
-                candidates_raw.append(self._metadata[idx])
+                cand = dict(self._metadata[idx])
+                is_c = idx in clap_indices
+                is_f = idx in feel_indices
+                cand["pool_source"] = "both" if (is_c and is_f) else ("clap" if is_c else "feel")
+                candidates_raw.append(cand)
 
         extra_list = list(self._extra_records.values())
         for s_idx in side_indices:
             if s_idx < len(extra_list):
-                candidates_raw.append(extra_list[s_idx])
+                cand = dict(extra_list[s_idx])
+                cand["pool_source"] = "clap"
+                candidates_raw.append(cand)
 
         # Filter out seed id and matching artist:title
         filter_key = seed_key or make_track_key(seed_record.get("artist", ""), seed_record.get("title", ""))
@@ -743,11 +856,17 @@ class MusicRecommender:
         # 3. Rerank
         scored_candidates: list[tuple[dict, float, list[str]]] = []
         for cand in filtered_candidates:
-            score, reasons = self._compute_pair_score(seed_record, cand)
+            if debug:
+                score, reasons, axes_dict, w_eff_dict = self._compute_pair_score(seed_record, cand, return_debug=True)
+            else:
+                score, reasons = self._compute_pair_score(seed_record, cand, return_debug=False)
             cand_res = dict(cand)
             cand_res["matchScore"] = score
             cand_res["matchReasons"] = reasons
             cand_res["languageAffinity"] = language_affinity(seed_record.get("language"), cand.get("language"))
+            if debug:
+                cand_res["axes"] = axes_dict
+                cand_res["weights"] = w_eff_dict
             scored_candidates.append((cand_res, score, reasons))
 
         # Sort by rerank score descending
@@ -807,6 +926,8 @@ class MusicRecommender:
             selected.append(cand)
             selected_claps.append(cand_clap)
 
+        if return_pool:
+            return selected, filtered_candidates
         return selected
 
 
@@ -821,5 +942,21 @@ def describe(audio_bytes: bytes, meta: dict | None = None) -> dict:
     return recommender.describe(audio_bytes, meta=meta)
 
 
-def recommend(seed: dict, k: int = 20, cross_language_max: int = 6, diversity: float = 0.70, key: str | None = None) -> list[dict]:
-    return recommender.recommend(seed, k=k, cross_language_max=cross_language_max, diversity=diversity, key=key)
+def recommend(
+    seed: dict,
+    k: int = 20,
+    cross_language_max: int = 6,
+    diversity: float = 0.70,
+    key: str | None = None,
+    debug: bool = False,
+    return_pool: bool = False,
+):
+    return recommender.recommend(
+        seed,
+        k=k,
+        cross_language_max=cross_language_max,
+        diversity=diversity,
+        key=key,
+        debug=debug,
+        return_pool=return_pool,
+    )

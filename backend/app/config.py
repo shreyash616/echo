@@ -18,9 +18,11 @@ class Settings(BaseSettings):
     faiss_index_path: str = "../ml/inference/music_index.faiss"
     track_metadata_path: str = "../ml/inference/track_metadata.json"
 
-    # Limits
+    # Limits & Candidate Pool (S1)
     max_recommendations: int = 20
     max_audio_size_mb: int = 30
+    candidates_clap: int = 500
+    candidates_feel: int = 600
 
 
 settings = Settings()
