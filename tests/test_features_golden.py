@@ -67,7 +67,14 @@ def _load_and_describe(fixture_name: str) -> dict:
     with open(path, "rb") as f:
         raw_bytes = f.read()
     y = decode_preview(raw_bytes)
-    return describe_audio(y, sr=22050)
+    desc = describe_audio(y, sr=22050)
+    # Shown in a failing test's report; GitHub turns it into a public annotation on the run
+    print(f"::notice::{fixture_name} " + " ".join(
+        f"{k}={desc[k]:.3f}" if isinstance(desc[k], float) else f"{k}={desc[k]}"
+        for k in ("felt_bpm", "kick_class", "beat_low_ratio", "off_beat_ratio", "sustain_ratio",
+                  "saturation", "darkness", "grit", "restraint_bucket")
+    ))
+    return desc
 
 
 def test_click_72_backbeat(expected_data):
