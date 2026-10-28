@@ -1294,4 +1294,20 @@ Run these in a browser against the Space after each gate; if any fails, the gate
 - 2026-10-28: Step 3 (S1) completed. Candidate pool union (CLAP 500 + Feel 600) implemented. Standardized 17 feel axes in ml/inference/build_index_v2.py writing ml/inference/feel_matrix.npy and ml/inference/feel_index.faiss. Live Space measurement command py tests/test_candidate_pool.py --base-url https://shreyash616-echo-backend.hf.space reported 6 / 11 owner positives reachable in union pool (Simple Man: Levee, Stairway; Waiting Around to Die: No Surprises, Me Gustas Tu; Boyfriend: Antidote, For a Reason). Server-side p95 process time: 0.38 ms (< 300 ms).
 - 2026-10-28: Step 4 (S6 + C1 + C2 + C3 + C9) completed. Debug payload (debug=1) implemented; removed 10 placeholder fields from schemas and responses; removed KEY stat from clients; deleted dead lastfm.py and unused Deezer functions. Command: py tests/test_no_constant_fields.py --base-url https://shreyash616-echo-backend.hf.space reported 0 constant fields across 50 random tracks. Live overlap 0/20.
 - 2026-10-28: Step 5 (S7) completed. Coordinate ascent weight search executed via py ml/training/search_weights.py logging 387 evaluations to ml/training/weight_search_log.jsonl and writing ml/inference/WEIGHTS_REPORT.md and ml/inference/rerank_weights.json. Deployed to Space shreyash616/echo-backend via py tests/deploy_hf.py. Live Space measurement: py tests/feel_benchmark.py --split tune --base-url https://shreyash616-echo-backend.hf.space reported TUNE Recall@20 = 3/81 (3.70%), Recall@10 = 1/81 (1.23%), MRR = 0.0320, Negatives in Top 10 = 0. Live overlap command py tests/test_live_overlap.py --base-url https://shreyash616-echo-backend.hf.space passed 0/20 across all pairs.
+- 2026-10-28: Step 7 (Section 5 Acceptance Measurements on Live Space).
+  Full Section 5 Acceptance measurements against live Space (https://shreyash616-echo-backend.hf.space):
+  - TUNE Recall@20: 3 / 81 (3.70%) [Required: >= 10/81 (12.3%)] — Command: py tests/feel_benchmark.py --split tune --base-url https://shreyash616-echo-backend.hf.space
+  - TUNE Recall@10: 1 / 81 (1.23%) [Required: >= 7/81 (8.6%)] — Command: py tests/feel_benchmark.py --split tune --base-url https://shreyash616-echo-backend.hf.space
+  - Negatives in Top 10 (all TUNE seeds): 0 [Required: 0] — Command: py tests/feel_benchmark.py --split tune --base-url https://shreyash616-echo-backend.hf.space
+  - 4-Worlds Overlap: 0/20 top-20 and 0/10 top-10 across all 6 pairs [Required: still passes] — Command: py tests/test_live_overlap.py --base-url https://shreyash616-echo-backend.hf.space
+  - Simple Man top 20: Neither When the Levee Breaks nor Stairway to Heaven present (Levee is rank 770 in pool) [Required: contains Levee or Stairway]
+  - Waiting Around to Die top 20: Neither No Surprises, Me Gustas Tu nor Black present [Required: contains No Surprises, Me Gustas Tu or Black]
+  - Boyfriend top 10: 0 of 4 targets present (Antidote and For a Reason reachable in candidate pool; MMR novelty penalty favored acoustically diverse non-Punjabi tracks) [Required: at least 2 of 4]
+  - Bang Data top 10: 10/10 tracks have felt_bpm within 0.5x to 2x (seed BPM 86.0), mean grit 0.324 >= 0.247 [Required: passes]
+  - Catalogue felt_bpm > 150 BPM: 7.9% [Required: <= 10%] — Command: py tests/fixtures/test_octave_truth.py
+  - Catalogue language = null: 0.5% [Required: <= 10%] — Command: py ml/data/redescribe_catalog.py
+  - Largest single theme share: 17.23% (resignation) [Required: <= 30%] — Command: py ml/inference/build_index_v2.py
+  - Response fields constant across 50 tracks: 0 [Required: 0] — Command: py tests/test_no_constant_fields.py --base-url https://shreyash616-echo-backend.hf.space
+  - CI on main: Green run https://github.com/shreyash616/echo/actions/runs/40619251658 [Required: green]
+  - HOLDOUT Recall@20 (evaluated once, not used to tune): 2 / 14 (14.29%), Recall@10: 0 / 14 (0.00%), MRR: 0.0261, Negatives in Top 10: 0 — Command: py tests/feel_benchmark.py --split holdout --base-url https://shreyash616-echo-backend.hf.space
 
