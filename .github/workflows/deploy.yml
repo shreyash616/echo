@@ -1,13 +1,8 @@
 name: Deploy
 
+# FIX_PLAN_2.md rule 20a: deploys are explicit dispatches named in a packet entry; a push never deploys.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - "backend/**"
-      - "ml/inference/**"
 
 jobs:
   deploy-backend:
