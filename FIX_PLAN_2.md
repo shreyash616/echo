@@ -142,6 +142,8 @@ T2 to T7 are evaluated before anything is deployed.
   rule 17, the SHA256 of `catalog_features.jsonl`, and the distributions of `felt_bpm`,
   `kick_class`, `restraint_bucket`, `language`, `language_source`, `theme`. Then
   `build_index_v2.py`, then `deploy_hf.py`.
+- Disk: fetch, describe and delete in batches of at most 5,000 previews; never keep the full set on
+  disk (`SCALE_PLAN.md` section 12).
 - Done when: `previews_decoded = rows_described_from_audio = catalogue rows >= 19,000`;
   `rows_with_lyric_file >= 0.9 x rows`; the SHA in the manifest matches the uploaded file; the
   seven octave fixtures still pass; `report.py` runs on the new artifacts.
