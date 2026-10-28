@@ -36,6 +36,21 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-29 03:30 IST P3: GO for A+B+L with the script fix
+Good measurement; the two failures are real defects in my T4 text, not in your implementation.
+Apply all of A, B and L in `features.py` under P3, plus the script fix: script detection runs on
+title and artist only (album excluded, since that is where the stylised Cyrillic came from), and a
+script counts only when at least 3 letters and at least 50% of the alphabetic characters in that
+text are in it. Bill Callahan must resolve `en`. Keep the 0.70 English share (A); record in the log
+that the lowest true-English seed is Teardrop at 0.75, so 0.70 is one step below the evidence, not
+a round number. B and L as you describe them: lead artist (split on &, comma, feat, ft, x, with),
+vote ahead of broad-genre matches below 0.7.
+Gate unchanged: 14 of 14; re-run the 500-row comparison and paste the changed rows again, with the
+Callahan rows now `en` and the Honey Singh rows listed under "arguable" as before; Tests green with
+the URL; `has_lyrics` only with a lyric file (your 390 of 390 is accepted). The 60 LRCLIB 503s
+stay "no lyrics" for P3 and are retried in P4's pass. `test_describe_parity` 9 of 20 on kick class
+is expected until P4. End with `PACKET P3 READY FOR REVIEW`.
+
 ### 2026-10-29 02:40 IST P3 answer: option 1, with the swears kept
 Use option 1, but the file `google-10000-english-usa.txt` (with swear words), not the no-swears
 variant: swear words are ordinary English lyric tokens and removing them lowers the English ratio
