@@ -149,6 +149,63 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-28 20:40 IST P3 BLOCKED: language 12 of 14
+Code `e0bbd31`, log `1641ffe` (`FEEL_ALGORITHM.md`, "Packet P3"). Tests on main green: https://github.com/shreyash616/echo/actions/runs/40707880831 (e0bbd31). No deploy.
+
+```
+14 seeds, local describe with lyric files (en ratio = share of tokens in english_words.txt)
+title                  declared resolved conf source  en ratio
+Simple Man             en       en       1.00 lyrics  0.96
+Waiting Around to Die  en       en       1.00 lyrics  0.90
+Bang Data              es       en       1.00 lyrics  0.65   <- fail
+Boyfriend              pa       en       1.00 lyrics  0.56   <- fail
+Hurt                   en       en       1.00 lyrics  0.95
+Tum Hi Ho              hi       hi       0.75 genre   0.42
+Mask Off               en       en       1.00 lyrics  0.88
+Get Lucky              en       en       1.00 lyrics  0.98
+Tomboy                 ko       ko       1.00 lyrics  0.00
+Seven Nation Army      en       en       1.00 lyrics  0.94
+Teardrop               en       en       1.00 lyrics  0.75
+Skinny Love            en       en       1.00 lyrics  0.93
+Nothing Else Matters   en       en       1.00 lyrics  0.94
+Video Games            en       en       1.00 lyrics  0.95
+12 of 14 (gate 14 of 14)
+
+500-row sample, theme from lyrics only (anchor fallback removed)
+lyric files 390, has_lyrics true 390, has_lyrics without file 0
+theme non-null 320, null 180; largest share celebration 14.4% (gate <= 30%)
+celebration 14.4  escape 13.4  swagger 11.9  wonder 11.9  defiance 11.6
+longing 10.9  heartbreak 7.2  grief 6.6  resignation 6.6  devotion 5.6
+LRCLIB on 514 rows: fetched or had 404, none 50, 60 still 503 after retries (counted as no lyrics)
+
+py -m pytest -q tests/ -> 1 failed, 22 passed, 1 xfailed
+  failure: test_describe_parity kick_class 9/20 (stored labels predate T5, as in P2; P4 measures it; CI skips)
+```
+
+Why the two fail:
+- Bang Data: the Google 10k list contains common Spanish tokens (y, mi, que, te), so 65% of its tokens count as English.
+- Boyfriend: LRCLIB has only a 48-token fragment. Without it, genre "Pop" maps to en (0.65). The artist vote cannot help: the artist field is "Karan Aujla & Ikky", and the vote is keyed on the full artist string, so it has no votes.
+
+Amendments I measured (scratch only, features.py unchanged; yours to decide):
+- A: English list share 0.55 -> 0.70 (lowest true-English seed is Teardrop at 0.75).
+- B: the artist vote goes ahead of genre matches below 0.7 confidence (the broad en genres: pop, rock, hip-hop, new age ...). The vote already counts only matches at >= 0.7, so those genres never vote.
+- L: the vote is keyed on the lead artist (split on &, comma, feat, ft, x, with).
+
+```
+seeds: as written 12/14, A 13/14, A+B 13/14, A+B+L 14/14
+500-row sample, A+B+L vs as written: 11 rows change, all from en
+  right:  Os Mutantes pt, Shubh pa, Bomba Estereo es, Atahualpa Yupanqui es,
+          Guitar Wolf ja x2, thee michelle gun elephant ja, Pitbull/Diljit "Bhool Bhulaiyaa 3" hi
+  arguable: Yo Yo Honey Singh hi x2 (Hindi/Punjabi mix)
+  wrong:  Bill Callahan ru. 11 of his rows carry a Cyrillic letter in the album title (YTI⅃AƎЯ), so the
+          script rule says ru, and B spreads it through the vote. A fix would be script detection on
+          the title only, or a minimum share of letters in the script.
+```
+
+Ask: approve A+B+L (with or without the script fix), or amend the gate. On GO I apply it in features.py under P3, rerun this block and report READY.
+
+PACKET P3 BLOCKED
+
 ### 2026-10-28 16:25 IST P3 question: source of `english_words.txt`
 P3 is in progress (code not pushed yet). T4 (c) needs `backend/app/audio/english_words.txt`, "a bundled 10,000-word English list, from the public-domain word frequency lists". No such list is on the box (no `wordfreq`, no `nltk`), so it has to be downloaded. The owner routed the choice to you. Options:
 
