@@ -50,6 +50,32 @@ jobs:
           ECHO_BASE_URL: https://shreyash616-echo-backend.hf.space
         run: pytest tests/test_live_overlap.py
 
+      - name: Run Candidate Pool Coverage Test
+        env:
+          ECHO_BASE_URL: https://shreyash616-echo-backend.hf.space
+        run: pytest tests/test_candidate_pool.py
+
+      - name: Run Theme Sanity Test
+        env:
+          ECHO_BASE_URL: https://shreyash616-echo-backend.hf.space
+        run: pytest tests/test_theme_sanity.py
+
+      - name: Run Describe Parity Test
+        run: pytest tests/test_describe_parity.py
+
+      - name: Run No-Constant-Fields Integrity Test
+        env:
+          ECHO_BASE_URL: https://shreyash616-echo-backend.hf.space
+        run: pytest tests/test_no_constant_fields.py
+
+      - name: Run Offline Replica Parity Test
+        env:
+          ECHO_BASE_URL: https://shreyash616-echo-backend.hf.space
+        run: pytest tests/test_offline_replica.py
+
+      - name: Run Axis Range Test
+        run: pytest tests/test_axis_range.py
+
       - name: Run Feel Benchmark on TUNE (report-only)
         run: |
           python tests/feel_benchmark.py --split tune --base-url https://shreyash616-echo-backend.hf.space || true

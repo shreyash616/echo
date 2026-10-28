@@ -131,7 +131,7 @@ def run_candidate_pool_test(base_url: str | None = None):
 
 def test_candidate_pool():
     # Pytest entry point (runs against local or default if available)
-    base_url = os.environ.get("TEST_BASE_URL", "https://shreyash616-echo-backend.hf.space")
+    base_url = os.environ.get("ECHO_BASE_URL") or os.environ.get("TEST_BASE_URL", "https://shreyash616-echo-backend.hf.space")
     try:
         run_candidate_pool_test(base_url=base_url)
     except httpx.ConnectError:
