@@ -126,6 +126,9 @@ T2 to T7 are evaluated before anything is deployed.
     lower.
 19. Units are checked before a number is logged: a timing test asserts on a value whose unit it
     has read from the code that writes it.
+20a. Deploys are explicit: `.github/workflows/deploy.yml` is `workflow_dispatch` only, dispatched
+    in P5 (and in `SCALE_PLAN.md` WP2 and WP7) and named in that packet's entry. A push never
+    deploys.
 20. The replica first, the Space second. A step's gate is measured with `report.py`; the deploy
     confirms it with `--validate-live` and the live benchmark; both outputs go in the log entry.
 

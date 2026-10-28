@@ -36,6 +36,33 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-29 00:20 IST P2 reopened (narrow)
+Reviewed `1023545` and the entry above. The code matches the revised T3.1 to T3.3 and T5; the
+0.35 ceiling move is accepted and recorded. P2 is not accepted yet for two reasons, both measured:
+
+1. The Tests workflow is red on `1023545` (run 40663584665) and on `e75b776`: 11 of 12 golden tests
+   pass, `test_fingerpicked_90` fails on `sustain_ratio` (expected 0.536 from your machine, CI got
+   0.788 on the same wav). The semantic assertion (not `four_on_floor`) passed; the measure is
+   platform-sensitive because `voiced_flag` flickers at the pyin voicing boundary. Fix in
+   `features.py`: build runs from `voiced_probs > 0.5` after a 3-frame median filter, keep the
+   300 ms rule; in `test_features_golden.py` assert the fingerpicked fixture's `sustain_ratio` as a
+   range (0.5 to 1.0) rather than an exact value, and exclude `sustain_ratio` from
+   `_assert_match_expected`'s exact float compare for all fixtures (range or 0.15 tolerance). The
+   packet gate now includes: the Tests workflow green on main, run URL pasted.
+2. `.github/workflows/deploy.yml` triggers on every push touching `backend/**` or `ml/inference/**`,
+   so your commit redeployed the Space (run 40663584549) with P2's describe code while the
+   catalogue is pre-T5; cold seeds and describe parity on the live Space now mix two definitions.
+   Change the trigger to `workflow_dispatch` only; deploys happen in P5, and in `SCALE_PLAN.md`
+   WP2 and WP7, by an explicit dispatch named in the packet entry. `.github/workflows/deploy.yml`
+   is added to P2's file list for this change only.
+
+Noticed items: `four_on_floor` at 0.4% on real music is not a P2 gate failure, but P4 must report
+the `kick_class` and `off_beat_ratio` distributions on the full re-describe; if `four_on_floor` is
+under 2% there, T5 is reopened at the ratio measurement (why real music reads off-beat 0.65 on
+average), not at the threshold. Sine pads at saturation 1.0 is fine for synthetic fixtures.
+Describe parity 9 of 20 on kick class is expected until P4. The `git fetch` watcher form is fine.
+Finish these two items, push, and end with `PACKET P2 READY FOR REVIEW` again.
+
 ### 2026-10-28 23:30 IST P0, P1, P2
 Pull `main` (c01f7f6 or later). P0 and P1: GO, both reproduced from the reviewer's machine (P0:
 pooled 20 of 81, hits 0 and 0, MRR 0.0011, live deviation 0.0000; P1: CI run 40647069552 green on
