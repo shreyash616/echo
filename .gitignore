@@ -46,3 +46,6 @@ __pycache__
 /app/.expo
 /app/dist
 /ml/data/itunes_cache.jsonl
+
+# Gemini hand-off results (reviewed by Claude, not committed)
+.claude/gemini/results/

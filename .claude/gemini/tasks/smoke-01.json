@@ -1,0 +1,6 @@
+{"id": "smoke-01",
+ "goal": "Smoke test of the hand-off wrapper.",
+ "files": [".claude/gemini/tasks/smoke.txt"],
+ "steps": ["Change the only line of `.claude/gemini/tasks/smoke.txt` from `before` to `after`."],
+ "verify": ["py -c \"import sys; sys.exit(open('.claude/gemini/tasks/smoke.txt').read().strip() != 'after')\""],
+ "timeout_s": 300}
