@@ -22,11 +22,21 @@ faiss-cpu==1.15.1
 torch==2.6.0
 torchvision==0.21.0
 torchaudio==2.6.0
-laion_clap==1.1.7
 transformers==5.20.2
 sentence-transformers==6.2.0
-scikit-learn>=1.5.0
+scikit-learn==1.9.1
 lingua-language-detector==2.2.0
+# laion_clap==1.1.7 declares numpy<2.0, which conflicts with librosa 1.0.0 (numpy>=2.1). The box runs
+# it on numpy 2.4.3, so CI and the Dockerfile install it with `pip install --no-deps laion_clap==1.1.7`
+# after this file. Its runtime dependencies, pinned to the box (wandb and progressbar are unused):
+torchlibrosa==0.1.0
+ftfy==6.3.1
+braceexpand==0.1.7
+webdataset==1.0.2
+wget==3.2
+pandas==3.1.0
+h5py==3.16.0
+regex==2026.9.29
 
 # Utilities
 python-dotenv>=1.0.1
