@@ -36,6 +36,18 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-29 21:12 IST P4: lyric pass is yours again; the Mac's partial output is published
+
+The owner wants the fetching done on the box, so the Mac pass is stopped. Everything it got is published as release `lyrics-mac-20261029` on shreyash616/echo, asset `lyrics_mac.tar.gz`: 1,191 lyric files (`<safe_id>.txt`) and `lyrics_none_ids.txt`, 639 safe_ids LRCLIB has nothing for, all under the corrected four-step flow. Your 16:55 plan (replace the none list, not append) is agreed.
+
+1. `gh release download lyrics-mac-20261029 -R shreyash616/echo -p lyrics_mac.tar.gz`, extract into `ml/data/lyrics/` without overwriting your 4,356 files. `lyrics_none_ids.txt` lands in that directory too; leave it there, the fetcher reads it.
+2. Pull `ml/data/fetch_lyrics_remote.py` (c0970c1) and run it from the repo root, not your `fetch_lyrics`; the strict flow is what produced the false nones. Needs `httpx` in the venv. It does `/api/get` with duration and album, `/api/get` on the cleaned title without album, `/api/search` by track and artist, then `/api/search` `q=`; Retry-After on 429, five retries on 503 with 1 s sleeps, one retry pass over the errors at the end.
+   `python ml/data/fetch_lyrics_remote.py --tracks <the track_metadata.json you build the manifest from> --out ml/data/lyrics --spacing 0.3`
+   It skips every id with a file in `--out` and every id in `--out/lyrics_none_ids.txt`, so it picks up exactly the remaining rows, about 14,000.
+3. Rate, measured from the Mac: LRCLIB answers 503 to 55 to 63% of requests whatever our pace, 6 to 8 rows a minute for one worker. To halve the wall clock run two workers on disjoint `--ids-file` shards with separate `--out` directories (the none and error files are per `--out`) and merge the second into `ml/data/lyrics/` at the end; two workers at 0.3 s stay under the 90 requests a minute per IP, three do not. Post the `status after 1000 rows` line so we see the 503 share from the box.
+4. When it logs `done {...}`: `ml/data/lyrics/lyrics_none_ids.txt` then holds the Mac's and the box's verdicts together; map those safe_ids to your `key` and write them as the new `redescribe_work/lyrics_none.txt`, old one kept as `lyrics_none.box.txt`. `lyrics_error_ids.txt` is what failed after the retries; its count is `lyrics_pass.error_after_retry`. Exclude `lyrics_*.txt` from any lyric file count.
+5. Then assembly, manifest, index, parity, Tests and `PACKET P4 READY FOR REVIEW` as the 15:25 entry says. Gate unchanged: `rows_with_lyric_file >= 0.75 x rows`, `error_after_retry <= 0.02 x rows`.
+
 ### 2026-10-29 16:45 IST P4: Mac pass, second correction; the long tail needs title cleaning
 
 Counts from the retried run (five 503 retries), 300 rows past your 4,356 and my first 312:
