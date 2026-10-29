@@ -90,7 +90,7 @@ Goal: an artist list of 80,000 to 120,000 artists with Deezer ids, written to th
 1. Seeds: every artist in `tests/feel_benchmark_v2.json` (seeds, positives, negatives), the 117
    names in `ml/data/harvest_seed_artists.json` resolved to Deezer ids, and the top 100 artists from
    Deezer charts for each of SG, IN, US, GB, ES, MX, BR, AR, KR, JP, FR, DE, IT, PK, BD, ID, PH, TR,
-   NG, ZA (endpoint `/chart/{country}/artists` or `/editorial/{id}/charts`, whichever Deezer serves).
+   NG, ZA, TW, HK, SA, EG, AE, VN, TH, MY (endpoint `/chart/{country}/artists` or `/editorial/{id}/charts`, whichever Deezer serves).
 2. Breadth-first walk over `/artist/{id}/related` (20 per call), depth-first from no seed; stop at
    120,000 unique artists or when a depth has no new artists. Keep `nb_fan` for the per-artist cap.
 3. Genre pages: `/genre` then `/genre/{id}/artists` for every genre, appended with `source =
@@ -98,8 +98,8 @@ Goal: an artist list of 80,000 to 120,000 artists with Deezer ids, written to th
    never reaches them.
 4. Rate limits: Deezer allows about 50 requests per 5 seconds; sleep on 4xx and retry with
    backoff; the walk is resumable from the last written line.
-5. Done when: `discovery/artists.jsonl` has at least 80,000 rows, at least 30 countries among the
-   chart seeds, and the file's SHA256 is in `discovery/MANIFEST.json` with the counts per source.
+5. Done when: `discovery/artists.jsonl` has at least 80,000 rows, at least 28 countries among the
+   chart seeds (every one listed in step 1), and the file's SHA256 is in `discovery/MANIFEST.json` with the counts per source.
 
 The artist list is then split into shards of 250 artists (`discovery/shards.json`: shard id to
 artist id range). At a cap of 20 songs an artist, 250 artists is about 5,000 songs, one harvest
@@ -130,7 +130,10 @@ LAION loader (`CLAP_Module(enable_fusion=False, amodel="HTSAT-base")` with the m
 mean the three windows, L2-normalise, store float16. The audio tower weights are loaded once per
 shard.
 
-**Stage E, text.** LRCLIB fetch for songs without a cached lyric file (paced at 5 a second), then
+**Stage E, text.** Lyrics from the local LRCLIB dump first (WP1 downloads it; match on normalised
+title and artist with duration within 2 s, the same rule as `/api/get`); the API only for songs the
+dump misses, identified `User-Agent`, at most 85 requests a minute, `Retry-After` honoured, and at
+most 10% of a shard, since the API alone is 8 days for a million rows at that allowance. Then
 language (round 2 T4 resolution order), theme chunks (round 2 T8), `has_lyrics` true only when a
 lyric file exists.
 
@@ -207,7 +210,8 @@ Acceptance, measured and pasted with commands, after the full build is deployed:
 | Rows in the catalogue (`header.json`) | at least 1,000,000, every row with a CLAP vector and a describe from audio (`rows_described_from_audio == rows`) |
 | Distinct artists | at least 60,000; no artist above 20 rows |
 | Benchmark share | all 149 benchmark entities present; under 0.1% of rows |
-| Language | `null` at most 10%; `language_source = lyrics` on at least 60% of rows with a lyric file; no single language above 70% |
+| Language | `null` at most 10%; `language_source = lyrics` on at least 60% of rows with a lyric file; no single language above 70%; at least 10 languages with at least 10,000 rows each |
+| Lyric coverage per language | for every language with at least 2,000 rows, `header.json` records the share with a lyric file, the `language_source` distribution and the theme null share; the share with a lyric file is at least 0.5 for en, es, pt, fr, de, it; every other language is reported, lowest ten listed in the WP6 report |
 | Felt tempo | above 150 BPM at most 10%, below 60 at most 5% |
 | Theme | largest share of non-null at most 30% |
 | Replica vs live (`report.py --validate-live`) | deviation under 0.001 |
@@ -260,15 +264,22 @@ Gate: the `FIX_PLAN_2.md` section 6 table pasted with every row measured; replic
 
 **WP1. Windows box environment.** Scope: WSL2 Ubuntu with the project venv: ffmpeg, librosa,
 pyloudnorm, laion_clap with CUDA, sentence-transformers, lingua, pyarrow, huggingface_hub; the
-LAION music checkpoint downloaded; HF write token for the dataset in the environment. Files:
-`SETUP.md` (a WSL2 section), `ml/data/requirements-harvest.txt`.
+LAION music checkpoint downloaded; HF write token for the dataset in the environment; the
+LRCLIB database dump (`lrclib.net/db-dumps`, the page is script-rendered, so list the files from
+the box) downloaded and reduced to one SQLite table `lyrics(title_norm, artist_norm, duration,
+plain_lyrics)` with an index on `(title_norm, artist_norm)`. Report the dump's compressed,
+extracted and reduced sizes before and after; if the extracted dump would leave under 20 GB free,
+stop and report BLOCKED with the sizes instead of downloading. Files:
+`SETUP.md` (a WSL2 section), `ml/data/requirements-harvest.txt`, `ml/data/lrclib_dump.py` (new).
 Verify and paste:
 ```
 uname -a && nvidia-smi --query-gpu=name,memory.total --format=csv && df -h ~ | tail -1
 python -c "import torch, laion_clap, librosa, lingua, pyarrow; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 python tests/test_features_golden.py
 ```
-Gate: CUDA true on the RTX 3080; golden tests pass on this machine; at least 30 GB free.
+Gate: CUDA true on the RTX 3080; golden tests pass on this machine; at least 30 GB free after
+the reduced dump is in place and the raw dump deleted; `lrclib_dump.py lookup` finds at least 8 of
+the 10 benchmark seeds with lyrics (title, artist, duration from `tests/feel_benchmark_v2.json`).
 
 **WP2. Columnar storage and loader, on the existing 20,000 rows.** Scope: `build_index_v3.py`
 writing the section 6 files from the current `catalog_features.jsonl` and `clap.npy`; the loader
