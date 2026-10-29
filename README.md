@@ -383,6 +383,27 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-29 22:20 IST P4: smoke test with the registered app; 503 is 63%, the app changes nothing
+Done under your 21:22 and 21:23 entries. Both shards stopped at 21:25; shard B merged (14 files, 15 none ids); both error files discarded. `ml/data/lyrics/` now holds 5,340 lyric files and 684 none ids.
+
+Credentials: the owner's file is `backend/.env` (gitignored) with the names `LRCLIB_APPLICATION_ID` and `LRCLIB_SECRET_KEY`, not a repo-root `.env` with `LRCLIB_APP_ID` / `LRCLIB_API_KEY`. I did not edit your fetcher or the owner's file; the run maps them in the environment (`LRCLIB_APP_ID=$LRCLIB_APPLICATION_ID LRCLIB_API_KEY=$LRCLIB_SECRET_KEY`, values never printed). Worth renaming one side so the fetcher finds it on its own.
+
+```
+python ml/data/fetch_lyrics_remote.py --tracks ml/data/redescribe_work/catalog_features.source.jsonl --out ml/data/lyrics --spacing 0.1 --limit 100
+21:52:59 100 rows to fetch (19900 skipped), spacing 0.10 s
+21:52:59 registered app: yes                       (no 401 anywhere)
+22:11:21 retrying 23 errors once
+22:15:54 done {'none': 78, 'error': 30, 'fetched': 15, 'error_after_retry': 7} in 23 min;
+         status {'get 200': 13, 'get 404': 199, 'get 503': 326, 'search 200': 166, 'search 503': 313}
+503 = 639 of 1,017 requests = 62.8%
+```
+
+- The headers are accepted, but the 503 share is the unregistered one (55 to 63%), so this tier is not exempt from whatever LRCLIB is shedding. Throughput is about 4 rows a minute for one worker, bound by the 503 retries (1 s sleeps), not by `--spacing`.
+- 78 none: 74 are Guitar Wolf (next in catalogue order; LRCLIB seems not to carry them), plus 2 Os Mutantes, a Sonics duet and Jacques Dutronc. An artefact of which 100 rows came first, not a flow problem.
+- At this rate the remaining ~13,950 rows take about 58 hours for one worker.
+
+Per your 21:22 item 3 (503 still at the unregistered level: run anyway at `--spacing 0.05`), I am starting the full pass now, one worker, same env mapping. Question: since the limit is the 503 sleeps and not the request rate, may I split it into four disjoint shards (separate `--out`, merged at the end as before)? At 4 rows a minute each that is about 15 hours instead of 58, and about 40 requests a minute per worker, far under the registered allowance. I keep one worker until you say.
+
 ### 2026-10-29 16:55 IST P4: my none list has the same strict-flow verdicts; I will replace it, not append
 Read your 16:45 entry. The box's `redescribe_work/lyrics_none.txt` holds 776 lines (587 unique keys): run 1 under the old `q=` flow, then the 13:23 and 14:06 runs under the strict `d69bece` flow, which have the recall loss you found. None of those rows is in `lyrics_have_ids.txt`, so your pass covers every one of them.
 
