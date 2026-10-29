@@ -36,6 +36,27 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-29 14:45 IST P4: GO for the 2 s test; the dump is out; WARP is with the owner
+
+Your readings are right and the counts settle it: 255 of 628 at 503 with zero 429 at a rate under
+the allowance is the edge rejecting your exit IP, not LRCLIB rate-limiting you. From this machine
+the same endpoint gives 12 of 12 at 200.
+
+1. GO to your option 1: resume with 2.0 s spacing (about 30 a minute), everything else as in
+   `d69bece`, for 300 rows, and paste the same counts. If 503 is under 5%, keep going at 2 s and
+   report the ETA; 15,751 rows at 1.3 requests a row is about 11 hours, which is acceptable. If it
+   is still above 5%, stop again and post the counts; nothing else to try on your side.
+2. WARP: raised with the owner, it is their call. If they turn it off you will be told here; then
+   go back to 0.70 s for 300 rows and paste the counts before continuing at that rate.
+3. The dump is ruled out, for P4 and for `SCALE_PLAN.md`: it is one file,
+   `lrclib-db-dump-20261012T090639Z.sqlite3.gz`, 47,837,763,733 bytes gzipped (listing at
+   `lrclib-db-dumps.bu3nnyut4y9jfkdg.workers.dev`, read 2026-10-29), so it does not fit the box's
+   budget before decompression. `SCALE_PLAN.md` Stage E and WP1 are corrected in this commit: the
+   scale path is a registered LRCLIB server-side application key (about 6,000 requests a minute
+   app-wide), which the owner obtains; not your work now.
+
+The rows already errored are retried on resume, as the script does. No deploy, allow-list unchanged.
+
 ### 2026-10-29 14:00 IST Channel stays in this README; SCALE_PLAN amended
 
 Disregard the issue thread and `tools/agent_chat.py`; both are closed and removed. Keep posting

@@ -130,10 +130,14 @@ LAION loader (`CLAP_Module(enable_fusion=False, amodel="HTSAT-base")` with the m
 mean the three windows, L2-normalise, store float16. The audio tower weights are loaded once per
 shard.
 
-**Stage E, text.** Lyrics from the local LRCLIB dump first (WP1 downloads it; match on normalised
-title and artist with duration within 2 s, the same rule as `/api/get`); the API only for songs the
-dump misses, identified `User-Agent`, at most 85 requests a minute, `Retry-After` honoured, and at
-most 10% of a shard, since the API alone is 8 days for a million rows at that allowance. Then
+**Stage E, text.** LRCLIB `/api/get` with `duration` and `album_name`, then without the album,
+then `/api/search` by track and artist; `Retry-After` honoured. The dump is not an option: it is
+one 47.8 GB gzipped SQLite file (`lrclib-db-dump-20261012T090639Z.sqlite3.gz`, listed by
+`lrclib-db-dumps.bu3nnyut4y9jfkdg.workers.dev` on 2026-10-29), over the box's whole budget before
+decompression. Rate: with the owner's registered server-side application key (`Lrclib-Api-Key`,
+about 6,000 requests a minute app-wide, `lrclib.net/developers`) a million rows is a few hours;
+without it the per-IP allowance is about 90 a minute and a million rows is 8 days, so WP1 stops
+and reports BLOCKED if the key is absent. Then
 language (round 2 T4 resolution order), theme chunks (round 2 T8), `has_lyrics` true only when a
 lyric file exists.
 
@@ -265,21 +269,18 @@ Gate: the `FIX_PLAN_2.md` section 6 table pasted with every row measured; replic
 **WP1. Windows box environment.** Scope: WSL2 Ubuntu with the project venv: ffmpeg, librosa,
 pyloudnorm, laion_clap with CUDA, sentence-transformers, lingua, pyarrow, huggingface_hub; the
 LAION music checkpoint downloaded; HF write token for the dataset in the environment; the
-LRCLIB database dump (`lrclib.net/db-dumps`, the page is script-rendered, so list the files from
-the box) downloaded and reduced to one SQLite table `lyrics(title_norm, artist_norm, duration,
-plain_lyrics)` with an index on `(title_norm, artist_norm)`. Report the dump's compressed,
-extracted and reduced sizes before and after; if the extracted dump would leave under 20 GB free,
-stop and report BLOCKED with the sizes instead of downloading. Files:
-`SETUP.md` (a WSL2 section), `ml/data/requirements-harvest.txt`, `ml/data/lrclib_dump.py` (new).
+owner's LRCLIB server-side application key in the environment as `LRCLIB_API_KEY` (the owner
+registers it at `lrclib.net/developers`; the key never enters the repository or a log). Files:
+`SETUP.md` (a WSL2 section), `ml/data/requirements-harvest.txt`.
 Verify and paste:
 ```
 uname -a && nvidia-smi --query-gpu=name,memory.total --format=csv && df -h ~ | tail -1
 python -c "import torch, laion_clap, librosa, lingua, pyarrow; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 python tests/test_features_golden.py
 ```
-Gate: CUDA true on the RTX 3080; golden tests pass on this machine; at least 30 GB free after
-the reduced dump is in place and the raw dump deleted; `lrclib_dump.py lookup` finds at least 8 of
-the 10 benchmark seeds with lyrics (title, artist, duration from `tests/feel_benchmark_v2.json`).
+Gate: CUDA true on the RTX 3080; golden tests pass on this machine; at least 30 GB free; 300
+sequential `/api/get` calls with the key at 10 a second return no 429 and under 1% 503 (paste
+the status counts; the key is read from the environment, never printed).
 
 **WP2. Columnar storage and loader, on the existing 20,000 rows.** Scope: `build_index_v3.py`
 writing the section 6 files from the current `catalog_features.jsonl` and `clap.npy`; the loader
