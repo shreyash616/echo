@@ -29,6 +29,7 @@ import hashlib
 import json
 import logging
 import multiprocessing as mp
+import random
 import re
 import shutil
 import subprocess
@@ -94,33 +95,52 @@ def lyric_path(row: dict) -> Path:
 
 
 _LRCLIB_LAST = [0.0]
+LRCLIB_SPACING_S = 0.70  # at most 85 requests a minute, under LRCLIB's ~90 for an identified UA
+LRCLIB_STATUS: Counter = Counter()  # (endpoint, status) for the pass log
 
 
 def fetch_lyrics(row: dict, client) -> str | None:
     """
-    Fetch plain lyrics from LRCLIB (same endpoints and acceptance as harvest_v2.fetch_lrclib_lyrics,
-    at most 2 requests per second) and write them to the row's lyric file. Returns the text, or
-    None when LRCLIB has no lyrics. HTTP errors other than 404 raise.
+    Fetch plain lyrics from LRCLIB and write them to the row's lyric file. /api/get with duration
+    and album, then /api/get without album, then /api/search by track and artist (artist-substring
+    acceptance as harvest_v2.fetch_lrclib_lyrics). One request every 0.70 s; 429 waits Retry-After,
+    503 waits 10 s and retries once. Returns the text, or None when LRCLIB has no lyrics. HTTP
+    errors other than 404 raise.
     """
-    def _get(url: str, params: dict):
-        # 429 and 5xx are transient on LRCLIB: retry twice with backoff, then return the response
-        for backoff in (5.0, 20.0, 60.0, None):
-            wait = 0.55 - (time.time() - _LRCLIB_LAST[0])
+    def _get(endpoint: str, params: dict):
+        retried_503 = False
+        while True:
+            wait = LRCLIB_SPACING_S - (time.time() - _LRCLIB_LAST[0])
             if wait > 0:
                 time.sleep(wait)
             _LRCLIB_LAST[0] = time.time()
-            resp = client.get(url, params=params, timeout=10.0)
-            if backoff is None or not (resp.status_code == 429 or resp.status_code >= 500):
-                return resp
-            time.sleep(backoff)
+            resp = client.get(f"https://lrclib.net/api/{endpoint}", params=params, timeout=10.0)
+            LRCLIB_STATUS[(endpoint, resp.status_code)] += 1
+            if resp.status_code == 429:
+                try:
+                    after = float(resp.headers.get("Retry-After", "10"))
+                except ValueError:
+                    after = 10.0
+                time.sleep(after * (1.0 + random.uniform(0.0, 0.3)))
+                continue
+            if resp.status_code == 503 and not retried_503:
+                retried_503 = True
+                time.sleep(10.0)
+                continue
+            return resp
 
     title, artist = row.get("title", ""), row.get("artist", "")
+    params = {"track_name": title, "artist_name": artist}
+    if row.get("durationMs"):
+        params["duration"] = round(row["durationMs"] / 1000)
     text = None
-    r = _get("https://lrclib.net/api/get", {"track_name": title, "artist_name": artist})
+    r = _get("get", {**params, "album_name": row["album"]} if row.get("album") else params)
+    if r.status_code == 404 and row.get("album"):
+        r = _get("get", params)
     if r.status_code == 200:
         text = r.json().get("plainLyrics")
     elif r.status_code == 404:
-        r2 = _get("https://lrclib.net/api/search", {"q": f"{title} {artist}"})
+        r2 = _get("search", {"track_name": title, "artist_name": artist})
         r2.raise_for_status()
         norm_art = re.sub(r"[^a-z0-9]", "", artist.lower())
         for h in r2.json():
@@ -286,6 +306,9 @@ class LyricFetcher(threading.Thread):
                 self.counts["none"] += 1
                 none_f.write(r["key"] + "\n")
                 none_f.flush()
+            if i + 1 == 300:
+                logger.info("LRCLIB status after 300 rows: %s",
+                            {f"{e} {s}": n for (e, s), n in sorted(LRCLIB_STATUS.items())})
             if (i + 1) % 500 == 0:
                 logger.info("Lyrics: %d/%d %s", i + 1, len(todo), dict(self.counts))
         return failed
@@ -319,6 +342,8 @@ class LyricFetcher(threading.Thread):
         self.counts["error_after_retry"] = len(still)
         self.counts.pop("error", None)
         logger.info("Lyrics: done %s", dict(self.counts))
+        logger.info("LRCLIB status, whole pass: %s",
+                    {f"{e} {s}": n for (e, s), n in sorted(LRCLIB_STATUS.items())})
 
 
 def run_batch(b: int, batch: list[dict], cut_points: dict, clap_model, anchor_keys, anchor_matrix,
