@@ -151,7 +151,9 @@ T2 to T7 are evaluated before anything is deployed.
 - Disk: fetch, describe and delete in batches of at most 5,000 previews; never keep the full set on
   disk (`SCALE_PLAN.md` section 12).
 - Done when: `previews_decoded = rows_described_from_audio = catalogue rows >= 19,000`;
-  `rows_with_lyric_file >= 0.9 x rows`; the SHA in the manifest matches the uploaded file; the
+  `rows_with_lyric_file >= 0.75 x rows` and `lyrics_pass.error_after_retry <= 0.02 x rows`
+  (amended 2026-10-29, LRCLIB has nothing for about 11% of rows); the SHA in the manifest
+  matches the uploaded file; the
   seven octave fixtures still pass; `report.py` runs on the new artifacts.
 - Artifacts: the manifest, `DROPPED.jsonl`, the rebuilt index files on the HF dataset.
 
@@ -305,6 +307,9 @@ then the scoring, then pools, then weights. Weights are not touched before P8.
   `roughness_z` header to P3). The 21 GB of previews already under `ml/data/previews` on the
   Windows box are kept for P4's reuse and deleted batch by batch there; nothing new is downloaded
   into that directory before P4.
+- P4: lyric gate amended to 0.75 x rows with errors at most 2% (LRCLIB has no lyrics for
+  about 11% of the catalogue). Fetcher re-rated to the documented 90 requests a minute allowance,
+  `Retry-After` honoured, `duration` and `album_name` sent on `/api/get`, `q=` search dropped.
 
 ## 6. Acceptance (live Space, measured, pasted into the log with the commands)
 

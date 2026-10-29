@@ -36,6 +36,62 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-29 14:05 IST P4 answer: gate amended to 0.75; fix the fetch rate, do not wait 70 hours
+
+Audio half noted: 4 batches checkpointed at 4.3 rows/s, no deploy, `e22048d` only. Good.
+
+**Question 1, the gate.** Amended. `rows_with_lyric_file >= 0.9 x rows` was my number and the
+measurement says LRCLIB has nothing for about 11% of these rows (instrumentals, obscure and
+non-English catalogue). New gate, also recorded in `FIX_PLAN_2.md` section 5 and the review
+decisions:
+
+- `rows_with_lyric_file >= 0.75 x rows`
+- `lyrics_pass.error_after_retry <= 0.02 x rows` (a row that errored is not "none"; it is unknown)
+- `lyrics_pass.none` reported, not thresholded
+
+**Question 2, the throughput.** Neither option. 220 rows an hour is not LRCLIB's ceiling, it is
+the fetcher tripping the limit and then sleeping through the backoffs. Facts, from
+`https://lrclib.net/docs.md` today and a probe from here:
+
+- Allowance for an identified `User-Agent` is about 90 requests a minute per IP, refilling
+  steadily. `fetch_lyrics` spaces at 0.55 s, which is 109 a minute, and a 404 costs a second
+  request on `/api/search`, so the loop runs above the allowance the whole time.
+- The docs name `429` plus `Retry-After` for the limit and say the edge rejects before the API
+  "under extreme floods"; those rejections are the 503s. The retry then sleeps 5 s, 20 s, 60 s
+  per row, which is where the hour goes.
+- 12 sequential `/api/get` calls at 0.7 s spacing from this machine, identified UA: 12 of 12
+  returned 200, no 503. The server is not down.
+- `/api/get` matches on `duration` (plus or minus 2 s) and `album_name`; the docs call the
+  duration "crucial". The rows carry `durationMs`, and the iTunes rows carry the album.
+  `/api/search?q=` is the full-text path, the slowest endpoint there, and we send it on every 404.
+
+Do this, in `fetch_lyrics` only (allow-list unchanged):
+
+1. Space requests at 0.70 s or more (at most 85 a minute, under the 90 allowance), one request
+   in flight, as now.
+2. Honour `Retry-After` on 429: sleep that many seconds plus up to 30% jitter, then retry the
+   same request. On 503 sleep 10 s and retry once; after that count the row as `error`.
+   Drop the 5/20/60 ladder.
+3. Send `duration=round(durationMs / 1000)` and `album_name` (when the row has one) on
+   `/api/get`. On 404, retry `/api/get` once without `album_name` (album strings differ between
+   iTunes and LRCLIB), then use `/api/search` with `track_name` and `artist_name` as parameters,
+   not `q=`. Keep the artist-substring acceptance for search hits.
+4. Log the status code per endpoint for the first 300 rows after the change and paste the
+   counts (200 / 404 / 429 / 503 per endpoint). If 503 is still above 5% after step 1 and 2,
+   stop and report; do not add concurrency.
+
+Stop the run, make the change, resume. Audio checkpoints and existing lyric files are kept as
+you said; the rows already fetched are not re-fetched. Expected remaining time is about 15,500
+rows at roughly 1.2 requests a row under 85 a minute: 3 to 4 hours, not 70.
+
+Not for P4, noted for `SCALE_PLAN.md`: at a million rows the API is 8 days at this allowance
+even with no errors. LRCLIB publishes full database dumps (`lrclib.net/db-dumps`; the page is
+script-rendered and I could not list the files from here); WP2 will read lyrics from a local
+copy of the dump, not from the API. Do not build that now.
+
+Report as before: `PACKET P4 READY FOR REVIEW` with the manifest, the status-code counts, the
+parity numbers and the Tests URL.
+
 ### 2026-10-29 04:15 IST GO P3; GO P4
 P3 accepted at `71126f2`: run 40710732090 green on `e4c1b1b`; 14 of 14 with sources that make
 sense (Bang Data by genre, Boyfriend by the lead-artist vote, Tomboy by lyrics); Callahan back to
