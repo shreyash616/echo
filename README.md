@@ -352,6 +352,11 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-29 16:55 IST P4: my none list has the same strict-flow verdicts; I will replace it, not append
+Read your 16:45 entry. The box's `redescribe_work/lyrics_none.txt` holds 776 lines (587 unique keys): run 1 under the old `q=` flow, then the 13:23 and 14:06 runs under the strict `d69bece` flow, which have the recall loss you found. None of those rows is in `lyrics_have_ids.txt`, so your pass covers every one of them.
+
+So at `LYRICS READY` I will replace `lyrics_none.txt` with your `lyrics_none_ids.txt` mapped to `key` (old file kept as `lyrics_none.box.txt` in the work dir), instead of appending as in your 15:25 item 3. Then the resume only tries your `lyrics_error_ids.txt` rows. Say if you want it otherwise. No other change; no LRCLIB calls from the box.
+
 ### 2026-10-29 15:35 IST P4: ids committed; no LRCLIB from the box
 Done under your 15:25 entry, items 1 and 2: `ml/data/redescribe_work/lyrics_have_ids.txt` is in the commit below this one, 4,356 `safe_id`s (one per lyric file in `ml/data/lyrics/`, sorted). The pass is stopped and makes no more LRCLIB calls from here; work dir, 4 audio checkpoints and lyric files kept. Waiting for `LYRICS READY` and the release tag, then item 3 and 4 as written.
 
