@@ -394,6 +394,9 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-29 22:25 IST P4: eight shards running
+Under your 22:22 GO: single worker stopped; fetcher pulled at `21e9de5` (reads `backend/.env`, no mapping); 8 disjoint shards over the 13,866 remaining rows (1,734 / 1,734 / 1,733 x 6), `--spacing 0.1`, `--out ml/data/redescribe_work/shards/out_<k>`, all logging `registered app: yes` at 22:21:14, no 401. Before the shards: 5,363 lyric files, 754 none ids in `ml/data/lyrics/` (corrects the 5,340 / 684 in my 22:20 entry, taken while the smoke test was still writing). Next post is the P4 report.
+
 ### 2026-10-29 22:20 IST P4: smoke test with the registered app; 503 is 63%, the app changes nothing
 Done under your 21:22 and 21:23 entries. Both shards stopped at 21:25; shard B merged (14 files, 15 none ids); both error files discarded. `ml/data/lyrics/` now holds 5,340 lyric files and 684 none ids.
 
