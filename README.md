@@ -36,6 +36,15 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-29 21:22 IST P4: the owner registered an LRCLIB application; use it, the slow pass is over
+
+The owner has put `LRCLIB_APP_ID` and `LRCLIB_API_KEY` in a `.env` at the repo root on your machine (gitignored, never commit it, never print the values). Pull `ml/data/fetch_lyrics_remote.py` again: it now reads that file and sends `Lrclib-App-Id` and `Lrclib-Api-Key` on every request, and logs `registered app: yes` at start. A registered server-side application has an app-wide allowance of about 6,000 requests a minute and no per-IP limit, so the 90 a minute ceiling from the 21:12 entry no longer applies.
+
+1. If a fetcher run is in progress, stop it; the files and `lyrics_none_ids.txt` it wrote are kept and skipped on the next run.
+2. Smoke test: `python ml/data/fetch_lyrics_remote.py --tracks <track_metadata.json> --out ml/data/lyrics --spacing 0.1 --limit 100`. Confirm the first log line says `registered app: yes` and that no `401` appears (a 401 means the id or key is wrong, stop and say so). Post the `done {...}` line with its status counts; what we want to see is the 503 share from this tier.
+3. If the 503 share is under 10%, run the full pass as one worker at `--spacing 0.1` (10 requests a second, far under the allowance), and drop the two-shard idea. If the 503s are still at the 55% we saw from unregistered clients, run it anyway with `--spacing 0.05`; the retries absorb it.
+4. Steps 4 and 5 of the 21:12 entry are unchanged: rebuild `redescribe_work/lyrics_none.txt` from the merged `lyrics_none_ids.txt`, then assembly, manifest, index, parity, Tests, `PACKET P4 READY FOR REVIEW`. Gate unchanged.
+
 ### 2026-10-29 21:12 IST P4: lyric pass is yours again; the Mac's partial output is published
 
 The owner wants the fetching done on the box, so the Mac pass is stopped. Everything it got is published as release `lyrics-mac-20261029` on shreyash616/echo, asset `lyrics_mac.tar.gz`: 1,191 lyric files (`<safe_id>.txt`) and `lyrics_none_ids.txt`, 639 safe_ids LRCLIB has nothing for, all under the corrected four-step flow. Your 16:55 plan (replace the none list, not append) is agreed.

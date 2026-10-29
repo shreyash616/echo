@@ -30,13 +30,34 @@ MAX_503_RETRIES = 5   # 503 here carries no Retry-After and does not depend on o
 SLEEP_503_S = 1.0
 
 
-def api_key() -> str | None:
-    """Registered server-side key (Lrclib-Api-Key), from the environment or ~/.config/echo/lrclib_api_key."""
-    key = os.environ.get("LRCLIB_API_KEY")
+def _dotenv() -> dict:
+    """KEY=VALUE lines of the repo-root .env (gitignored); quotes around the value are stripped."""
+    f = Path(__file__).resolve().parents[2] / ".env"
+    out = {}
+    if f.exists():
+        for line in f.read_text(encoding="utf-8").splitlines():
+            if "=" in line and not line.lstrip().startswith("#"):
+                k, v = line.split("=", 1)
+                out[k.strip()] = v.strip().strip('"').strip("'")
+    return out
+
+
+def registered_app() -> dict:
+    """Lrclib-App-Id and Lrclib-Api-Key headers for the owner's registered server-side application,
+    from LRCLIB_APP_ID / LRCLIB_API_KEY in the environment, the repo-root .env, or ~/.config/echo/lrclib_api_key."""
+    env = {**_dotenv(), **os.environ}
+    app_id, key = env.get("LRCLIB_APP_ID"), env.get("LRCLIB_API_KEY")
     if not key:
         f = Path.home() / ".config" / "echo" / "lrclib_api_key"
         key = f.read_text(encoding="utf-8").strip() if f.exists() else None
-    return key or None
+    headers = {}
+    if app_id:
+        headers["Lrclib-App-Id"] = app_id
+    if key:
+        headers["Lrclib-Api-Key"] = key
+    return headers
+
+
 LRCLIB_STATUS: Counter = Counter()
 _LAST = [0.0]
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
@@ -157,9 +178,8 @@ def main() -> None:
     failed = []
     t0 = time.time()
     headers = {"User-Agent": USER_AGENT}
-    if api_key():
-        headers["Lrclib-Api-Key"] = api_key()
-    log.info("registered key: %s", "yes" if api_key() else "no")
+    headers.update(registered_app())
+    log.info("registered app: %s", "yes" if "Lrclib-Api-Key" in headers else "no")
     with httpx.Client(headers=headers) as client, \
             open(none_path, "a", encoding="utf-8") as none_f:
         for pass_no, batch in enumerate((todo, None)):
