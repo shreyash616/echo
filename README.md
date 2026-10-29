@@ -36,6 +36,17 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-29 22:22 IST P4: GO for eight shards; the fetcher now reads backend/.env by itself
+
+Good test. The registered tier is accepted and still shed at 63%, so the 503 is LRCLIB's own overload and no rate on our side changes it. Sharding is the right lever.
+
+1. GO for parallel shards, eight rather than four: at about 40 requests a minute each that is 320 a minute, about 5% of the application's allowance, and roughly 7 to 8 hours instead of 58. Do not go wider than eight; the 503s say LRCLIB is already struggling. Disjoint `--ids-file` shards, separate `--out` directories, `--spacing 0.1`. Stop the single worker you started first, or exclude the rows it has done from the shards; both are fine since every file and none id is skipped anyway.
+2. Merge at the end as before: every shard's `it_*.txt` into `ml/data/lyrics/`, every shard's `lyrics_none_ids.txt` appended to `ml/data/lyrics/lyrics_none_ids.txt`, and the shards' `lyrics_error_ids.txt` concatenated; run the fetcher once more with `--ids-file` set to that concatenation so the errors get a second full attempt, then whatever remains in `lyrics_error_ids.txt` is `error_after_retry`.
+3. Credentials: pull `ml/data/fetch_lyrics_remote.py` again. It now reads `backend/.env` as well as a repo-root `.env`, and accepts `LRCLIB_APPLICATION_ID` / `LRCLIB_SECRET_KEY` as well as the names I used, so the environment mapping is no longer needed. Nothing was renamed on the owner's side.
+4. Then the none list rebuild, assembly, manifest, index, parity, Tests and `PACKET P4 READY FOR REVIEW`, as in the 21:12 entry. Gate unchanged.
+
+Post one line when the eight shards are running, with the per-shard row counts, and the usual report at the end. No need to post in between.
+
 ### 2026-10-29 21:23 IST P4: stop the current run now; resume with the registered application
 
 The owner is telling you directly as well: stop whatever lyric fetching is running right now, your `fetch_lyrics` or the remote fetcher in one or two shards. At the unregistered rate it would run all night, and the registered application finishes it in minutes. Nothing is lost: every `<safe_id>.txt` already written and every id in `lyrics_none_ids.txt` is skipped on the next run.

@@ -31,22 +31,25 @@ SLEEP_503_S = 1.0
 
 
 def _dotenv() -> dict:
-    """KEY=VALUE lines of the repo-root .env (gitignored); quotes around the value are stripped."""
-    f = Path(__file__).resolve().parents[2] / ".env"
+    """KEY=VALUE lines of the repo-root .env and backend/.env (both gitignored); quotes are stripped."""
+    root = Path(__file__).resolve().parents[2]
     out = {}
-    if f.exists():
-        for line in f.read_text(encoding="utf-8").splitlines():
-            if "=" in line and not line.lstrip().startswith("#"):
-                k, v = line.split("=", 1)
-                out[k.strip()] = v.strip().strip('"').strip("'")
+    for f in (root / ".env", root / "backend" / ".env"):
+        if f.exists():
+            for line in f.read_text(encoding="utf-8").splitlines():
+                if "=" in line and not line.lstrip().startswith("#"):
+                    k, v = line.split("=", 1)
+                    out[k.strip()] = v.strip().strip('"').strip("'")
     return out
 
 
 def registered_app() -> dict:
     """Lrclib-App-Id and Lrclib-Api-Key headers for the owner's registered server-side application,
-    from LRCLIB_APP_ID / LRCLIB_API_KEY in the environment, the repo-root .env, or ~/.config/echo/lrclib_api_key."""
+    from LRCLIB_APP_ID / LRCLIB_API_KEY (or LRCLIB_APPLICATION_ID / LRCLIB_SECRET_KEY) in the environment,
+    the repo-root .env, backend/.env, or ~/.config/echo/lrclib_api_key."""
     env = {**_dotenv(), **os.environ}
-    app_id, key = env.get("LRCLIB_APP_ID"), env.get("LRCLIB_API_KEY")
+    app_id = env.get("LRCLIB_APP_ID") or env.get("LRCLIB_APPLICATION_ID")
+    key = env.get("LRCLIB_API_KEY") or env.get("LRCLIB_SECRET_KEY")
     if not key:
         f = Path.home() / ".config" / "echo" / "lrclib_api_key"
         key = f.read_text(encoding="utf-8").strip() if f.exists() else None
