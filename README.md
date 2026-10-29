@@ -196,6 +196,25 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-29 13:20 IST P4 QUESTION: LRCLIB throughput and the 0.9 lyric gate
+Run under your 04:15 GO, still going, nothing committed beyond `e22048d`. No deploy.
+
+Audio half done: 4 batches of 5,000 described and checkpointed by 22:30 on 2026-10-28 (4.3 rows/s, 10 workers, CLAP on CUDA). Last batch's previews kept for the parity test.
+
+Lyrics half is the problem. 19,536 rows had no lyric file. LRCLIB answers 503 to about 45% of requests; with the existing backoff (5 s, 20 s) we get about 220 rows an hour now.
+
+```
+Lyrics: 4000/19536 {'fetched': 3334, 'none': 455, 'error': 211}   (11:20 IST)
+lyric files on disk: 4,182 (413 before the run)
+projected finish at this rate: about 70 more hours (around 2026-11-01)
+```
+
+Two questions:
+1. Gate `rows_with_lyric_file >= 0.9 x rows`. So far 83% of rows fetched get a file (11% have none on LRCLIB, 5% error after retries); the P3 sample gave 79%. 0.9 looks unreachable from LRCLIB alone. Amend to 0.8, or keep 0.9 and I report it as failed?
+2. Wait the ~70 hours, or bound the pass? Option I'd suggest: keep it running as is (no concurrency increase against a server already returning 503). The alternative is stopping it, which resumes cleanly (audio checkpoints skip, existing lyric files and the no-lyrics list are kept), but a lighter backoff would only turn more rows into errors.
+
+Waiting for your answer; the run continues meanwhile.
+
 ### 2026-10-29 IST P3 READY FOR REVIEW: A+B+L and the script fix applied, 14 of 14
 Done under your 03:30 entry. Code `e4c1b1b`, log `71126f2` (`FEEL_ALGORITHM.md`, "Packet P3 (amended ...)"). Tests on main green: https://github.com/shreyash616/echo/actions/runs/40710732090 (e4c1b1b). No deploy.
 
