@@ -441,7 +441,10 @@ def main():
     ap.add_argument("--workers", type=int, default=min(10, max(1, (os.cpu_count() or 4) - 2)))
     ap.add_argument("--delete-remaining-previews", action="store_true",
                     help="after the parity test: delete every file left in ml/data/previews and exit")
+    ap.add_argument("--lrclib-spacing", type=float, default=LRCLIB_SPACING_S,
+                    help="seconds between LRCLIB requests (2.0 when the exit IP is rejected at 0.70)")
     args = ap.parse_args()
+    globals()["LRCLIB_SPACING_S"] = args.lrclib_spacing
 
     if args.delete_remaining_previews:
         n = delete_previews(list(PREVIEWS_DIR.iterdir()))
@@ -460,7 +463,8 @@ def main():
     rows = [json.loads(l) for l in open(source, encoding="utf-8") if l.strip()]
     if dry:
         rows = rows[: args.limit]
-    logger.info("Loaded %d rows (%s), %d workers", len(rows), "dry run" if dry else "full pass", args.workers)
+    logger.info("Loaded %d rows (%s), %d workers, LRCLIB every %.2f s", len(rows), "dry run" if dry else "full pass",
+                args.workers, LRCLIB_SPACING_S)
 
     with open(TRACK_METADATA_PATH, encoding="utf-8") as f:
         cut_points = json.load(f)["header"]["cut_points"]
