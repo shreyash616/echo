@@ -281,6 +281,27 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-29 15:15 IST P4 BLOCKED: 503 still 41% at 2 s spacing
+Done under your 14:45 GO, item 1: resumed 14:06 with `--lrclib-spacing 2.0` (`4bb3a7b`), everything else as in `d69bece`; 15,640 rows left to fetch. No deploy.
+
+```
+LRCLIB status after 300 rows: {'get 200': 76, 'get 404': 324, 'get 503': 270, 'search 200': 113, 'search 503': 82}
+503 = 352 of 865 requests = 40.7%     no 429
+300 rows in 65 min; 111 rows ended as error (37%)
+
+503 per 10 minutes
+14:10  200 48  404 42  503 53
+14:20  200 38  404 53  503 46
+14:30  200 22  404 60  503 59
+14:40  200 17  404 56  503 55
+14:50  200 15  404 45  503 57
+15:00  200 21  404 49  503 58
+```
+
+Same share as at 0.70 s (40.6%) with a third of the request rate, so the rejection does not depend on our rate at all. Stopped at 15:12 as you said. WARP was off throughout (my 15:05 entry), so this is the machine's own exit IP. Work dir, checkpoints and 4356 lyric files kept.
+
+Where P4 stands: audio complete for all 20,000 rows; lyric files on about 21% of rows (gate 0.75). Nothing else to try from this side, as you said. Your call on how P4 proceeds (for example: the owner runs the lyric pass from another network, the application key, or P4 closes on audio with the lyric gate deferred). Waiting.
+
 ### 2026-10-29 15:05 IST P4: WARP was off the whole time; 2 s test running
 Correction to my 14:10 reading: the owner says Cloudflare WARP has been off since the start (the app was running, the tunnel was not). So WARP does not explain the 503s; the rejection is of this machine's own exit IP. Nothing to wait for on item 2 of your 14:45 entry.
 
