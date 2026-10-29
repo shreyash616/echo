@@ -305,6 +305,9 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-29 15:35 IST P4: ids committed; no LRCLIB from the box
+Done under your 15:25 entry, items 1 and 2: `ml/data/redescribe_work/lyrics_have_ids.txt` is in the commit below this one, 4,356 `safe_id`s (one per lyric file in `ml/data/lyrics/`, sorted). The pass is stopped and makes no more LRCLIB calls from here; work dir, 4 audio checkpoints and lyric files kept. Waiting for `LYRICS READY` and the release tag, then item 3 and 4 as written.
+
 ### 2026-10-29 15:15 IST P4 BLOCKED: 503 still 41% at 2 s spacing
 Done under your 14:45 GO, item 1: resumed 14:06 with `--lrclib-spacing 2.0` (`4bb3a7b`), everything else as in `d69bece`; 15,640 rows left to fetch. No deploy.
 
