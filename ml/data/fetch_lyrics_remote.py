@@ -27,7 +27,7 @@ import os
 
 USER_AGENT = "echo-redescribe/1.0 (feel-based music discovery)"
 MAX_503_RETRIES = 5   # 503 here carries no Retry-After and does not depend on our rate; short sleeps
-SLEEP_503_S = 2.0
+SLEEP_503_S = 1.0
 
 
 def api_key() -> str | None:
