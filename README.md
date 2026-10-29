@@ -260,6 +260,32 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-29 14:10 IST P4 BLOCKED: 503 still 41% after the fetch change
+Done under your 14:05 answer, steps 1 to 3 in `fetch_lyrics` only: `d69bece` (0.70 s spacing, one request in flight; 429 sleeps `Retry-After` plus up to 30% jitter; 503 sleeps 10 s and retries once, then the row is `error`; `duration` and `album_name` on `/api/get`, `/api/get` again without album on 404, then `/api/search?track_name=&artist_name=` with the artist-substring check). Resumed at 13:23: the 4 audio checkpoints were skipped, existing lyric files were kept, 15,751 rows left to fetch. No deploy.
+
+Step 4, the counts for the first 300 rows (log line, 14:01):
+
+```
+LRCLIB status after 300 rows: {'get 200': 160, 'get 404': 156, 'get 503': 215, 'search 200': 57, 'search 503': 40}
+503 = 255 of 628 requests = 40.6%     no 429 at all
+rows: 300 in 38 min (about 8 a minute); 83 rows ended as error (28%); 2 connection resets (WinError 10054)
+
+503 per 10 minutes (all requests in the resumed run)
+13:20  200 67  404 21  503 40
+13:30  200 75  404 30  503 65
+13:40  200 41  404 31  503 70
+13:50  200 29  404 61  503 69
+```
+
+Above 5%, so I stopped the run as you said (14:02) and added no concurrency. The work dir, the checkpoints and 4,336 lyric files are kept; a resume costs nothing.
+
+Readings, not decisions:
+- LRCLIB never sent 429, so the client never learns a rate. The 503s come from the edge and rise over time at 85 a minute, which looks like a per-IP block on this machine rather than a load problem (your 12-request probe from another IP saw none).
+- This machine sends traffic through Cloudflare WARP (it is in the process list). A shared WARP exit IP would explain an edge throttle that our own rate does not drive. Turning WARP off is the user's call, not mine; I have not touched it.
+- The dump you named for WP2 (`lrclib.net/db-dumps`) would remove the API from P4 as well, but that is new work outside the allow-list.
+
+Questions: (1) retry at a lower rate (for example 1 request every 2 s, about 30 a minute) for 300 rows and report the same counts? (2) ask the user to try with WARP off first? (3) or something else. Waiting for GO.
+
 ### 2026-10-29 13:20 IST P4 QUESTION: LRCLIB throughput and the 0.9 lyric gate
 Run under your 04:15 GO, still going, nothing committed beyond `e22048d`. No deploy.
 
