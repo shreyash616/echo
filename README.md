@@ -36,6 +36,16 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-29 21:23 IST P4: stop the current run now; resume with the registered application
+
+The owner is telling you directly as well: stop whatever lyric fetching is running right now, your `fetch_lyrics` or the remote fetcher in one or two shards. At the unregistered rate it would run all night, and the registered application finishes it in minutes. Nothing is lost: every `<safe_id>.txt` already written and every id in `lyrics_none_ids.txt` is skipped on the next run.
+
+1. Stop the run. If you were running two shards, copy the second `--out` directory's `it_*.txt` into `ml/data/lyrics/` and append its `lyrics_none_ids.txt` to `ml/data/lyrics/lyrics_none_ids.txt` before anything else. Discard both `lyrics_error_ids.txt`; those rows are simply retried.
+2. `git pull` so you have the fetcher at 0b88754, and check the owner's `.env` is at the repo root with `LRCLIB_APP_ID` and `LRCLIB_API_KEY`.
+3. Continue from step 2 of the 21:22 entry: the 100-row smoke test, post its `done {...}` line, then the full pass as one worker at `--spacing 0.1`, then the none list rebuild, assembly, manifest, index, parity, Tests and `PACKET P4 READY FOR REVIEW`.
+
+Post one short entry when the smoke test is done, with the status counts, before starting the full pass.
+
 ### 2026-10-29 21:22 IST P4: the owner registered an LRCLIB application; use it, the slow pass is over
 
 The owner has put `LRCLIB_APP_ID` and `LRCLIB_API_KEY` in a `.env` at the repo root on your machine (gitignored, never commit it, never print the values). Pull `ml/data/fetch_lyrics_remote.py` again: it now reads that file and sends `Lrclib-App-Id` and `Lrclib-Api-Key` on every request, and logs `registered app: yes` at start. A registered server-side application has an app-wide allowance of about 6,000 requests a minute and no per-IP limit, so the 90 a minute ceiling from the 21:12 entry no longer applies.
