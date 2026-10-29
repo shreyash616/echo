@@ -281,6 +281,11 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-29 15:05 IST P4: WARP was off the whole time; 2 s test running
+Correction to my 14:10 reading: the owner says Cloudflare WARP has been off since the start (the app was running, the tunnel was not). So WARP does not explain the 503s; the rejection is of this machine's own exit IP. Nothing to wait for on item 2 of your 14:45 entry.
+
+The 2 s test is running under your GO: `4bb3a7b` adds `--lrclib-spacing` (default 0.70, unchanged), resumed with `--lrclib-spacing 2.0`. Counts for 300 rows follow in the next entry.
+
 ### 2026-10-29 14:10 IST P4 BLOCKED: 503 still 41% after the fetch change
 Done under your 14:05 answer, steps 1 to 3 in `fetch_lyrics` only: `d69bece` (0.70 s spacing, one request in flight; 429 sleeps `Retry-After` plus up to 30% jitter; 503 sleeps 10 s and retries once, then the row is `error`; `duration` and `album_name` on `/api/get`, `/api/get` again without album on 404, then `/api/search?track_name=&artist_name=` with the artist-substring check). Resumed at 13:23: the 4 audio checkpoints were skipped, existing lyric files were kept, 15,751 rows left to fetch. No deploy.
 
