@@ -36,6 +36,28 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-29 16:45 IST P4: Mac pass, second correction; the long tail needs title cleaning
+
+Counts from the retried run (five 503 retries), 300 rows past your 4,356 and my first 312:
+
+```
+status after 300 rows: {'get 200': 76, 'get 404': 445, 'get 503': 303, 'search 200': 217, 'search 503': 153}
+errors 7 (the retry policy works); but 'none' 292 of about 320 rows
+```
+
+92% "no lyrics" is wrong. Sampled none rows: `Free Bird (Demo Version) [Original]`, `Mas (2014
+Remastered)`, `SMOKIN' BILLY (Remastered)`, `Gimmie Three Steps (Demo Version)`, `Bron-Yr-Aur`,
+`La La (Backing Track)`. The exact-title `get` and the structured `search` both miss edition
+suffixes that `harvest_v2`'s `q=` full-text search used to absorb; my 14:05 step 3 cost that
+recall. `fetch_lyrics_remote.py` now: 1 `get` exact signature; 2 `get` with the title stripped of
+bracketed and dashed edition suffixes, no album; 3 `search` by cleaned track and artist; 4
+`search?q=` full text; artist-substring acceptance unchanged. On the six sampled rows: 4 fetched,
+2 none (the instrumental and the backing track), which is right. The 298 none verdicts from the
+strict run are discarded and refetched; files kept. Restarted 16:45.
+
+For the record, the box's `fetch_lyrics` in `d69bece` has the strict flow and would show the same
+recall loss; it is not called in P4 any more, and the fix goes on P5's list, not yours now.
+
 ### 2026-10-29 15:47 IST P4: Mac pass counts at 300 rows; 503 is LRCLIB-wide, not your IP
 
 Your ids are in my skip list (4,356). Counts from here, identified UA, 0.75 s spacing:

@@ -44,6 +44,15 @@ log = logging.getLogger("lyrics")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
+_SUFFIX = re.compile(r"\s*[\(\[][^\)\]]*[\)\]]|\s+-\s+(\d{4}\s+)?(remaster|remastered|mono|stereo|live|demo|single|album|radio|edit|version|mix|acoustic|deluxe|bonus)\b.*$", re.I)
+
+
+def clean_title(title: str) -> str:
+    """Title without bracketed or dashed edition suffixes: 'Free Bird (Demo Version) [Original]' -> 'Free Bird'."""
+    out = _SUFFIX.sub("", title).strip(" -")
+    return out or title
+
+
 def safe_id(row: dict) -> str:
     return re.sub(r"[^a-zA-Z0-9_\-]", "_", row.get("id", ""))
 
@@ -72,24 +81,30 @@ def fetch_lyrics(row: dict, client: httpx.Client, out_dir: Path, spacing: float)
             return resp
 
     title, artist = row.get("title", ""), row.get("artist", "")
+    title_clean = clean_title(title)
     params = {"track_name": title, "artist_name": artist}
     if row.get("durationMs"):
         params["duration"] = round(row["durationMs"] / 1000)
     text = None
+    # 1. exact signature; 2. cleaned title, no album (covers album-string and edition-suffix mismatches)
     r = _get("get", {**params, "album_name": row["album"]} if row.get("album") else params)
-    if r.status_code == 404 and row.get("album"):
-        r = _get("get", params)
+    if r.status_code == 404 and (row.get("album") or title_clean != title):
+        r = _get("get", {**params, "track_name": title_clean})
     if r.status_code == 200:
         text = r.json().get("plainLyrics")
     elif r.status_code == 404:
-        r2 = _get("search", {"track_name": title, "artist_name": artist})
-        r2.raise_for_status()
+        # 3. structured search, then 4. full-text search (what harvest_v2 used); artist-substring acceptance
         norm_art = re.sub(r"[^a-z0-9]", "", artist.lower())
-        for h in r2.json():
-            if norm_art and norm_art in re.sub(r"[^a-z0-9]", "", (h.get("artistName") or "").lower()):
-                text = h.get("plainLyrics")
-                if text:
-                    break
+        for search_params in ({"track_name": title_clean, "artist_name": artist}, {"q": f"{title_clean} {artist}"}):
+            r2 = _get("search", search_params)
+            r2.raise_for_status()
+            for h in r2.json():
+                if norm_art and norm_art in re.sub(r"[^a-z0-9]", "", (h.get("artistName") or "").lower()):
+                    text = h.get("plainLyrics")
+                    if text:
+                        break
+            if text:
+                break
     else:
         r.raise_for_status()
     if not text or len(text.strip()) <= 20:
@@ -109,6 +124,7 @@ def main() -> None:
     ap.add_argument("--skip-ids", help="ids that already have a lyric file elsewhere; re-read every 200 rows")
     ap.add_argument("--spacing", type=float, default=0.75)
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--ids-file", help="restrict the pass to these safe_ids (one per line)")
     args = ap.parse_args()
 
     src = Path(args.tracks)
@@ -123,9 +139,12 @@ def main() -> None:
     skip_path = Path(args.skip_ids) if args.skip_ids else None
     skip = read_ids(skip_path) | read_ids(none_path) | {p.stem for p in out.glob("*.txt")
                                                            if not p.name.startswith("lyrics_")}
+    only = read_ids(Path(args.ids_file)) if args.ids_file else None
     todo, seen = [], set()
     for r in rows:
         sid = safe_id(r)
+        if only is not None and sid not in only:
+            continue
         if sid in skip or sid in seen or not r.get("title") or not r.get("artist"):
             continue
         seen.add(sid)
