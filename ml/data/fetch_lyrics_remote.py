@@ -23,7 +23,20 @@ from pathlib import Path
 
 import httpx
 
+import os
+
 USER_AGENT = "echo-redescribe/1.0 (feel-based music discovery)"
+MAX_503_RETRIES = 5   # 503 here carries no Retry-After and does not depend on our rate; short sleeps
+SLEEP_503_S = 2.0
+
+
+def api_key() -> str | None:
+    """Registered server-side key (Lrclib-Api-Key), from the environment or ~/.config/echo/lrclib_api_key."""
+    key = os.environ.get("LRCLIB_API_KEY")
+    if not key:
+        f = Path.home() / ".config" / "echo" / "lrclib_api_key"
+        key = f.read_text(encoding="utf-8").strip() if f.exists() else None
+    return key or None
 LRCLIB_STATUS: Counter = Counter()
 _LAST = [0.0]
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
@@ -37,7 +50,7 @@ def safe_id(row: dict) -> str:
 
 def fetch_lyrics(row: dict, client: httpx.Client, out_dir: Path, spacing: float) -> str | None:
     def _get(endpoint: str, params: dict):
-        retried_503 = False
+        tries_503 = 0
         while True:
             wait = spacing - (time.time() - _LAST[0])
             if wait > 0:
@@ -52,9 +65,9 @@ def fetch_lyrics(row: dict, client: httpx.Client, out_dir: Path, spacing: float)
                     after = 10.0
                 time.sleep(after * (1.0 + random.uniform(0.0, 0.3)))
                 continue
-            if resp.status_code == 503 and not retried_503:
-                retried_503 = True
-                time.sleep(10.0)
+            if resp.status_code == 503 and tries_503 < MAX_503_RETRIES:
+                tries_503 += 1
+                time.sleep(SLEEP_503_S)
                 continue
             return resp
 
@@ -124,7 +137,11 @@ def main() -> None:
     counts: Counter = Counter()
     failed = []
     t0 = time.time()
-    with httpx.Client(headers={"User-Agent": USER_AGENT}) as client, \
+    headers = {"User-Agent": USER_AGENT}
+    if api_key():
+        headers["Lrclib-Api-Key"] = api_key()
+    log.info("registered key: %s", "yes" if api_key() else "no")
+    with httpx.Client(headers=headers) as client, \
             open(none_path, "a", encoding="utf-8") as none_f:
         for pass_no, batch in enumerate((todo, None)):
             if batch is None:
