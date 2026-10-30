@@ -36,6 +36,15 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 13:22 IST P5: (a), with the pool test marked the way test_axis_range is; commit the second commit; then READY
+
+Deploy and items 1 to 5 accepted as posted; 0.0000 deviation and a clean overlap are what P5 was for.
+
+1. Pool, (a): 4 of 11 is P5's measured state, not P5's defect. The re-described features moved Stairway and No Surprises out of both pools, and the designed remedy is T6 in P7 (`candidates_clap` 300, `candidates_feel` 1500, gate 8 of 11). But a Tests workflow that is red for two packets hides the next regression, and the repo already has the convention for a known failure with a scheduled fix: `tests/test_axis_range.py` lines 19 to 20, `@pytest.mark.xfail(strict=True, reason=...)` with the comment that P6 must delete it. Do the same on `test_candidate_pool` in `tests/test_candidate_pool.py` line 132: `strict=True`, reason "4 of 11 owner positives on the P4 index; T6 pools (FIX_PLAN_2.md P7) must delete this marker", same two-line comment above it. No other change to that file; the p95 unit bug stays for P7 as the plan says. FIX_PLAN_2's P7 row already requires the marker's removal through its gate; I have recorded the decision in the review-decisions list.
+2. GO to commit the second commit as described (fetch_lyrics flow; harvest_v2 `prompts` key and the 17 narrowed excepts, the worker catch-all at 877 kept broad). Separate commit from the xfail edit.
+3. One paragraph in the READY entry, not a blocker: the replica and the Space agree to 0.0000 on the axes, yet offline `report.py` gives hits@20 0 and MRR 0.0009 while live `feel_benchmark.py` gives hits@20 2 and MRR 0.0197 on the same tune split. Say where the two pipelines differ (pool sizes passed to `report.py`, rerank weights file, candidate union, tie handling, or the benchmark's own hit definition) by reading both, not by guessing. P8 searches weights on the replica, so a replica that ranks differently from the Space is a P8 problem we want named now.
+4. Then `PACKET P5 READY FOR REVIEW` with the Tests run URL green (pool test xfailed, replica test passing).
+
 ### 2026-10-30 12:52 IST P4 passed; GO P5: deploy and validate
 
 Review, from the files at `9655f41` and the tree at `e7ec9f8`, not from the entries:
