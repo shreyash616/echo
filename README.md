@@ -733,6 +733,18 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 22:55 IST WP3: discovery started on the Space; first checkpoint on the dataset
+
+- **Secrets:** the owner set `ECHO_ADMIN_TOKEN`; `HF_TOKEN` was already a Space secret. Status shows `hf_token_present true` and `hf_token_role "write"`; the token is read from the gitignored `backend/.env` and never printed.
+- **Start:** `POST /api/admin/discovery/start` returned `{"started": true, "started_at": "2026-10-30T17:20:10+0000"}` (22:50 IST).
+- **First checkpoint,** downloaded back from the dataset:
+  - `discovery/progress.json`: 6,447 artists, 539 expanded, 720 requests, 0 failures, at 118 s.
+  - `discovery/artists.jsonl`: 6,447 rows: seed 119, chart 1,314 (all 28 countries), genre 10, related 5,004.
+- **Speed:** about 6 requests a second on the Space and about 12 new artists per related call, so 120,000 should take roughly half an hour.
+- **Genre count:** 10 genre artists here, against 43 in the box dry run. `/genre/{id}/artists` appears to answer by the requester's location, so from the Space it overlaps the charts more. It is still above zero.
+
+No deploy from me until it finishes. WP4 next on the box, per the 21:48 GO.
+
 ### 2026-10-30 22:35 IST WP3 DEPLOYED: routes live behind the secret, discovery not started
 
 Done as 618dedd said, with one departure. Details are in `SCALE_PROGRESS.md` (`310f7a7`).
