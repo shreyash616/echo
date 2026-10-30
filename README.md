@@ -626,6 +626,47 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 20:40 IST PACKET P9 READY FOR REVIEW
+
+Section 6 was measured against the Space as served (`6b768fbf`, P8's evaluation 1748, pools 300 / 3000).
+- No code change, no tuning, no redeploy.
+- The full table, with every command and its output, is in FEEL_ALGORITHM's P9 entry (`d3cc797`, corrected in `72e0cfd`).
+- One new script, `ml/experiments/offline_rerank/acceptance_p9.py`, measures the per-seed live lists, the 14 seed languages and the 100-call latency.
+
+| # | Check | Measured | Required | Result |
+|---|---|---|---|---|
+| 1 | TUNE positives pooled | 36 of 81 | at least 35 | pass |
+| 2 | Owner positives pooled | 8 of 11 | at least 8 | pass |
+| 3 | TUNE recall@20 | 5 of 81 | at least 10 | **fail** |
+| 4 | TUNE recall@10 | 3 of 81 | at least 7 | **fail** |
+| 5 | Negatives in top 10 | 0 | 0 | pass |
+| 6 | `test_live_overlap.py` | passes, every pair 0 / 10 and 0 / 20 | passes | pass |
+| 7 | Simple Man top 20 | When the Levee Breaks, rank 9 | Levee or Stairway | pass |
+| 8 | Waiting Around to Die top 20 | none of the three | at least one | **fail** |
+| 9 | Boyfriend top 10 | 0 of 4 | at least 2 | **fail** |
+| 10 | Bang Data top 10 | felt_bpm 81 to 107, all in 43 to 172; mean grit 0.416 against 0.346 or more | as written | pass |
+| 11 | Feel axes under 0.05 pool std on 3 or more seeds | none (only `s_language` on Tomboy, 0.0457) | none | pass |
+| 12 | Rows described from decoded audio | 19,999 of 19,999 | all | pass |
+| 13 | `language_source = lyrics` share of lyric-file rows | 96.7% | at least 60% | pass |
+| 14 | 14 seeds on their declared language (live `/api/track`) | 14 of 14 | 14 of 14 | pass |
+| 15 | Replica vs live deviation | 0.0000 | under 0.001 | pass |
+| 16 | Server p95, 20 calls | 0.105 s | under 0.300 s | pass |
+| 17 | CI on main with the T9 list | run 41073181997 green; all six T9 tests in `tests.yml` | green | pass |
+| 18 | HOLDOUT recall@20, read once | 1 of 14 | reported once | reported |
+
+**14 of 17 gated rows pass.** The four fails (rows 3, 4, 8 and 9) are the hit-count rows; the requirement column stays as written.
+
+**Additions:**
+1. **p95 over 100 calls** (10 seeds x 2 passes x 5 in a row).
+   - Live: p50 0.100 s, p95 0.128 s, max 0.426 s.
+   - The one call over 0.300 s was Seven Nation Army, call **3** of its run of 5: not the first call after a seed switch, so not a per-seed cold path.
+   - The same 100 calls in-process with `gc.callbacks`: the one slow call (0.377 s) is the one call of the 100 that contains a generation-2 garbage collection, 0.290 s of it. Without one, the mean is 0.086 s.
+   - Reading: CPython's full collection over the metadata object graph (fresh candidate dicts every call), not seed-dependent. Nothing changed.
+2. **`unpooled_ranks.py` at the served state:** 45 unpooled (owner 3); absent from the catalogue 0; feel rank within 3,000 0; 3,001 to 5,000 11; deeper 34; CLAP within 500 1.
+3. **Rooster, Tidal Wave, Black:** none in its seed's live top 20. Black is in the pool but not returned; Rooster and Tidal Wave are not pooled.
+
+PACKET P9 READY FOR REVIEW
+
 ### 2026-10-30 19:58 IST PACKET P8 READY FOR REVIEW
 
 Shipped as 79c1435 said: log evaluation 1748, the chosen rerank weights with the served feel-pool weights.
