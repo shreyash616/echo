@@ -36,6 +36,21 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 15:56 IST P6 passed; GO P7: pools, latency in seconds, swing out of s_groove
+
+Review from the tree at `92ea453` and the live dataset: `977c67c` touches the four P6 files only; `2aa91bc` and `8d99f96` touch the constant-fields test and the log; `test_axis_range.py` has no marker; `SEED_IDS` holds 50 ids with the strict marker at line 132; the dataset's `track_metadata.json` header has `feature_std` for 19 axes (`mode_polarity` 0.3084, `swing` 0.0); Tests run 41039757506 is green, checked. Replica 1 / 1 / 0.0020 against baseline 0 / 0 / 0.0011, deviation 0.0000. Good packet, and the frozen seed set was the right end to the test's two-faced sampling.
+
+**GO P7.** Scope is T6, T3.5 and two carried items; weights stay untouched (T6's "feel weights set to what T7 writes back" is P8's).
+1. `backend/app/config.py`: `candidates_clap` 500 to 300, `candidates_feel` 600 to 1500.
+2. `tests/test_candidate_pool.py`: `X-Process-Time` parsed as seconds, printed as seconds, `assert p95 < 0.300`; delete the strict xfail marker and its two-line comment, the test passes on its own or the packet is not done.
+3. T3.5: `swing` leaves `s_groove` in `recommender._compute_pair_score`, the four remaining inner weights renormalised to sum to 1 (0.4, 0.2, 0.2, 0.1 become 0.444, 0.222, 0.222, 0.111), mirrored in `score_lib.py`; `swing` leaves the header std list in `build_index_v2.py` (18 axes remain). Rebuild the header with `build_index_v2.py` from the P4 rows, no re-describe.
+4. Carried: the reworded log line ships with this deploy.
+5. `report.py --split tune` before (1 / 1 / 0.0020, pooled 19) and after, pooled count stated. Then `deploy_hf.py`, `deploy.yml` dispatched and named, `--validate-live` under 0.001, `python tests/test_candidate_pool.py --base-url https://shreyash616-echo-backend.hf.space` with the per-seed owner-positive table and the 20 per-call `X-Process-Time` values in seconds, `pytest -q tests/` and the Tests run URL.
+
+Gate: at least 8 of 11 owner positives and at least 35 of 81 TUNE positives pooled; server p95 under 0.300 s over the 20 in-catalogue calls; deviation under 0.001; replica hits and MRR not below P6; `test_candidate_pool` passing with no marker; Tests green.
+
+Expect the latency half to be the hard one: your P5 note put the real p95 at about 0.47 s already, before the pool grows to 1,800 candidates. If p95 is over 0.300 s after the change, do not tune anything: post BLOCKED with the 20 timings and a profile of one `/api/recommendations` call split into FAISS search, the pair-scoring loop, MMR, and response assembly (`cProfile` or timestamps around the four blocks, whichever is already in the code), and I decide what moves.
+
 ### 2026-10-30 15:45 IST P6: (b), freeze the 50 seed ids into the test; strict stays
 
 A test that samples one way when an artifact is on disk and another way when it is not measures two different things on the box and in CI; that is the defect here, and `strict=False` would only paper over it.
