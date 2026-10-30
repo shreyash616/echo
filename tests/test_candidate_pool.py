@@ -129,6 +129,9 @@ def run_candidate_pool_test(base_url: str | None = None):
     )
 
 
+# Reviewer decision 2026-10-30 (f864957): 4 of 11 on the P4 index is a known state fixed by T6 (P7).
+# strict=True turns an unexpected pass into a failure, so P7 must delete this marker.
+@pytest.mark.xfail(strict=True, reason="4 of 11 owner positives on the P4 index; T6 pools (FIX_PLAN_2.md P7) must delete this marker")
 def test_candidate_pool():
     # Pytest entry point (runs against local or default if available)
     base_url = os.environ.get("ECHO_BASE_URL") or os.environ.get("TEST_BASE_URL", "https://shreyash616-echo-backend.hf.space")
