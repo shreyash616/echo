@@ -13,7 +13,7 @@ AXES = ["s_clap", "s_anchor", "s_tempo", "s_pulse", "s_groove", "s_dark", "s_gri
         "s_intimacy", "s_restraint", "s_meaning", "s_language", "s_harm", "s_mode"]
 AUDIO_KEYS = AXES[:10]
 
-# ---- language affinity (copied semantics from backend/app/services/language_affinity.py, no learned file) ----
+# ---- language affinity (copied semantics from backend/app/services/language_affinity.py, learned file included) ----
 _GROUPS = {
     "indic_north": {"hi", "pa", "ur", "bn", "mr", "gu"},
     "indic_south": {"ta", "te", "ml", "kn"},
@@ -36,12 +36,19 @@ def _group_of(l):
             return g
     return None
 
+_LEARNED = json.load(open(f"{HF}/language_affinity.json", encoding="utf-8")) if os.path.exists(f"{HF}/language_affinity.json") else {}
+
+
 def language_affinity(s, c):
     if not s or not c:
         return 0.75
     s, c = s.lower().strip(), c.lower().strip()
     if s == c:
         return 1.0
+    if f"{s}:{c}" in _LEARNED:  # the Space reads the learned table before the rules (FEEL_ALGORITHM 11.8.3)
+        return float(_LEARNED[f"{s}:{c}"])
+    if f"{c}:{s}" in _LEARNED:
+        return float(_LEARNED[f"{c}:{s}"])
     p = frozenset({s, c})
     if p in _SPECIFIC:
         return _SPECIFIC[p]
