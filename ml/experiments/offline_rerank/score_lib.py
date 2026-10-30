@@ -293,7 +293,7 @@ class Catalogue:
         self.weights_live = json.load(open(f"{HF}/rerank_weights.json"))
         self.feature_std = self.header.get("feature_std") or {}
         self.k_clap = 300  # as config.candidates_clap
-        self.k_feel = 1500  # as config.candidates_feel
+        self.k_feel = 3000  # as config.candidates_feel
 
     def pool(self, seed_key, k_clap=None, k_feel=None):
         k_clap = k_clap or self.k_clap

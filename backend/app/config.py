@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     max_recommendations: int = 20
     max_audio_size_mb: int = 30
     candidates_clap: int = 300
-    candidates_feel: int = 1500
+    candidates_feel: int = 3000
 
 
 settings = Settings()
