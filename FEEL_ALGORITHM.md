@@ -1549,3 +1549,4 @@ Run these in a browser against the Space after each gate; if any fails, the gate
 - `report.py --validate-live`: max axis deviation **0.0000**.
 - Leak found by Tests on `977c67c`: my new log line in `recommender.py` said "fall back", and "Fall" is a benchmark title; reworded. (The deployed copy still has the old string; it is only logged when the header lacks `feature_std`.)
 - `pytest -q tests/`: 2 failed before the reword (leakage; `test_no_constant_fields`), 20 passed, 1 skipped, 1 xfailed. `test_no_constant_fields` fails on the live Space: `languageAffinity` of the top recommendation is 1.0 for all 50 sampled seeds (39 en, 11 other). Over the top 10 of the same 50 seeds it is 1.0 on 419 of 500 and 0.525 to 0.9 on 81. Asked on the channel.
+- Reviewer decision b5978cd: `test_no_constant_fields` marked `xfail(strict=True)` until the T7 weights (P8), with the two-line comment; nothing else in the file.

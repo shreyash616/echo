@@ -139,6 +139,9 @@ def run_no_constant_fields_test(base_url: str):
     print("ALL FIELD PARITY AND NON-CONSTANT CHECKS PASSED!")
 
 
+# Reviewer decision 2026-10-30 (b5978cd): same-language first results are the served s_language 0.21, fixed by T7 (P8).
+# strict=True turns an unexpected pass into a failure, so P8 must delete this marker.
+@pytest.mark.xfail(strict=True, reason="languageAffinity 1.0 on results[0] for 50 of 50 seeds under the served s_language 0.21; T7 weights (FIX_PLAN_2.md P8) must delete this marker")
 def test_no_constant_fields():
     base_url = os.environ.get("ECHO_BASE_URL") or os.environ.get("TEST_BASE_URL", "https://shreyash616-echo-backend.hf.space")
     try:
