@@ -188,3 +188,157 @@ included). Same interpreter, same stack as P4's describe, so the golden parity q
   follow-up commit.
 
 PACKET WP1 READY FOR REVIEW
+
+## WP2. Columnar storage and loader, on the existing 20,000 rows
+
+- Started: 2026-10-30 21:10 IST after GO WP2 (README 8ea9733).
+- Files (seven, the list as amended at 3b44f87): `ml/inference/build_index_v3.py` (new), `backend/app/services/recommender.py`
+  (loader only), `ml/experiments/offline_rerank/score_lib.py`, `tests/test_columnar_loader.py` (new), `tests/deploy_hf.py`
+  (file list), `backend/startup.sh` (six downloads), `backend/requirements.txt` (`pyarrow==26.0.0`); `SCALE_PROGRESS.md`.
+- Commits: `15db12e` (the five files), `2c67304` (no JSON fallback, `startup.sh`, the pin).
+
+### What was built
+
+- `build_index_v3.py` runs `build_index_v2.main()` unchanged with its outputs redirected to a scratch directory (so every
+  derived field, standardisation and cut point is the code that produced the served rows), checks those rows and that
+  header equal the served `track_metadata.json` (`True`), and writes: `clap.f16.npy` (19,999 x 512 float16),
+  `feel_matrix.npy` (byte-identical to the served one), `features.npz` (52 arrays), `strings.parquet` (17 text columns),
+  `keys.npy` / `key_order.npy`, `header.json` (v2's header plus the column list, the two field orders, rows, build commit).
+- `recommender.py`: `ColumnarRows` (a row is a dict assembled on demand from the columns: the JSON row's fields, field
+  order and Python types), `KeyLookup` (`get` / `in` / `[]` by id, key, itunes id, as `track_id_map.json`), and
+  `_load_columnar`: CLAP float16 to float32 into a flat `IndexFlatIP`, the feel matrix into `IndexFlatL2`. **No JSON
+  fallback**: a missing or unreadable file is logged by name and the recommender stays unloaded (`/api/health` false).
+- `score_lib.Catalogue` reads the same files through the Space's own `ColumnarRows` and `KeyLookup` (rows materialised
+  once, as the replica iterates them) and raises on a missing file; no JSON path left.
+
+### Verification block, verbatim
+
+```
+$ python ml/inference/build_index_v3.py --out ml/inference && ls -la ml/inference | grep -E "clap.f16|feel_matrix|features.npz|strings.parquet|keys.npy|header.json"
+
+============================================================
+STEP R4 / S1 INDEX BUILD COMPLETED SUCCESSFULLY
+Total Catalogue Rows:       19999
+CLAP FAISS Index Total:     19999 (dim 512)
+Feel FAISS Index Total:     19999 (dim 17)
+ID Map Entries:             59953
+Anchor Max Cosine:          0.8032 (< 0.95)
+Anchor Min Cosine:          -0.0431 (< 0.70)
+First 50 Mean Cosine:       0.6542 (< 0.90)
+kick_class shares:
+  other               : 41.20%
+  syncopated_808      : 42.30%
+  sparse_backbeat     : 15.67%
+  four_on_floor       : 0.83%
+restraint_bucket shares:
+  moderate            : 51.62%
+  restrained          : 24.30%
+  saturated           : 24.08%
+============================================================
+============================================================
+build_index_v3: 19999 rows, 66 fields -> ml\inference
+  numeric arrays 52, text columns 17, lookup keys 59953
+  clap.f16 max abs error against the float32 rows: 6.104e-05
+============================================================
+-rw-r--r-- 1 Shreyash Padhi 197121 20479104 Oct 30 21:29 clap.f16.npy
+-rw-r--r-- 1 Shreyash Padhi 197121  9312707 Oct 30 21:29 features.npz
+-rw-r--r-- 1 Shreyash Padhi 197121  1360060 Oct 30 21:29 feel_matrix.npy
+-rw-r--r-- 1 Shreyash Padhi 197121    13007 Oct 30 21:29 header.json
+-rw-r--r-- 1 Shreyash Padhi 197121   479752 Oct 30 21:29 keys.npy
+-rw-r--r-- 1 Shreyash Padhi 197121  3191038 Oct 30 21:29 strings.parquet
+
+$ python -m pytest -q tests/test_columnar_loader.py tests/test_features_golden.py tests/test_no_gates.py tests/test_no_benchmark_leakage.py
+21 passed, 5 warnings in 55.59s
+
+$ python tests/deploy_hf.py && curl -s https://shreyash616-echo-backend.hf.space/api/health
+Uploading ml/inference/clap.f16.npy -> clap.f16.npy...
+Uploading ml/inference/features.npz -> features.npz...
+Uploading ml/inference/strings.parquet -> strings.parquet...
+Uploading ml/inference/keys.npy -> keys.npy...
+Uploading ml/inference/key_order.npy -> key_order.npy...
+Uploading ml/inference/header.json -> header.json...
+Restarting Space...
+All files uploaded successfully!
+{"status":"ok","recommender_loaded":true}   (the old container, still up during the restart; the rebuilt one below)
+
+deploy.yml https://github.com/shreyash616/echo/actions/runs/41086058209 success; Space RUNNING 21:34:17 on sha 1095b439, then:
+$ curl -s https://shreyash616-echo-backend.hf.space/api/health
+{"status":"ok","recommender_loaded":true}
+
+$ ECHO_ARTIFACT_DIR=ml/inference python ml/experiments/offline_rerank/report.py --split tune --validate-live https://shreyash616-echo-backend.hf.space | tail -3
+
+SUMMARY split=tune: positives 81, pooled 36, not pooled 45, hits@10 3, hits@20 5, MRR 0.0170, negatives in top10 0
+LIVE VALIDATION: max axis deviation vs https://shreyash616-echo-backend.hf.space = 0.0000 (must be < 0.001)
+
+$ python tests/test_live_overlap.py --base-url https://shreyash616-echo-backend.hf.space | tail -2
+[SUCCESS] ALL PAIRS PASSED OVERLAP THRESHOLDS (Rule 9 Satisfied)!
+
+```
+
+### Beyond the block
+
+```
+align_p8.py (side record recreated with /api/track/67238735), served weights, 300 / 3000:
+pools 300 / 3000; served weights from ml/inference/rerank_weights.json
+| seed | shared of 20 | live pool | side records in live pool | replica only | live only |
+|---|---|---|---|---|---|
+| Simple Man | 20 (same order) | 3215 | 1 | - | - |
+| Waiting Around to Die | 20 (same order) | 3172 | 1 | - | - |
+| Bang Data | 20 (same order) | 3139 | 1 | - | - |
+| Boyfriend | 20 (same order) | 3131 | 1 | - | - |
+| Hurt | 20 (same order) | 3191 | 1 | - | - |
+| Tum Hi Ho | 20 (same order) | 3201 | 1 | - | - |
+| Mask Off | 20 (same order) | 3219 | 1 | - | - |
+| Get Lucky | 20 (same order) | 3221 | 0 | - | - |
+| Tomboy | 20 (same order) | 3177 | 1 | - | - |
+
+minimum shared over the TUNE seeds: 20 of 20 (gate: at least 18 on every seed)
+
+$ python tests/test_candidate_pool.py --base-url https://shreyash616-echo-backend.hf.space
+  Owner Positives in Union Pool: 8 / 11 (Required >= 8 of 11)
+  All Positives in Union Pool:   35 / 67
+  X-Process-Time per call (s):   0.196, 0.201, 0.224, 0.201, 0.198, 0.177, 0.179, 0.184, 0.183, 0.192, 0.182, 0.172, 0.209, 0.190, 0.177, 0.193, 0.241, 0.207, 0.208, 0.175
+  Server-side p95 Process Time:  0.225 s (Required < 0.300 s)
+
+$ python -m pytest -q tests/
+29 passed, 1 skipped, 5 warnings in 150.60s (0:02:30)
+
+Tests https://github.com/shreyash616/echo/actions/runs/41085686410 green (attempt 2, rerun after the deploy; attempt 1 ran before it)
+```
+
+### Float16 CLAP and every rank
+
+- Max absolute difference between the float16-rounded-back CLAP rows and the float32 unit-norm rows from `clap.npy`:
+  **6.104e-05**. Deviation against the columnar Space 0.0000; the same replica against the JSON-served Space before the
+  deploy read 0.0001, which is how the live check shows the Space loads the columnar set.
+- Served ranks: `report.py` pooled 36, hits@10 3, hits@20 5, MRR 0.0170, negatives 0, exactly WP0's; `align_p8.py` 20 of 20
+  in the same order on all nine, Get Lucky included. No seed's top 20 changed order.
+- Below the served lists, for the record: replica JSON against replica columnar on the nine TUNE seeds, the pools are
+  identical, axis differences at most 7.3e-05, score differences at most 1.7e-05, and positions 1 to 60 of the pre-MMR
+  order (the window the language budget reads) identical on every seed. Deeper, near-tied candidates swap: the first
+  differing pre-MMR rank is 97 to 290 by seed, 119 to 241 positions differ among about 3,200. With float32 CLAP and the
+  float32 columns instead, 2 to 8 positions differ on five seeds (first at rank 268 or deeper) and none on four: the
+  deep swaps are mostly float16, as expected.
+
+### Gate
+
+- All tests pass: the block's four files 21 passed; the full suite 29 passed, 1 skipped; Tests green.
+- Health `recommender_loaded: true` on the rebuilt Space (`1095b439`).
+- Deviation 0.0000, under 0.001. Overlap passes.
+- `report.py` pooled 36 and 3 / 5 / 0.0170 as WP0; `align_p8.py` 20 of 20 on all nine.
+- p95 reported: **0.225 s** over 20 calls (P9: 0.105 s); under the 0.300 s serving gate.
+
+### Noticed
+
+- p95 doubled because each call assembles about 3,200 candidate dicts from the columns (about 10.6 microseconds a row,
+  35 ms a call on the box) where it used to copy stored dicts. `_score_pool` reading the columns by row index instead of
+  through dicts would remove it; that is a serving change for WP7, not a loader change.
+- Departures from section 6's table, each to keep the rows identical or the files small: ints are stored int64 and
+  flags bool (not float32), so `felt_bpm`, `year`, `loop_bars` stay ints; `strings.parquet` and `features.npz` carry every
+  field of the JSON row (adding `deezer_id`, `genre`, `decade`, `language_conf`, `anchor_cosines` to the table's lists);
+  `keys.npy` holds sorted blake2b-64 hashes of the lookup strings, not the strings, since fixed-width numpy strings were
+  86 MB at 20,000 rows (about 4 GB at a million) against 480 KB; a hash hit is confirmed against the row's own strings,
+  and `test_columnar_loader` checks all 59,953 keys against `track_id_map.json`.
+- `build_index_v3.py` reaches the rows through `build_index_v2`; at a million rows it reads shards instead (WP6).
+
+PACKET WP2 READY FOR REVIEW
