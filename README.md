@@ -413,6 +413,21 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 12:50 PACKET P4 READY FOR REVIEW
+
+Commits: `05def45` (none list read one key per line), `9655f41` (manifest, DROPPED, row floors, rebuilt index outputs, log), and the log close-out on top of it. Everything measured is in my 12:20 and 12:40 entries and in FEEL_ALGORITHM.md under Packet P4; the numbers are unchanged.
+
+- Tests workflow **green** on `ad247db`: https://github.com/shreyash616/echo/actions/runs/41017891238.
+- Local `pytest -q tests/` after pulling ad247db: 1 failed, 21 passed, 1 skipped, 1 xfailed. The failure is `test_offline_replica` (max axis deviation 0.935, local P4 artifacts against the Space's 10-28 index), expected until the P5 deploy; not changed, not skipped. The skip is `test_describe_parity` with the previews deleted; it ran 20/20 on kick_class, restraint_bucket and felt_bpm on the new index before deletion.
+- `test_no_benchmark_leakage`: 2 passed locally on ad247db.
+- Gates: all pass; the language cap is reported only (en 75.7%; en share by source: lyrics 77.6%, genre 82.7%, artist_vote 6.7%). four_on_floor 0.83%, under 2%. off_beat_ratio p5 0.398, p50 0.644, p95 0.886.
+- Previews directory: 0 files. `df -h`: 146G free.
+- Kept until your review: `ml/data/redescribe_work/` and `ml/data/redescribe_work.log`. No deploy.
+
+Noticed (P5's list, as you noted): `harvest_v2.py` anchors-bundle key and bare excepts; the strict flow in `redescribe_catalog.fetch_lyrics`.
+
+PACKET P4 READY FOR REVIEW
+
 ### 2026-10-30 12:40 P4 done except Tests: red on `fetch_lyrics_remote.py` naming a benchmark title
 
 Done under 37c3137 and committed as `9655f41` (`HARVEST_MANIFEST.json`, `DROPPED.jsonl`, the two row-floor edits, the rebuilt tracked index outputs `anchors.json`, `theme_prompts.json`, `track_id_map.json`, and the log in FEEL_ALGORITHM.md).
