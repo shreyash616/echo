@@ -394,6 +394,41 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 12:20 P4 BLOCKED: language gate (en 75.7%) and build_index_v2's 20,000 guard (19,999 rows)
+
+Shards done 00:41 (13,866 rows, 2 h 15 min, not 7 to 8): fetched 11,948, none 1,754, error_after_retry 164. Merge into `ml/data/lyrics` with no clashes; the second full attempt on the 164 gave fetched 81, none 82, error_after_retry **1**. Status counts summed over the eight shards: get 200 12,068, get 404 4,889, get 503 23,696, search 200 3,089, search 503 4,969 (503 still about 48%; the 5 short retries absorbed it). None list rebuilt by key (2,591 keys); the old one is `lyrics_none.box.txt`.
+
+Bug found and fixed in-packet, `05def45`: `LyricFetcher` read `lyrics_none.txt` with `split()`, and keys are `artist:title` with spaces, so only 78 one-word keys ever matched. The first resume (01:43) therefore re-fetched 2,519 known-none rows through the strict flow until I stopped it at 12:08 (0 fetched, wrote no lyric files; its appended verdicts are set aside as `lyrics_none.split_bug.txt`). Now `splitlines()`; the resume at 12:10 had 1 row to fetch and assembled in 6 min.
+
+Manifest (`describe_commit 05def45`, clean; catalog sha256 `ba16a10422a57cbf9f53059b7d8bed19590c604baae58dfcf0459c50f465377e`, clap sha256 `082bcb064c5a9c8488ecf15fe65b1d69d7bcc036407b1e6fa05498622a0f845b`):
+
+| Gate | Value | Pass |
+|---|---|---|
+| previews_decoded = rows_described_from_audio = rows >= 19,000 | 19,999 = 19,999 = 19,999 (1 dropped: The Neighbourhood "A Moment of Silence", ffmpeg returned no audio) | yes |
+| rows_with_lyric_file >= 0.75 x rows | 17,408 (87.0%) | yes |
+| lyrics_pass.error_after_retry <= 0.02 x rows | 1 (manifest `lyrics_pass` covers the resume only: to_fetch 1, error_after_retry 1) | yes |
+| felt_bpm >150 / <60 / median | 3.46% / 2.40% / 96 | yes |
+| language null <= 10% | 0.53% | yes |
+| language_source = lyrics on rows with a lyric file >= 60% | 96.7% | yes |
+| **no language above 70%** | **en 75.7%** (15,137), es 7.8, fr 6.0, pa 2.6, hi 2.1, ja 1.9, pt 1.1 | **no** |
+| largest theme <= 30% of non-null | celebration 19.0% (null 5,547) | yes |
+| no kick class above 50% | syncopated_808 42.3%, other 41.2%, sparse_backbeat 15.7%, four_on_floor 0.83% | yes |
+| saturation std >= 0.08 / sustain at 1.0 <= 20% / darkness std > 0.10 | 0.152 / 15.9% / 0.114 | yes |
+
+four_on_floor is **0.83%, under 2%**, said as asked. off_beat_ratio p5 0.398, p50 0.644, p95 0.886. restraint_bucket moderate 51.6, restrained 24.3, saturated 24.1. language_source lyrics 84.2, genre 12.3, artist_vote 3.0, none 0.5. std: saturation 0.1519, sustain_ratio 0.096, darkness 0.1143, grit 0.0719, intimacy 0.0505.
+
+Blocker 1, language. en at 75.7% with 96.7% of lyric-file rows resolved from the lyrics themselves, so this reads as the catalogue's real mix rather than a resolver defect; but the gate is the gate and I have not touched the check or the resolver. Your call: (a) the cap is wrong for this catalogue and becomes reported-only, or (b) a change you name.
+
+Blocker 2, index. `py ml/inference/build_index_v2.py` stops at line 134, `Expected at least 20,000 tracks, got 19999`, against the P4 gate of 19,000. Changing that guard to 19,000 (the gate's floor) would be a check edit, so I am asking: GO to set it to 19,000 in `build_index_v2.py`?
+
+Parity ran against the old index for that reason: restraint_bucket 20/20, felt_bpm 20/20, kick_class 9/20. All 7 kick rows I checked against the new `catalog_features.jsonl` (I'm Good (Blue), departing the body, Flock of Soul, Break of Dawn, Desire Be Desire Go, My Men, YG call) match the cold describe; the stored side is `recommender._metadata`, still the 10-28 `ml/inference/track_metadata.json`. I will rerun parity and `report.py` after the index builds.
+
+Not done yet: index, parity on the new index, report.py, preview deletion (6,475 previews kept for parity), Tests, and the P4 commit of `HARVEST_MANIFEST.json` and `DROPPED.jsonl`. No deploy.
+
+Noticed: harvest_v2.py reads the anchors bundle with the wrong key and has bare excepts; the strict flow in `fetch_lyrics` (already on P5's list).
+
+BLOCKED
+
 ### 2026-10-29 22:25 IST P4: eight shards running
 Under your 22:22 GO: single worker stopped; fetcher pulled at `21e9de5` (reads `backend/.env`, no mapping); 8 disjoint shards over the 13,866 remaining rows (1,734 / 1,734 / 1,733 x 6), `--spacing 0.1`, `--out ml/data/redescribe_work/shards/out_<k>`, all logging `registered app: yes` at 22:21:14, no 401. Before the shards: 5,363 lyric files, 754 none ids in `ml/data/lyrics/` (corrects the 5,340 / 684 in my 22:20 entry, taken while the smoke test was still writing). Next post is the P4 report.
 
