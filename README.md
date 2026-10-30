@@ -591,6 +591,51 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 19:25 IST P8 item 1: 20 of 20 on all nine; Tests red on test_no_gates, which reads the seed filter as an artist gate
+
+**Done as 19:01 said** (`9d1451d`):
+- **Space:** `recommender.py`'s pool filter drops a candidate by id, by key, or by `match_track`'s rule.
+  - The backend cannot import `tests/feel_benchmark.py`: it is not deployed, and it imports the recommender. So `normalize_title` is copied once as `_bench_norm`, cached, with a comment naming the source. There is no third variant.
+- **Replica:** `score_lib.Catalogue.pool` imports `match_track`.
+- **Also dropped:** two catalogue variants of TUNE seeds, `arijit singh:tum hi ho from aashiqui 2` and `daft punk:get lucky drumless edition feat pharrell williams and nile rodgers`.
+- The exactness gate still passes; box wall is about 0.09 s.
+
+**Deploy, run 41064750753, Space `07fe3231`.**
+- `--validate-live` **0.0000**.
+- The restart emptied the side index. I recreated the record with the call `test_theme_sanity.py` makes in CI, `/api/track/67238735` (locally the test falls back to the catalogue and makes no Space call).
+- Then `align_p8.py`, with 1 side record in every other seed's pool and 0 in Get Lucky's:
+
+| seed | shared of 20 |
+|---|---|
+| Simple Man | 20, same order |
+| Waiting Around to Die | 20, same order |
+| Bang Data | 20, same order |
+| Boyfriend | 20, same order |
+| Hurt | 20, same order |
+| Tum Hi Ho | 20, same order |
+| Mask Off | 20, same order |
+| Get Lucky | 20, same order |
+| Tomboy | 20, same order |
+
+- **Live first result for Get Lucky:** Earth, Wind & Fire "September (Eric Kupper Extended Vocal Mix)", 0.851; no longer Get Lucky.
+- **P8 "before"** (aligned replica, served weights): pooled 36, hits@10 **2**, hits@20 **3**, MRR **0.0144**, negatives 0. The old definition gave 1 / 1 / 0.0020. The filter moved no hit.
+
+**Blocker: Tests run 41064700180 is red on `tests/test_no_gates.py`.** Its AST scan flags any `if` in a function named `*recommend*` whose body is `continue` and whose condition text contains a `GATE_ATTRIBUTES` word (`artist`, `language`, `genre`, ...):
+
+```
+[backend/app/services/recommender.py:1106] Gate found in recommend(): drops candidate on ['artist']:
+'(seed_title in c_title or c_title in seed_title) and (seed_artist in c_artist or c_artist in seed_artist)'
+```
+
+The condition drops the seed's own song, not candidates by artist. But the scan cannot tell the two apart, and I have not renamed or moved anything to get past it; that would be editing around a check.
+
+Your call:
+- **(a)** The seed-identity test moves to a named helper, e.g. `_is_seed_copy(seed_record, cand)`, and the filter calls it, like the key comparison that never names `artist`. The scan then passes as written. Say so if you read that as evading it.
+- **(b)** `test_no_gates.py` gets an explicit allowance for the seed filter, and the test joins P8's list.
+- **(c)** Something else you name.
+
+Item 2 (the search) waits on this. BLOCKED
+
 ### 2026-10-30 19:20 IST P8 item 1 BLOCKED: 8 of 9 seeds share 20 of 20 in order; Get Lucky 11, from one side-index record that is the seed itself
 
 Item 1 code is `c5deee7`; no weight has been touched.
