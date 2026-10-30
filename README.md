@@ -36,6 +36,16 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 14:12 IST P6: (b), polarity similarity shrunk toward 0.7; swing scheduled as T3.5 for P7
+
+Right diagnosis: with 10,276 undefined-mode rows, "0.7 when either is undefined" makes `s_mode` a constant for half of all seeds, which is exactly what rule 18 forbids. (a) would hide a dead axis behind a test exemption, so (b).
+
+1. `s_mode`, both files: `sim_pol = clip(1 - 0.5 * |pol_seed - pol_cand|, 0, 1)` on the rows' raw `mode_polarity` (the row dict, as `recommender.py:730` reads it today, not the vector at 124 that zeroes it for undefined rows). Defined on both sides: `s_mode = sim_pol`, unchanged. Either undefined: `s_mode = 0.7 + 0.3 * (sim_pol - 0.7)`, range 0.49 to 0.79, centred on T3.4's 0.7, varying by candidate. Rows undefined through `features.py:370` carry polarity 0.0 and score 0.79 against each other, a cluster, not a constant. FIX_PLAN_2 records the amendment under the review decisions.
+2. Rerun `report.py --split tune` and `pytest -q tests/test_axis_range.py`; post the `s_mode` column for the nine seeds and the headline numbers. Gate as in the GO: no axis under 0.05 on three or more seeds, the test passing on its own.
+3. Then commit (code, `score_lib.py`, the test edit, the header write), `deploy_hf.py`, `deploy.yml` dispatched and named, `--validate-live` under 0.001, Tests green, `PACKET P6 READY FOR REVIEW`.
+
+Swing: good catch, and correctly not P6's. It is T3.5 in FIX_PLAN_2 now, scheduled for P7: `swing` leaves `s_groove` (the four remaining inner weights renormalised to sum to 1) and the T2 header list, mirrored in `score_lib.py`; a real swing feature belongs to SCALE_PLAN, where every row is described afresh. In P6 leave it as it is; the warning `build_index_v2.py` logs for a zero-std axis is the right behaviour.
+
 ### 2026-10-30 13:47 IST P5 passed; GO P6: z-scored similarities, T3.4, axis-range marker off
 
 Review, from the tree at `4367ccf`: `76aa513` is three added lines in `tests/test_candidate_pool.py` and nothing else; `0d0e1ec` touches only `harvest_v2.py` and `redescribe_catalog.py`, one broad except left at `harvest_v2.py:877` as agreed, and `fetch_lyrics` has `clean_title`, the album-less second get, the two searches, Retry-After with jitter and five 503 retries. Tests run 41021882376 is green, checked. The four replica-versus-Space differences all hold in the code: `recommender.py:777` and `routes.py:593` default `diversity` 0.70 with MMR at 949; the side index adds up to 100 at 860; `report.py:100` validates with `diversity=1.0`; `feel_benchmark.match_track` falls back to title containment at 74; `report.py:111` divides summed reciprocal ranks by all positives. Good reading. It is now P8's opening scope in FIX_PLAN_2: the replica reproduces the Space's selection and the benchmark's hit rule before any weight is searched, gate 18 of 20 shared per seed.
