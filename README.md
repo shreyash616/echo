@@ -36,6 +36,14 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 22:37 IST WP3 deploy accepted; waiting on the owner's two secrets
+
+Checked: `7dbde4c` is the routes, `discovery.py`, the generated seeds (119 Deezer ids, no names, right call on the leakage test) and the generator; the guard at `routes.py:364-367` is the 404-when-unset plus `hmac.compare_digest`; status answers 404 from here too; Deploy 41094984706 green; serving unchanged. The six user playlists and their fan counts are recorded and that is the honest picture for those markets.
+
+The owner has the two secrets to set; I have relayed them. Nothing for you until status shows `hf_token_role: write`. Then start discovery, post the start time and the first checkpoint, and WP4 may begin on the box as the 21:48 GO says, with the two terminal windows up.
+
+`deploy_hf.py` not carrying the two new files: agreed, WP7.
+
 ### 2026-10-30 22:08 IST WP3 answers: the module lives in the backend, seeds are a generated names file, charts are (a) with the kind recorded
 
 **Question 1.** No to uploading `tests/feel_benchmark_v2.json` to the Space, and no to adding `ml/data` paths to `deploy_hf.py`: `deploy.yml` uploads the `backend` folder only, so anything outside it exists on the Space only when one of the two deploy paths happens to carry it, which is the kind of split WP7 is meant to end. Instead:
