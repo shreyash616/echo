@@ -413,3 +413,95 @@ WP3 DEPLOYED. Waiting for the owner's two Space secrets; discovery is not starte
 - Genre new artists 10 here against 43 in the box dry run: Deezer's `/genre/{id}/artists` appears to answer by the requester's
   location, and from the Space it overlaps the charts more. Above zero, as the gate asks.
 - No deploy until the run finishes (it would restart the Space).
+
+## WP4. Harvester on one fixture shard
+
+- Started: 2026-10-30 23:05 IST, as the 21:48 GO allows once discovery was checkpointing (first checkpoint 22:52).
+- Files: `ml/data/harvest_v3.py` (new), `tests/test_harvest_shard.py` (new), `tests/test_harvest_resume.py` (new),
+  `tests/fixtures/harvest_fixture_shard.json` (new: Khruangbin, Altin Gun, Fatoumata Diawara, Snarky Puppy, The Marias;
+  none in the benchmark or the harvest seeds, checked), `.gitignore` (`/ml/data/harvest_v3_work`; `/ml/data/previews`
+  was already ignored), `SCALE_PROGRESS.md`.
+
+### What was built
+
+`harvest_v3.py`, stages A to F of section 5, reusing the P4 code instead of copying it:
+- A: iTunes artist search (first result whose `harvest_v2._norm_str` name equals the artist's), lookup of 200 songs, songs
+  with a preview in iTunes order, `harvest_v2._is_clean_track_name`, at most 20 an artist, deduplicated by key and
+  iTunes id against the global set and the shard; harvest_v2's record fields; 3 s spacing (20 a minute), exponential
+  backoff on 403 / 429.
+- B: 8 connections, one retry, failures to the dropped list. C: `redescribe_catalog._describe_one` over 10 workers with
+  `header.json`'s cut points. D: P4's decode and 48 kHz resample, `_window_audio_frames`, 64 windows a batch, mean,
+  L2-normalise, float16; anchors and vibes as P4; one INFO line a batch to `<shard>.clap.log`.
+- E: `fetch_lyrics_remote.fetch_lyrics` with the application headers, 24 fetchers over disjoint ranges; then P4's theme
+  (`apply_lyric_theme`), words per minute and language (artist majority, then `language_from_meta`).
+- F: features, CLAP, dropped and manifest files to `catalog/v3/`, every file downloaded back and hashed against the
+  manifest; outside a fixture the shard joins `catalog/v3/MANIFEST.json` and its keys `catalog/v3/keys.txt`, and the
+  claim is released; the shard's previews are deleted.
+- Claims and resume: `catalog/v3/claims/<runner>.json`; the lowest shard neither finished nor claimed by another runner
+  within 6 hours; a runner's own surviving claim (a crash) is taken again first, from stage A.
+- harvest_v2 and the recommender import torch at module level, so the harvester imports them inside the stages; the
+  10 spawned describe workers then load no torch (checked with `-X importtime`).
+
+### The owner's windows
+
+Both opened in the Terminal panel before the run and left up: `Get-Content -Path ml\data\harvest_v3_workixture.describe.log -Wait`
+(stages A to C, E, F) and `Get-Content -Path ml\data\harvest_v3_workixture.clap.log -Wait` (stage D, one line a batch:
+batch index of total, windows, device, seconds, songs a second, `torch.cuda.memory_allocated` in MB).
+
+```
+CLAP batch 1/5 | windows 64 | device cuda | 184.11 s | 0.12 songs/s | cuda 778 MB
+CLAP batch 2/5 | windows 64 | device cuda | 0.88 s | 0.23 songs/s | cuda 778 MB
+CLAP batch 3/5 | windows 64 | device cuda | 0.65 s | 0.34 songs/s | cuda 778 MB
+CLAP batch 4/5 | windows 64 | device cuda | 0.67 s | 0.46 songs/s | cuda 778 MB
+CLAP batch 5/5 | windows 44 | device cuda | 0.45 s | 0.54 songs/s | cuda 778 MB
+CLAP done: 100 songs, 300 windows, 186.8 s
+```
+
+### Verification block, verbatim
+
+```
+$ python ml/data/harvest_v3.py --shard-file tests/fixtures/harvest_fixture_shard.json
+shard fixture done in 420 s: 100 songs, 0 dropped, 100 previews deleted
+
+$ python -m pytest -q tests/test_harvest_shard.py tests/test_harvest_resume.py
+7 passed, 1 warning in 294.28s (0:04:54)
+
+$ ls ml/data/previews | wc -l
+0
+
+$ python -c "from huggingface_hub import hf_hub_download as d; import json; print(json.load(open(d('shreyash616/echo-ml-artifacts','catalog/v3/shard_fixture.manifest.json',repo_type='dataset'))))"
+{"shard": "fixture", "fixture": true, "runner": "Shreyash-PC", "artists": 5, "first_deezer_id": 5328540, "last_deezer_id": 12607183, "artists_unresolved": 0, "songs": 100, "dropped": 0, "dropped_by_stage": {}, "lyrics": {"fetched": 40, "none": 14, "error": 33}, "files": {"features": "catalog/v3/shard_fixture.features.jsonl.gz", "clap": "catalog/v3/shard_fixture.clap.f16.npy", "dropped": "catalog/v3/shard_fixture.dropped.jsonl"}, "sha256": {"features": "98339e75714412df684da364de136982a284609581127dd8f0cd3127bb978f69", "clap": "4130572ef966a3e7b7663b80dec3b37c20817cb559e22df8b42152b3b52e71c4", "dropped": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"}, "clap_shape": [100, 512], "describe_commit": "e4c1b1bd2b4dd35a21560de82d280a587461ce99", "date": "2026-10-30T18:24:25+00:00", "seconds_per_stage": {"A": 47.2, "B": 24.8, "C": 33.0, "D": 209.1, "E": 94.8, "F": 9.1}}
+(plus "keys" and "itunes_ids", 100 each)
+```
+
+Uploaded files hashed independently after a fresh download:
+```
+catalog/v3/shard_fixture.features.jsonl.gz: 98339e75714412df684da364de136982a284609581127dd8f0cd3127bb978f69 matches
+catalog/v3/shard_fixture.clap.f16.npy: 4130572ef966a3e7b7663b80dec3b37c20817cb559e22df8b42152b3b52e71c4 matches
+catalog/v3/shard_fixture.dropped.jsonl: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 matches
+```
+Only `catalog/v3/shard_fixture.*` is on the dataset under `catalog/`; nothing under `discovery/` was touched.
+
+### Gate
+
+- Both tests pass (7 of 7). `test_harvest_shard` runs one fixture artist end to end into a local store: rows and CLAP aligned,
+  float16 unit rows, SHA256s, describe commit WP0's, seconds for A to F, dropped count, every row's field set equal to
+  today's `catalog_features.jsonl` row with the same `has_lyrics` (two sets: 65 fields, and 64 without `theme_vec`),
+  batched CLAP equal to P4's one-window path (max abs difference 3.4e-08 and 4.1e-08), previews deleted.
+  `test_harvest_resume`: lowest unclaimed shard, fresh foreign claim skipped, stale one taken over, crash in stage D leaves
+  the claim and the rerun starts at A, finish writes the manifest and keys and releases the claim, the next shard gets the keys.
+- Previews directory empty. Fixture manifest: `describe_commit` `e4c1b1bd2b4dd35a21560de82d280a587461ce99` (WP0's), seconds
+  per stage A 47.2, B 24.8, C 33.0, D 209.1, E 94.8, F 9.1, dropped 0, SHA256s matching the uploaded files.
+
+### Noticed
+
+- **CLAP batch 64 costs a one-time stall of 3 to 5 minutes per process** (184 s here; 185, 235 and 328 s in three separate
+  measurements), on the first 64-window call only; peak memory is 3.3 GB of the 3080's 10 GB, so it is not memory. Measured
+  in fresh processes: batch 16 first call 0.93 s and steady 8 ms a window; batch 32 first call 0.89 s, 11 ms a window;
+  batch 64 first call 185 s, 15 ms a window. At one process per shard and about 200 shards that is about 10 hours of stall,
+  and 64 is also the slowest per window. Recommendation: 32. Section 5 says 64, so the fixture ran at 64.
+- Stage E: 33 of 87 lyric fetches ended in error after the five 503 retries (38%). `fetch_lyrics_remote`'s own main runs a
+  second pass over its errors; the harvester's stage E does not yet. A second pass is the cheap fix, for WP5.
+- `test_harvest_shard` takes about 5 minutes (network, the CLAP stall); it is not in `tests.yml`.
+
+PACKET WP4 READY FOR REVIEW

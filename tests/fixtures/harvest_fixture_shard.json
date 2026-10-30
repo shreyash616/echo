@@ -1,0 +1,41 @@
+{
+ "shard": "fixture",
+ "note": "SCALE_PLAN WP4: 5 artists outside the benchmark and the harvest seeds, in discovery/artists.jsonl's row format",
+ "artists": [
+  {
+   "deezer_id": 5328540,
+   "name": "Khruangbin",
+   "nb_fan": 99300,
+   "source": "fixture",
+   "depth": 0
+  },
+  {
+   "deezer_id": 12494758,
+   "name": "Altın Gün",
+   "nb_fan": 40889,
+   "source": "fixture",
+   "depth": 0
+  },
+  {
+   "deezer_id": 390174,
+   "name": "Fatoumata Diawara",
+   "nb_fan": 115908,
+   "source": "fixture",
+   "depth": 0
+  },
+  {
+   "deezer_id": 471526,
+   "name": "Snarky Puppy",
+   "nb_fan": 83846,
+   "source": "fixture",
+   "depth": 0
+  },
+  {
+   "deezer_id": 12607183,
+   "name": "The Marías",
+   "nb_fan": 152159,
+   "source": "fixture",
+   "depth": 0
+  }
+ ]
+}

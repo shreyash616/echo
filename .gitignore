@@ -22,6 +22,7 @@
 /ml/data/deezer_catalog.json
 /ml/data/embeddings.npy
 /ml/data/previews
+/ml/data/harvest_v3_work
 /ml/data/lyrics
 /ml/experiments/cache
 /ml/checkpoints
