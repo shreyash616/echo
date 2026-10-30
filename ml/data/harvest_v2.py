@@ -184,7 +184,7 @@ async def harvest_deezer_membership(
                         art = row.get("artist", "").strip()
                         if art:
                             artist_counts[art] = artist_counts.get(art, 0) + 1
-                    except Exception:
+                    except (ValueError, KeyError, AttributeError):
                         pass
         logger.info(
             "Resumed existing membership: %d rows from %d distinct playlists (%d unique artists)",
@@ -225,7 +225,7 @@ async def harvest_deezer_membership(
                 if r.status_code != 200:
                     continue
                 playlists_data = r.json().get("data", [])
-            except Exception as e:
+            except (httpx.HTTPError, ValueError, AttributeError) as e:
                 logger.debug("Deezer search error for %r: %s", query, e)
                 continue
 
@@ -241,7 +241,7 @@ async def harvest_deezer_membership(
                     if tr_resp.status_code != 200:
                         continue
                     tracks = tr_resp.json().get("data", [])
-                except Exception:
+                except (httpx.HTTPError, ValueError, AttributeError):
                     continue
 
                 for t in tracks:
@@ -288,7 +288,7 @@ def load_itunes_cache() -> dict[str, dict]:
                         rec = json.loads(line)
                         k = rec.get("key") or make_track_key(rec.get("artist", ""), rec.get("title", ""))
                         cache[k] = rec
-                    except Exception:
+                    except (ValueError, AttributeError):
                         pass
         logger.info("Loaded %d tracks from iTunes persistent cache %s", len(cache), ITUNES_CACHE_PATH)
     return cache
@@ -382,7 +382,7 @@ async def resolve_itunes_preview(
             elif r.status_code in (403, 429):
                 logger.warning("iTunes HTTP %d rate limit hit. Backing off 65s...", r.status_code)
                 await asyncio.sleep(65.0)
-        except Exception as e:
+        except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as e:
             logger.debug("iTunes search exception for '%s': %s", query, e)
             await asyncio.sleep(3.0)
     return None
@@ -481,7 +481,7 @@ async def expand_artist_via_itunes(
 
             return added
 
-        except Exception as e:
+        except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as e:
             logger.debug("Artist expansion error for %r: %s", artist, e)
             await asyncio.sleep(3.0)
     return 0
@@ -522,7 +522,7 @@ async def fetch_lrclib_lyrics(client: httpx.AsyncClient, track_name: str, artist
                             if lyrics and len(lyrics.strip()) > 20:
                                 return lyrics.strip()
                 return None
-        except Exception:
+        except (httpx.HTTPError, ValueError, AttributeError):
             await asyncio.sleep(0.5)
     return None
 
@@ -534,7 +534,7 @@ async def download_audio_preview(client: httpx.AsyncClient, preview_url: str, tr
     if cache_path.exists() and cache_path.stat().st_size > 1000:
         try:
             return cache_path.read_bytes()
-        except Exception:
+        except OSError:
             pass
 
     for _ in range(2):
@@ -543,7 +543,7 @@ async def download_audio_preview(client: httpx.AsyncClient, preview_url: str, tr
             if r.status_code == 200 and len(r.content) > 1000:
                 cache_path.write_bytes(r.content)
                 return r.content
-        except Exception:
+        except (httpx.HTTPError, OSError):
             await asyncio.sleep(1.0)
     return None
 
@@ -559,7 +559,7 @@ def extract_dsp_features(audio_bytes: bytes, meta: dict) -> dict | None:
         if dsp.get("crest_factor", 0.0) < 6.0:
             return None
         return dsp
-    except Exception:
+    except (OSError, ValueError, IndexError, FloatingPointError, librosa.util.exceptions.LibrosaError):
         return None
 
 
@@ -581,7 +581,7 @@ def embed_clap_windows(clap_module, y_22k: np.ndarray) -> np.ndarray | None:
         if norm > 1e-8:
             return mean_emb / norm
         return mean_emb
-    except Exception as exc:
+    except (RuntimeError, ValueError, librosa.util.exceptions.LibrosaError) as exc:
         logger.debug("embed_clap_windows error: %s", exc)
         return None
 
@@ -690,12 +690,10 @@ async def run_harvest(
     # Load 24 anchors
     with open(ANCHORS_PATH, "r", encoding="utf-8") as f:
         anchors_data = json.load(f)
-    if "anchors" in anchors_data and isinstance(anchors_data["anchors"], dict):
-        anchor_keys = list(anchors_data["anchors"].keys())
-        anchor_matrix = np.array([anchors_data["anchors"][k] for k in anchor_keys], dtype=np.float32)
-    else:
-        anchor_keys = list(anchors_data.keys())
-        anchor_matrix = np.array([anchors_data[k] for k in anchor_keys], dtype=np.float32)
+    # build_index_v2 writes a bundle {prompts, means, stds, keys}; a plain {key: vector} file is the old layout
+    anchors = anchors_data["prompts"] if "prompts" in anchors_data else anchors_data
+    anchor_keys = list(anchors)
+    anchor_matrix = np.array([anchors[k] for k in anchor_keys], dtype=np.float32)
 
     logger.info("Loading official LAION CLAP module...")
     import laion_clap
@@ -723,7 +721,7 @@ async def run_harvest(
                         k = rec.get("key")
                         if k:
                             seen_keys.add(k)
-                    except Exception:
+                    except (ValueError, AttributeError):
                         pass
 
     if CLAP_NPY_PATH.exists() and len(seen_keys) > 0:
@@ -731,7 +729,7 @@ async def run_harvest(
             arr = np.load(CLAP_NPY_PATH)
             if len(arr) == len(seen_keys):
                 existing_clap_embs = list(arr)
-        except Exception:
+        except (OSError, ValueError):
             pass
 
     logger.info("Resuming catalogue features: %d tracks already processed", len(seen_keys))
@@ -766,13 +764,13 @@ async def run_harvest(
             if lyrics_cache_file.exists():
                 try:
                     return lyrics_cache_file.read_text(encoding="utf-8")
-                except Exception:
+                except (OSError, ValueError):
                     pass
             text = await fetch_lrclib_lyrics(http_client, cand["title"], cand["artist"])
             if text:
                 try:
                     lyrics_cache_file.write_text(text, encoding="utf-8")
-                except Exception:
+                except OSError:
                     pass
             return text
 
@@ -789,7 +787,7 @@ async def run_harvest(
             y_22k = decode_preview(audio_bytes)
             if len(y_22k) < 22050 * 5:
                 return
-        except Exception:
+        except (OSError, ValueError):
             return
 
         # Pool B: DSP Extraction
@@ -917,7 +915,7 @@ async def run_harvest(
                     lang_counts[l] = lang_counts.get(l, 0) + 1
                     if r.get("artist"):
                         distinct_artists.add(r["artist"])
-                except Exception:
+                except (ValueError, AttributeError):
                     pass
 
     manifest = {

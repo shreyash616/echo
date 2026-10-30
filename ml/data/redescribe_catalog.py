@@ -97,18 +97,29 @@ def lyric_path(row: dict) -> Path:
 _LRCLIB_LAST = [0.0]
 LRCLIB_SPACING_S = 0.70  # at most 85 requests a minute, under LRCLIB's ~90 for an identified UA
 LRCLIB_STATUS: Counter = Counter()  # (endpoint, status) for the pass log
+MAX_503_RETRIES = 5   # LRCLIB's 503 carries no Retry-After and does not depend on our rate; short sleeps
+SLEEP_503_S = 1.0
+
+_SUFFIX = re.compile(r"\s*[\(\[][^\)\]]*[\)\]]|\s+-\s+(\d{4}\s+)?(remaster|remastered|mono|stereo|live|demo|single|album|radio|edit|version|mix|acoustic|deluxe|bonus)\b.*$", re.I)
+
+
+def clean_title(title: str) -> str:
+    """Title without bracketed or dashed edition suffixes: 'Moon River (Demo Version) [Original]' -> 'Moon River'."""
+    out = _SUFFIX.sub("", title).strip(" -")
+    return out or title
 
 
 def fetch_lyrics(row: dict, client) -> str | None:
     """
-    Fetch plain lyrics from LRCLIB and write them to the row's lyric file. /api/get with duration
-    and album, then /api/get without album, then /api/search by track and artist (artist-substring
-    acceptance as harvest_v2.fetch_lrclib_lyrics). One request every 0.70 s; 429 waits Retry-After,
-    503 waits 10 s and retries once. Returns the text, or None when LRCLIB has no lyrics. HTTP
-    errors other than 404 raise.
+    Fetch plain lyrics from LRCLIB and write them to the row's lyric file; the flow of
+    fetch_lyrics_remote.py. 1. /api/get with duration and album; 2. /api/get with the cleaned title
+    and no album; 3. /api/search by cleaned track and artist; 4. /api/search?q= full text. Steps 3
+    and 4 accept a hit only when the artist matches as a substring (as harvest_v2.fetch_lrclib_lyrics).
+    One request every LRCLIB_SPACING_S; 429 waits Retry-After plus up to 30% jitter, 503 retries five
+    times 1 s apart. Returns the text, or None when LRCLIB has no lyrics. HTTP errors other than 404 raise.
     """
     def _get(endpoint: str, params: dict):
-        retried_503 = False
+        tries_503 = 0
         while True:
             wait = LRCLIB_SPACING_S - (time.time() - _LRCLIB_LAST[0])
             if wait > 0:
@@ -123,31 +134,35 @@ def fetch_lyrics(row: dict, client) -> str | None:
                     after = 10.0
                 time.sleep(after * (1.0 + random.uniform(0.0, 0.3)))
                 continue
-            if resp.status_code == 503 and not retried_503:
-                retried_503 = True
-                time.sleep(10.0)
+            if resp.status_code == 503 and tries_503 < MAX_503_RETRIES:
+                tries_503 += 1
+                time.sleep(SLEEP_503_S)
                 continue
             return resp
 
     title, artist = row.get("title", ""), row.get("artist", "")
+    title_clean = clean_title(title)
     params = {"track_name": title, "artist_name": artist}
     if row.get("durationMs"):
         params["duration"] = round(row["durationMs"] / 1000)
     text = None
     r = _get("get", {**params, "album_name": row["album"]} if row.get("album") else params)
-    if r.status_code == 404 and row.get("album"):
-        r = _get("get", params)
+    if r.status_code == 404 and (row.get("album") or title_clean != title):
+        r = _get("get", {**params, "track_name": title_clean})
     if r.status_code == 200:
         text = r.json().get("plainLyrics")
     elif r.status_code == 404:
-        r2 = _get("search", {"track_name": title, "artist_name": artist})
-        r2.raise_for_status()
         norm_art = re.sub(r"[^a-z0-9]", "", artist.lower())
-        for h in r2.json():
-            if norm_art and norm_art in re.sub(r"[^a-z0-9]", "", (h.get("artistName") or "").lower()):
-                text = h.get("plainLyrics")
-                if text:
-                    break
+        for search_params in ({"track_name": title_clean, "artist_name": artist}, {"q": f"{title_clean} {artist}"}):
+            r2 = _get("search", search_params)
+            r2.raise_for_status()
+            for h in r2.json():
+                if norm_art and norm_art in re.sub(r"[^a-z0-9]", "", (h.get("artistName") or "").lower()):
+                    text = h.get("plainLyrics")
+                    if text:
+                        break
+            if text:
+                break
     else:
         r.raise_for_status()
     if not text or len(text.strip()) <= 20:
