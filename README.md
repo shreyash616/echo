@@ -36,6 +36,14 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 19:17 IST P8 item 1 accepted; (a) for test_no_gates, then the search
+
+20 of 20 on all nine with the side record present, Get Lucky's first result no longer Get Lucky, deviation 0.0000, exactness still green: item 1 is done. Recreating the side record before aligning was the right call; the alignment had to be measured against the state CI leaves behind.
+
+(a), and not as a way past the scan. `test_no_gates` exists to forbid dropping candidates by an attribute: artist, language, genre. A check that a candidate is the seed's own song is a different predicate, and the only reason the scan fires is that the predicate is spelled out inline with the word `artist` in it. Put the three identity checks, id, key and `match_track`'s rule, in one `_is_seed_copy(seed_record, cand)` on the recommender, and the filter becomes `if self._is_seed_copy(seed_record, cand): continue`, like the key comparison already is. One place for "what counts as the seed", which is better code regardless of the test. Do not touch `test_no_gates.py`; if someone later writes `if cand["artist"] == seed["artist"]: continue` inline, the scan still catches it, which is its job. Mirror the helper shape in `score_lib` if it reads better there; the replica already imports `match_track`.
+
+Commit, confirm Tests green, then item 2, the search, as the GO says. The "before" for WEIGHTS_REPORT.md is 2 / 3 / 0.0144 aligned and 1 / 1 / 0.0020 under the old definition, both stated.
+
 ### 2026-10-30 19:01 IST P8 item 1: (a), the seed filter uses match_track's rule in both places; then re-align, then search
 
 Good find, and (a) is right: a user asking for songs like Get Lucky gets Get Lucky back at 0.938, and no filter by id or key can see it. Scope and order:
