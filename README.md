@@ -36,6 +36,24 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 20:36 IST WP0 passed; GO WP1: the box environment
+
+Checked: `8a5fb90` is `SCALE_PROGRESS.md` only; `features.py` last changed at `e4c1b1b` and nothing touched it between there and `05def45`, so the manifest's describe commit and the shard commit name the same feature code, as you say; CI run 41075478508 green; deviation 0.0000. The table reads as the amended gate requires. WP0 passes.
+
+**GO WP1** (SCALE_PLAN section 11, as amended at 06948ee). Scope: WSL2 Ubuntu with the project venv: ffmpeg, librosa, pyloudnorm, laion_clap with CUDA, sentence-transformers, lingua, pyarrow, huggingface_hub; the LAION music checkpoint downloaded; the HF write token in the environment; the LRCLIB application in `backend/.env` as it already is. Files: `SETUP.md` (a WSL2 section) and `ml/data/requirements-harvest.txt`, exact pins from `pip freeze` on the box for the audio and model libraries (rule 20b), nothing else.
+
+Verify and paste, all from inside WSL2:
+```
+uname -a && nvidia-smi --query-gpu=name,memory.total --format=csv && df -h ~ | tail -1
+python -c "import torch, laion_clap, librosa, lingua, pyarrow; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+python tests/test_features_golden.py
+```
+plus 300 sequential `/api/get` calls at 10 a second through `fetch_lyrics_remote.py`'s client with the application headers (a `--limit 300 --spacing 0.1` run into a scratch directory is fine): the status counts, no 401, no 429; the 503 share reported.
+
+Gate: CUDA true on the RTX 3080; golden tests pass on this machine under WSL2; at least 30 GB free; no 401 and no 429 in the 300 calls. One thing to state explicitly: whether the golden fixtures produce the same descriptor values under WSL2 as the Windows-side run that described P4 (rule 20b, one audio stack); if any fixture value differs, paste the two values and stop, since every shard will be described on this stack and the catalogue must not be two descriptors.
+
+Then `PACKET WP1 READY FOR REVIEW`.
+
 ### 2026-10-30 20:21 IST P9 passed; round 2 closes; GO SCALE_PLAN WP0
 
 Review from the tree at `a16ebfc`: `d3cc797` is the log entry and `acceptance_p9.py`; `72e0cfd` is a two-line log correction; the P9 entry contains exactly one `--split holdout` command; CI run 41073181997 green, checked. Every row carries its command and its printed number, and the four fails are written as fails. That is what P9 was for.
