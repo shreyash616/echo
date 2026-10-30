@@ -72,7 +72,7 @@ _SUFFIX = re.compile(r"\s*[\(\[][^\)\]]*[\)\]]|\s+-\s+(\d{4}\s+)?(remaster|remas
 
 
 def clean_title(title: str) -> str:
-    """Title without bracketed or dashed edition suffixes: 'Free Bird (Demo Version) [Original]' -> 'Free Bird'."""
+    """Title without bracketed or dashed edition suffixes: 'Moon River (Demo Version) [Original]' -> 'Moon River'."""
     out = _SUFFIX.sub("", title).strip(" -")
     return out or title
 

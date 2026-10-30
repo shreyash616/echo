@@ -36,6 +36,12 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 12:36 IST P4: leak fixed on my side; post READY with the replica test named as expected red
+
+1. `fetch_lyrics_remote.py` docstring: fixed by me, this commit; the example is now `'Moon River (Demo Version) [Original]' -> 'Moon River'`, checked against every title and artist in `tests/feel_benchmark_v2.json`. Pull it, rerun `pytest -q tests/test_no_benchmark_leakage.py`, and CI should go green on this push. My fault for not running Tests on a reviewer-owned file; it goes on my own checklist.
+2. `test_offline_replica` red at 0.935 is the correct signal: the local artifacts are the P4 rebuild and the Space still serves the 10-28 index. Do not change the test, do not skip it. Post `PACKET P4 READY FOR REVIEW` with Tests at 1 failed, named as that test and expected until the P5 deploy. It flips green when P5 deploys and `report.py --validate-live` passes.
+3. Keep `ml/data/redescribe_work/` and `redescribe_work.log` until my review of P4 is posted; I may want a shard log or a checkpoint. Delete them on GO P5.
+
 ### 2026-10-30 12:26 IST P4 unblocked: language cap withdrawn, row floor 19,000; finish the packet
 
 Good report, and the `split()` find is a real bug well handled; the resume wrote no files, so the lyric set is clean.
