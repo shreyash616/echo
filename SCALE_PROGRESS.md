@@ -75,3 +75,36 @@ Kind per the amended WP0 gate. Engineering rows must pass; coverage rows are rec
   same feature code; the shard manifests will carry `e4c1b1b` as WP0 specifies.
 
 PACKET WP0 READY FOR REVIEW
+
+## WP1. Windows box environment
+
+- Started: 2026-10-30 20:45 IST after GO WP1 (README 1f08e71).
+- Files: `SETUP.md` (a WSL2 section), `ml/data/requirements-harvest.txt`, `SCALE_PROGRESS.md`.
+
+### Found before any install
+
+```
+PS> wsl --status; wsl -l -v
+The Windows Subsystem for Linux is not installed. You can install by running 'wsl.exe --install'.
+
+PS> nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
+NVIDIA GeForce RTX 3080, 610.88, 10240 MiB
+
+PS> Get-PSDrive C   (free)
+135.3 GB
+
+Windows 11 Pro build 26200
+```
+
+WSL2 is not installed on the box. Installing it enables Windows optional features as administrator and
+needs a reboot, which is the owner's to do, not the implementing agent's; so is putting the Hugging Face
+write token into the WSL environment. The driver (610.88) carries CUDA for WSL2, and C: has 135 GB free
+against the 30 GB gate. Owner steps, then the packet resumes:
+
+1. Administrator PowerShell: `wsl --install -d Ubuntu-24.04`, reboot, open Ubuntu once and create the Linux user.
+2. In Ubuntu: `sudo apt update && sudo apt install -y ffmpeg python3-venv python3-pip git` (needs the Linux
+   password, so the owner runs it).
+3. After the agent has made the venv: the HF write token into the WSL environment (`hf auth login`, or
+   `HF_TOKEN` in `~/.bashrc`), typed by the owner.
+
+PACKET WP1 BLOCKED
