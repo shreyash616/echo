@@ -278,6 +278,40 @@ def score_matrix(F, both_flags, w):
     return np.clip(s, 0.05, 0.99)
 
 
+def mmr_select(scores, claps, arts, is_cross, k=20, diversity=0.70, cross_language_max=6):
+    """recommender.recommend's selection (P8 alignment): stable sort by score, then the vectorised
+    MMR with the artist cap of 2 and the supply-scaled cross-language budget. arts: normalised
+    artist per candidate; is_cross: languageAffinity < 0.99. Returns positions into the inputs, in
+    the order the Space returns them."""
+    order = sorted(range(len(scores)), key=scores.__getitem__, reverse=True)
+    sc = np.asarray(scores, dtype=np.float64)[order]
+    C = np.asarray(claps)[order]
+    cross = np.asarray(is_cross, dtype=bool)[order]
+    same_count = int((~cross[:60]).sum())
+    budget = cross_language_max if same_count >= 14 else k
+    ids = {}
+    codes = np.array([ids.setdefault(arts[i], len(ids)) for i in order], dtype=np.int64)
+    picks = np.zeros(len(ids), dtype=np.int64)
+    remaining = np.ones(len(order), dtype=bool)
+    max_sim = np.zeros(len(order))
+    selected, cross_used = [], 0
+    while len(selected) < k and remaining.any():
+        rem = np.flatnonzero(remaining)
+        rs, rc = sc[rem], cross[rem]
+        best_same = float(rs[~rc].max()) if (~rc).any() else 0.0
+        mmr = diversity * rs - (1.0 - diversity) * (max_sim[rem] if selected else 0.0)
+        mmr = np.where(picks[codes[rem]] >= 2, mmr - 100.0, mmr)
+        mmr = np.where(rc & (cross_used >= budget) & (rs < (best_same + 0.05)), mmr - 50.0, mmr)
+        best = int(rem[int(np.argmax(mmr))])
+        sims = (C @ C[best]).astype(np.float64)
+        max_sim = sims if not selected else np.maximum(max_sim, sims)
+        remaining[best] = False
+        picks[codes[best]] += 1
+        cross_used += int(cross[best])
+        selected.append(order[best])
+    return selected
+
+
 class Catalogue:
     def __init__(self):
         raw = json.load(open(f"{HF}/track_metadata.json"))
@@ -311,8 +345,11 @@ class Catalogue:
         _, If = self.feel_index.search(self.feel_matrix[si:si + 1].astype(np.float32), min(k_feel, self.feel_index.ntotal))
         feel_idx = {int(i) for i in If[0] if i >= 0}
         out = []
+        seed_id = str(self.meta[si].get("id", ""))
         for idx in clap_idx | feel_idx:
             r = self.meta[idx]
+            if seed_id and str(r.get("id", "")) == seed_id:  # the Space drops the seed's id too (duplicate rows)
+                continue
             key = r.get("key") or make_track_key(r.get("artist", ""), r.get("title", ""))
             if key == seed_key:
                 continue
@@ -326,3 +363,10 @@ class Catalogue:
         srcs = np.array([src for _, src in pool])
         F, flags = score_pool(self.meta[si], [self.meta[i] for i in idxs], self.clap[si], self.clap[idxs], self.feature_std)
         return si, idxs, srcs, F, flags
+
+    def top20(self, idxs, F, flags, w, k=20, diversity=0.70):
+        """The catalogue rows the Space returns for this pool under weights w, in order."""
+        scores = score_matrix(F, flags, w)
+        arts = [_norm_artist(self.meta[int(i)].get("artist", "")) for i in idxs]
+        cross = F[:, AXES.index("s_language")] < 0.99
+        return [int(idxs[j]) for j in mmr_select(scores, self.clap[idxs], arts, cross, k=k, diversity=diversity)]

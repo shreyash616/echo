@@ -7,7 +7,9 @@ Usage:
          [--k-clap 500 --k-feel 600] [--validate-live https://<space>]
 
 Prints, per seed: pool size, every positive with its pool rank (or "not pooled") and its axes
-next to the top-3 axes; then hits@10, hits@20, MRR over ALL positives (unpooled = miss), the
+next to the top-3 axes, and its rank in the post-MMR top 20 the Space returns (score_lib.mmr_select,
+matched by feel_benchmark.match_track); then hits@10, hits@20, MRR over ALL positives on that top 20
+(not returned = miss), negatives in its top 10, the
 per-axis standard deviation over the pool (an axis under 0.02 on a seed is inert there), and,
 with --validate-live, the max deviation between these axes and the Space's debug=1 axes.
 """
@@ -15,7 +17,9 @@ import argparse, json, sys, os
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.abspath("tests"))
 from score_lib import AXES, Catalogue, make_track_key, score_matrix  # noqa: E402
+from feel_benchmark import match_track  # noqa: E402  (P8: the live benchmark's hit rule, imported)
 
 
 def load_benchmark(path, split):
@@ -24,8 +28,8 @@ def load_benchmark(path, split):
         if split != "all" and e.get("split") != split:
             continue
         seed = make_track_key(e["seed"]["artist"], e["seed"]["title"])
-        pos = [(make_track_key(p["artist"], p["title"]), p.get("source", "?")) for p in e.get("positives", [])]
-        neg = [make_track_key(p["artist"], p["title"]) for p in e.get("negatives", [])]
+        pos = [(make_track_key(p["artist"], p["title"]), p.get("source", "?"), p) for p in e.get("positives", [])]
+        neg = [(make_track_key(p["artist"], p["title"]), p) for p in e.get("negatives", [])]
         out.append((seed, f'{e["seed"]["artist"]} - {e["seed"]["title"]}', pos, neg))
     return out
 
@@ -65,32 +69,38 @@ def main():
         scores = score_matrix(F, flags, w)
         order = np.argsort(-scores)
         rank_of = {int(idxs[j]): r + 1 for r, j in enumerate(order)}
+        # P8: hits, MRR and negatives on the post-MMR top 20 the Space would return, matched as
+        # feel_benchmark matches (key, else title-and-artist containment)
+        top = [cat.meta[i] for i in cat.top20(idxs, F, flags, w)]
+        post_rank = lambda t: next((r + 1 for r, m in enumerate(top) if match_track(m, t)), None)
         print(f"\n== {label} | pool {len(idxs)} (clap {int((srcs=='clap').sum())} feel {int((srcs=='feel').sum())} both {int((srcs=='both').sum())})")
         for r in range(3):
             j = order[r]
             m = cat.meta[int(idxs[j])]
             print(f"  top{r+1} {m.get('key','')[:34]:34} {scores[j]:.3f} {srcs[j]:4} | {fmt(F[j])}")
-        for pk, src in positives:
+        for pk, src, pd in positives:
             tot_pos += 1
+            pr = post_rank(pd)
+            if pr is not None:
+                h10 += pr <= 10
+                h20 += pr <= 20
+                rr.append(1.0 / pr)
+            shown = f"top20 rank {pr}" if pr is not None else "not in top 20"
             pi = cat.id_map.get(pk)
             if pi is None:
-                print(f"  POS {pk[:34]:34} NOT IN CATALOGUE ({src})")
+                print(f"  POS {pk[:34]:34} NOT IN CATALOGUE ({src}) | {shown}")
                 continue
             if pi not in rank_of:
-                print(f"  POS {pk[:34]:34} not pooled ({src})")
+                print(f"  POS {pk[:34]:34} not pooled ({src}) | {shown}")
                 continue
             pooled += 1
-            rk = rank_of[pi]
             j = int(np.where(idxs == pi)[0][0])
-            h10 += rk <= 10
-            h20 += rk <= 20
-            rr.append(1.0 / rk)
-            print(f"  POS {pk[:34]:34} rank {rk:4d} {srcs[j]:4} ({src}) | {fmt(F[j])}")
-        for nk in negatives:
-            ni = cat.id_map.get(nk)
-            if ni is not None and rank_of.get(ni, 10**6) <= 10:
+            print(f"  POS {pk[:34]:34} pool rank {rank_of[pi]:4d} {srcs[j]:4} ({src}) | {shown} | {fmt(F[j])}")
+        for nk, nd in negatives:
+            nr = post_rank(nd)
+            if nr is not None and nr <= 10:
                 neg10 += 1
-                print(f"  NEG {nk[:34]:34} rank {rank_of[ni]} IN TOP 10")
+                print(f"  NEG {nk[:34]:34} top20 rank {nr} IN TOP 10")
         std = F.std(axis=0)
         inert = [AXES[i].replace("s_", "") for i in range(len(AXES)) if std[i] < 0.02]
         print(f"  axis std over pool: {fmt(std)}" + (f"  INERT: {inert}" if inert else ""))
