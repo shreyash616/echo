@@ -36,6 +36,19 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 13:47 IST P5 passed; GO P6: z-scored similarities, T3.4, axis-range marker off
+
+Review, from the tree at `4367ccf`: `76aa513` is three added lines in `tests/test_candidate_pool.py` and nothing else; `0d0e1ec` touches only `harvest_v2.py` and `redescribe_catalog.py`, one broad except left at `harvest_v2.py:877` as agreed, and `fetch_lyrics` has `clean_title`, the album-less second get, the two searches, Retry-After with jitter and five 503 retries. Tests run 41021882376 is green, checked. The four replica-versus-Space differences all hold in the code: `recommender.py:777` and `routes.py:593` default `diversity` 0.70 with MMR at 949; the side index adds up to 100 at 860; `report.py:100` validates with `diversity=1.0`; `feel_benchmark.match_track` falls back to title containment at 74; `report.py:111` divides summed reciprocal ranks by all positives. Good reading. It is now P8's opening scope in FIX_PLAN_2: the replica reproduces the Space's selection and the benchmark's hit rule before any weight is searched, gate 18 of 20 shared per seed.
+
+**GO P6.** Scope, from FIX_PLAN_2 T2 and T3.4 and the P6 row; nothing outside it (no weights, no pool sizes, no MMR).
+1. `build_index_v2.py` writes `feature_std` for the 18 axes T2 lists (`darkness` through `changes_per_bar`) into the `track_metadata.json` header, computed from `catalog_features.jsonl`; no re-describe, the P4 rows are the input. The manifest keeps its five.
+2. `recommender._compute_pair_score`: every `1 - |a - b|` and `1 - |a - b| / constant` becomes `exp(-|a - b| / (tau * std_k))`, `tau = 1.0`, std read from the header; `s_restraint = exp(-(|dz_loudness_range| + |dz_crest_factor|) / 2)`, bucket stays a label; `s_vocal` and `s_groove` keep their inner weights on the z terms.
+3. T3.4: delete the `riff_flag` override (`recommender.py` around 718); `s_harm` is the `changes_per_bar` and `loop_bars` similarity with a `riff_flag` equality term at 0.2 inside it; `s_mode` is 0.7 when either mode is undefined.
+4. `score_lib.py` mirrored in the same commit as 2 and 3. Delete the strict xfail marker and its comment from `tests/test_axis_range.py`; the test must pass on its own.
+5. `report.py --split tune` before (your 12:40 numbers stand as "before") and after, with the per-axis pool std table per TUNE seed. Then `deploy_hf.py`, `deploy.yml` dispatched and the run URL named, `report.py --validate-live` after the Space is up.
+
+Gate: rule 18, no feel axis with pool std under 0.05 on three or more TUNE seeds, none pending now that T3.1 to T3.4 are all in; `s_harm` and `s_mode` pool std above 0.05 on at least three TUNE seeds; deviation under 0.001; replica hits@10, hits@20 and MRR not below the 2026-10-28 baseline (0, 0, 0.0011), pooled is P7's and is only reported; `pytest -q tests/` green with `test_axis_range` passing and the Tests run URL. Section 2 expects about 1 hit of 81 from this step; report what you get, whatever it is. BLOCKED with the std table if any axis stays flat.
+
 ### 2026-10-30 13:22 IST P5: (a), with the pool test marked the way test_axis_range is; commit the second commit; then READY
 
 Deploy and items 1 to 5 accepted as posted; 0.0000 deviation and a clean overlap are what P5 was for.
