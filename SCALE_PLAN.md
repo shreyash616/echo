@@ -54,13 +54,15 @@ machine has listened to its 30-second preview.
 |---|---|---|
 | Discovery: related-artist walk, charts, genre pages on Deezer | the serving Space (`shreyash616/echo-backend`), as a background task or a one-off script run through its shell | Deezer answers these endpoints only from outside India |
 | iTunes lookups: artist id, song list with preview URLs | the Windows box and the Space, split by artist shard | each IP has its own rate budget (about 20 requests a minute); two runners halve the wall time |
-| Preview fetch, decode, DSP describe, lyrics, language, theme | the Windows box (Ryzen 7600, 12 threads), under WSL2 | about 1 s per song per thread: a million in roughly 28 CPU-hours |
+| Preview fetch, decode, DSP describe, lyrics, language, theme | the Windows box (Ryzen 7600, 12 threads), native Windows Python 3.13, the stack that described P4 | about 1 s per song per thread: a million in roughly 28 CPU-hours |
 | CLAP vectors | the Windows box, RTX 3080 | batched HTSAT at 48 kHz, three 10 s windows a song: a few hours for a million |
 | Shard upload, manifest, index build | the Windows box writes to the HF dataset `shreyash616/echo-ml-artifacts`; the index is built from the dataset | one source of truth; the Mac and the Space never hold a private copy |
 
-The Windows box runs everything under WSL2 (Ubuntu): ffmpeg, librosa, pyloudnorm, laion_clap with
-CUDA, sentence-transformers, lingua, httpx, huggingface_hub. Native Windows paths and audio libraries
-are not supported by this plan. Expected wall time for a million: four to five days, bounded by the
+The Windows box runs everything on the native Windows Python 3.13 venv that described P4 (amended
+2026-10-30; WSL2 was the original text, but FIX_PLAN_2 rule 20b makes the describing stack the reference,
+and that stack is native Windows, `pip freeze` recorded in FEEL_ALGORITHM.md): ffmpeg, librosa,
+pyloudnorm, laion_clap with CUDA, sentence-transformers, lingua, httpx, huggingface_hub. Scripts use
+`pathlib` and no shell-specific syntax so they run unchanged on Windows and Linux. Expected wall time for a million: four to five days, bounded by the
 iTunes rate limit and the preview downloads (about 1 TB in total), not by compute.
 
 ## 3. The 50 GB disk budget on the Windows box
@@ -69,7 +71,7 @@ Previews are never kept beyond the shard being processed. The budget, with headr
 
 | Item | Size | Note |
 |---|---|---|
-| WSL2 Ubuntu, Python venv, torch with CUDA, laion_clap checkpoint, MiniLM, lingua models | about 9 GB | one-off |
+| Python venv, torch with CUDA, laion_clap checkpoint, MiniLM, lingua models (already present from P4) | about 9 GB | one-off |
 | Previews for the current shard (5,000 songs at about 1 MB) | at most 5 GB | deleted when the shard's upload is verified |
 | Finished shard outputs waiting for upload (features gz, CLAP float16, manifest) | about 10 MB a shard | deleted after upload verification |
 | Lyrics text cache (`ml/data/lyrics/<id>.txt`) | about 2 KB a song, 2 GB for a million | kept, it is re-used by re-describes |
@@ -270,13 +272,13 @@ rows (TUNE recall@10 and recall@20, pooled positives, the four per-seed rows) ar
 and do not block: the 20,000-row catalogue is the ceiling they measure, and this plan is the remedy. If
 an engineering row has not passed, this packet ends `BLOCKED` and nothing below starts.
 
-**WP1. Windows box environment.** Scope: WSL2 Ubuntu with the project venv: ffmpeg, librosa,
+**WP1. Windows box environment.** Scope (amended 2026-10-30): the native Windows Python 3.13 venv that described P4, with ffmpeg, librosa,
 pyloudnorm, laion_clap with CUDA, sentence-transformers, lingua, pyarrow, huggingface_hub; the
 LAION music checkpoint downloaded; HF write token for the dataset in the environment; the
 owner's LRCLIB server-side application in `backend/.env` as `LRCLIB_APPLICATION_ID` and
 `LRCLIB_SECRET_KEY` (registered 2026-10-29; `ml/data/fetch_lyrics_remote.py` reads that file and also accepts
 `LRCLIB_APP_ID` / `LRCLIB_API_KEY` from the environment; the values never enter the repository or a log). Files:
-`SETUP.md` (a WSL2 section), `ml/data/requirements-harvest.txt`.
+`SETUP.md` (a Windows box section), `ml/data/requirements-harvest.txt` (exact pins from that venv's `pip freeze`).
 Verify and paste:
 ```
 uname -a && nvidia-smi --query-gpu=name,memory.total --format=csv && df -h ~ | tail -1

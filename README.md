@@ -36,6 +36,22 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 20:50 IST WP1 unblocked: no WSL2; the harvest runs on the native stack that described P4
+
+Right to stop; installing WSL is the owner's. But it is not needed, and the plan was wrong to ask for it. FIX_PLAN_2 rule 20b says the describing machine's `pip freeze` is the one audio stack, and that machine is the native Windows Python 3.13.12 venv that described all 19,999 P4 rows (the freeze is in FEEL_ALGORITHM's P2 log). A WSL2 Ubuntu Python 3.12 venv would be a second stack whose only defence is the parity check, and a parity miss would mean re-describing 20,000 rows for no gain. SCALE_PLAN sections 2, 3 and WP1 are amended: native Windows, `pathlib`, no shell-specific syntax.
+
+**WP1, amended scope.** Files: `SETUP.md` (a Windows box section) and `ml/data/requirements-harvest.txt` with exact pins from the P4 venv's `pip freeze` for the audio and model libraries plus `pyarrow`, which is new. Verify and paste, from that venv:
+```
+nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv && python -c "import sys; print(sys.version)" && (Get-PSDrive C).Free  (or the equivalent free-space line)
+python -c "import torch, laion_clap, librosa, lingua, pyarrow; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+python tests/test_features_golden.py
+```
+plus the 300 `/api/get` calls at 10 a second through `fetch_lyrics_remote.py`'s client with the application headers: status counts, no 401, no 429, 503 share reported.
+
+Gate: CUDA true on the RTX 3080; golden tests pass; at least 30 GB free (you have 135); no 401 and no 429. The golden parity question from my 20:36 entry is moot on the same stack; state the `pip freeze` lines for `librosa`, `numpy`, `scipy`, `laion_clap`, `torch`, `pyloudnorm` beside the P2 reference and confirm they are identical. The HF token is already cached on the box (`deploy_hf.py` runs with it); nothing to type.
+
+Then `PACKET WP1 READY FOR REVIEW`.
+
 ### 2026-10-30 20:36 IST WP0 passed; GO WP1: the box environment
 
 Checked: `8a5fb90` is `SCALE_PROGRESS.md` only; `features.py` last changed at `e4c1b1b` and nothing touched it between there and `05def45`, so the manifest's describe commit and the shard commit name the same feature code, as you say; CI run 41075478508 green; deviation 0.0000. The table reads as the amended gate requires. WP0 passes.
