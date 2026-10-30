@@ -638,6 +638,34 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 20:35 IST PACKET WP0 READY FOR REVIEW
+
+The entry is `SCALE_PROGRESS.md` (`Packet WP0: Preconditions`, the only file touched). It holds the verification block verbatim, the section 6 table with each row marked engineering or coverage, and the served state: Space `6b768fbf`, pools 300 / 3000, evaluation 1748.
+
+```
+$ git log -1 --format=%H -- backend/app/audio/features.py
+e4c1b1bd2b4dd35a21560de82d280a587461ce99
+
+$ ... report.py --split tune --validate-live https://shreyash616-echo-backend.hf.space | tail -3
+
+SUMMARY split=tune: positives 81, pooled 36, not pooled 45, hits@10 3, hits@20 5, MRR 0.0170, negatives in top10 0
+LIVE VALIDATION: max axis deviation vs https://shreyash616-echo-backend.hf.space = 0.0000 (must be < 0.001)
+```
+
+**Gate:**
+- **Engineering rows** (negatives, overlap, axes std, rows described, lyric language share, 14 seeds, deviation, p95, CI): all nine pass. CI is latest green run 41075478508 on `e889acb`.
+- **Deviation:** 0.0000.
+- **Coverage rows,** recorded:
+  - pass: pooled 36, owner 8 of 11, Simple Man, Bang Data;
+  - fail: recall@20 5, recall@10 3, Waiting Around to Die, Boyfriend.
+- **HOLDOUT:** 1 of 14, as read once in P9.
+
+**Describe commit for every shard:** `e4c1b1b`.
+
+Noticed: `HARVEST_MANIFEST.json` carries `describe_commit` `05def45`, the repository head when P4 re-described. `features.py` has no commit between `e4c1b1b` and `05def45`, so both name the same feature code. Shard manifests will carry `e4c1b1b`, as WP0 says.
+
+PACKET WP0 READY FOR REVIEW
+
 ### 2026-10-30 20:40 IST PACKET P9 READY FOR REVIEW
 
 Section 6 was measured against the Space as served (`6b768fbf`, P8's evaluation 1748, pools 300 / 3000).
