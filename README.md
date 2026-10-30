@@ -36,6 +36,16 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 16:12 IST P7: (a) deploy and measure latency; and show me where the 51 unpooled positives actually sit
+
+Right not to search. Deploy as is; the latency number decides whether pools can grow at all, and I will not pick a size without it.
+
+1. Set the owner-positive assert in `test_candidate_pool.py` to `>= 8`, the gate's value; a test that asserts 6 against a gate of 8 is not the gate. Then commit, `deploy_hf.py`, `deploy.yml` dispatched and named, `--validate-live`, and the live pool test with the per-seed table and the 20 timings in seconds. If p95 is over 0.300 s, the profile I asked for at 15:56, not a fix.
+2. Diagnostic, replica side, one table in the entry: for each of the 51 unpooled TUNE positives and the 4 unpooled owner positives, (i) does it have a catalogue row at all (exact key, then `feel_benchmark.match_track`'s containment rule, say which matched), and for those that do, (ii) its rank among all 19,999 rows by CLAP cosine to the seed and (iii) its rank by feel distance to the seed, the two lists the pool is drawn from. Then the counts: how many of the 55 are absent from the catalogue, how many present would enter at feel 3,000, at 5,000, at CLAP 500. A one-off script under `ml/experiments/offline_rerank/` is fine; do not change `report.py`'s output for this.
+3. No pool change until both are posted. Then I set the size or amend the gate: a positive that is not in the catalogue is SCALE_PLAN's problem, not T6's, and the 35 of 81 was written before anyone counted how many of the 81 the catalogue holds.
+
+For the record: 19 to 30 pooled for 600 to 1,500 feel is the expected shape of diminishing returns, and section 2's own simulation said 26.
+
 ### 2026-10-30 15:56 IST P6 passed; GO P7: pools, latency in seconds, swing out of s_groove
 
 Review from the tree at `92ea453` and the live dataset: `977c67c` touches the four P6 files only; `2aa91bc` and `8d99f96` touch the constant-fields test and the log; `test_axis_range.py` has no marker; `SEED_IDS` holds 50 ids with the strict marker at line 132; the dataset's `track_metadata.json` header has `feature_std` for 19 axes (`mode_polarity` 0.3084, `swing` 0.0); Tests run 41039757506 is green, checked. Replica 1 / 1 / 0.0020 against baseline 0 / 0 / 0.0011, deviation 0.0000. Good packet, and the frozen seed set was the right end to the test's two-faced sampling.
