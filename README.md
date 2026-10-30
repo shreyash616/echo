@@ -537,6 +537,76 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 16:25 P7 BLOCKED: the Space does not come up after the deploy (X-Repo-Commit stall, twice); diagnostic below
+
+**The Space is down.** Code `17e48bc` (pools 300 / 1500 mirrored in `score_lib`, T3.5, `test_candidate_pool` in seconds with 20 timed calls, owner assert `>= 8`, marker deleted); `deploy_hf.py` ran clean; `deploy.yml` https://github.com/shreyash616/echo/actions/runs/41043081080 success. Then:
+- 16:17:30 RUNTIME_ERROR. One `restart_space` at 16:18; APP_STARTING, then RUNTIME_ERROR again by 16:19:37. Both times the log ends:
+  `[startup] Attempt 6 failed for track_metadata.json: Response from https://huggingface.co/datasets/shreyash616/echo-ml-artifacts/resolve/main/track_metadata.json is missing the 'X-Repo-Commit' header, so it does not seem to be served by a Hugging Face Hub endpoint. ... We also cannot find the requested files in the local cache.`
+- From the box the same URL answers `302` with `X-Repo-Commit: 6d9623586efabb52c48cc01233e09899b74a0ffa`, so the dataset is fine; the Space's own fetch is what fails. `startup.sh` lines 14 to 29 try 6 times with `time.sleep(2 + 2 * attempt)`, about 30 s in all. In P6 one restart was enough; this time it was not. I have not restarted again or touched `startup.sh` (your 15:30 note: a longer backoff is SCALE_PLAN WP7). Live validation, the live pool table and the 20 timings are not measured.
+
+Your call: (a) I restart again on a timer (say every 10 minutes, at most three times); (b) a GO to lengthen the backoff in `startup.sh` now; (c) roll the Space back to the P6 code by redeploying `977c67c`'s backend files; (d) you do it from the Hub side.
+
+Replica after (no Space needed): positives 81, **pooled 30** (from 19), hits@10 1, hits@20 1, **MRR 0.0023** (P6 0.0020), negatives 0; owner positives pooled **7 of 11** (exact key).
+
+Diagnostic (`ml/experiments/offline_rerank/unpooled_ranks.py`, committed): every one of the 51 unpooled TUNE positives has a catalogue row by **exact key; 0 absent**. Ranks are among all 19,999 rows with the seed as rank 1, as FAISS counts them.
+
+| seed | positive | owner | catalogue row | CLAP rank | feel rank |
+| Simple Man | Led Zeppelin - Stairway to Heaven | yes | exact | 4068 | 2280 |
+| Simple Man | Alice in Chains - Rooster | yes | exact | 4536 | 5413 |
+| Simple Man | Led Zeppelin - Since I've Been Loving You |  | exact | 2394 | 14198 |
+| Simple Man | Lynyrd Skynyrd - Tuesday's Gone |  | exact | 1158 | 15352 |
+| Simple Man | Pink Floyd - Comfortably Numb |  | exact | 5718 | 2555 |
+| Simple Man | B.B. King - The Thrill Is Gone |  | exact | 5223 | 11393 |
+| Simple Man | Dire Straits - Brothers in Arms |  | exact | 7021 | 6754 |
+| Simple Man | Metallica - Fade to Black |  | exact | 7129 | 10672 |
+| Simple Man | Pearl Jam - Black |  | exact | 2032 | 2170 |
+| Simple Man | Radiohead - Creep |  | exact | 6764 | 3895 |
+| Simple Man | Johnny Cash - Hurt |  | exact | 9431 | 3102 |
+| Simple Man | Rammstein - Ohne Dich |  | exact | 7811 | 1645 |
+| Waiting Around to Die | Atahualpa Yupanqui - Los Ejes de Mi Carreta |  | exact | 515 | 9392 |
+| Waiting Around to Die | Jagjit Singh - Tum Itna Jo Muskura Rahe Ho |  | exact | 2502 | 10317 |
+| Waiting Around to Die | Lhasa de Sela - Con Toda Palabra |  | exact | 2884 | 5704 |
+| Waiting Around to Die | Cesaria Evora - Sodade |  | exact | 748 | 9275 |
+| Waiting Around to Die | Nick Drake - Place to Be |  | exact | 4470 | 2173 |
+| Waiting Around to Die | Elliott Smith - Between the Bars |  | exact | 925 | 15538 |
+| Waiting Around to Die | Bill Callahan - Too Many Birds |  | exact | 2578 | 3391 |
+| Bang Data | Thee Oh Sees - Tidal Wave | yes | exact | 9491 | 17657 |
+| Bang Data | The Sonics - The Witch |  | exact | 7887 | 10244 |
+| Bang Data | Los Saicos - Demolicion |  | exact | 6129 | 17803 |
+| Bang Data | Jacques Dutronc - Les Cactus |  | exact | 3710 | 15060 |
+| Bang Data | Guitar Wolf - Jet Generation |  | exact | 7523 | 13281 |
+| Bang Data | Thee Michelle Gun Elephant - Smokin' Billy |  | exact | 4636 | 19351 |
+| Bang Data | Plastilina Mosh - Mr. P. Mosh |  | exact | 9964 | 5220 |
+| Bang Data | Kinky - Mas |  | exact | 15043 | 19663 |
+| Bang Data | Bomba Estereo - Fuego |  | exact | 1762 | 5519 |
+| Bang Data | Kumbia Queers - Kumbia Dark |  | exact | 7068 | 5790 |
+| Bang Data | Ty Segall - Girlfriend |  | exact | 14204 | 18632 |
+| Bang Data | Mdou Moctar - Afrique Victime |  | exact | 14427 | 19869 |
+| Boyfriend | Shubh - Baller | yes | exact | 1398 | 8862 |
+| Boyfriend | Justin Bieber - Peaches |  | exact | 2432 | 4711 |
+| Boyfriend | Post Malone - Sunflower |  | exact | 3780 | 3150 |
+| Boyfriend | Khalid - Location |  | exact | 1622 | 11640 |
+| Boyfriend | Tyga - Taste |  | exact | 6933 | 8580 |
+| Boyfriend | Davido - Fall |  | exact | 2231 | 7452 |
+| Boyfriend | Karan Aujla - Admirin' You |  | exact | 6069 | 13615 |
+| Boyfriend | Diljit Dosanjh - Lover |  | exact | 1569 | 3463 |
+| Boyfriend | AP Dhillon - Tere Te |  | exact | 1644 | 2080 |
+| Boyfriend | Shubh - Still Rollin |  | exact | 5540 | 13533 |
+| Boyfriend | AP Dhillon - Summer High |  | exact | 1615 | 4479 |
+| Hurt | Jacques Brel - Ne Me Quitte Pas |  | exact | 733 | 4706 |
+| Tum Hi Ho | Patrick Watson - Je Te Laisserai Des Mots |  | exact | 13767 | 13862 |
+| Mask Off | Lil Uzi Vert - XO Tour Llif3 |  | exact | 2337 | 4522 |
+| Mask Off | Travis Scott - Goosebumps |  | exact | 2514 | 3931 |
+| Mask Off | AP Dhillon - Brown Munde |  | exact | 11902 | 4905 |
+| Get Lucky | Earth, Wind & Fire - September |  | exact | 336 | 9914 |
+| Get Lucky | Mariya Takeuchi - Plastic Love |  | exact | 5562 | 11313 |
+| Tomboy | Mac DeMarco - Chamber of Reflection |  | exact | 12950 | 15959 |
+| Tomboy | Mac DeMarco - Ode to Viceroy |  | exact | 8815 | 10366 |
+
+Counts: absent 0 of 51 (owner 0 of 4). Present and inside feel <= 3,000: **6** (owner 1, Stairway at 2,280); feel <= 5,000: **17** (owner 1); CLAP <= 500: **1** (owner 0; September at 336, the only one between 300 and 500). With feel 5,000 the replica would pool about 30 + 17 = 47 of 81, but owner positives would still be 8 of 11 at most (Stairway in, Rooster 5,413, Tidal Wave 17,657, Baller 8,862 out). So the 35 of 81 is reachable by size only at feel above 3,000; the remaining positives sit 5,000 to 20,000 deep on both lists, which is a feature problem, not a pool size.
+
+BLOCKED
+
 ### 2026-10-30 16:45 P7 BLOCKED before deploy: the replica pools 30 of 81 and 7 of 11 at 300 / 1500
 
 Done in the working tree, nothing committed but the start log `8e799ab`, nothing deployed:
