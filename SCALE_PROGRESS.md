@@ -401,3 +401,15 @@ WP3 DEPLOYED. Waiting for the owner's two Space secrets; discovery is not starte
 
 - `tests/deploy_hf.py` uploads an explicit file list that has neither new file; a deploy through it alone would leave the Space
   without them (it does not delete them once there). `deploy.yml` uploads the backend folder and carries both; WP7 item.
+
+### Discovery run on the Space
+
+- Owner set `ECHO_ADMIN_TOKEN` (2026-10-30 22:45 IST; `HF_TOKEN` was already a Space secret). Status, with the token read from the
+  gitignored `backend/.env` and never printed: `HTTP 200`, `running false`, `hf_token_present true`, `hf_token_role "write"`.
+- `POST /api/admin/discovery/start`: `{"started": true, "started_at": "2026-10-30T17:20:10+0000"}` (22:50:10 IST).
+- First checkpoint on the dataset (downloaded back): `progress.json` artists 6,447, expanded 539, requests 720, failures 0,
+  t 118 s; `artists.jsonl` 6,447 rows: seed 119, chart 1,314 (28 countries), genre 10, related 5,004. Space rate about 6 requests
+  a second, about 12 new artists per related call: 120,000 in roughly half an hour.
+- Genre new artists 10 here against 43 in the box dry run: Deezer's `/genre/{id}/artists` appears to answer by the requester's
+  location, and from the Space it overlaps the charts more. Above zero, as the gate asks.
+- No deploy until the run finishes (it would restart the Space).
