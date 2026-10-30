@@ -733,6 +733,54 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-31 00:20 IST PACKET WP4 READY FOR REVIEW
+
+`ccde97e`, plus `ba060ec`, a two-line fix to the progress entry. Started while discovery was checkpointing, as your 21:48 GO allows; discovery is still running on the Space, untouched by WP4.
+
+**`ml/data/harvest_v3.py`** implements stages A to F and the claims and resume of section 5. It imports the P4 code rather than copying it:
+- **Describe and CLAP:** `redescribe_catalog`'s describe worker, CLAP loader, decode and resample path, and theme.
+- **Lyrics:** `fetch_lyrics_remote`'s LRCLIB flow, with the application headers from `backend/.env`.
+- **Resolve:** `harvest_v2`'s artist match, track filter and record fields.
+
+`harvest_v2` and the recommender load torch at import, so they are imported inside the stages. The 10 spawned describe workers then load no torch.
+
+**Your two windows** were open in the Terminal panel before the run and left up: a `Get-Content -Wait` of the describe log (stages A to C, E, F) and of the CLAP batch log (one INFO line per batch: index of total, windows, device, seconds, songs a second, `cuda.memory_allocated` MB).
+
+**Fixture run:** five artists not in the benchmark or the seeds, 100 songs, 0 dropped, 420 s.
+
+**Block:**
+```
+python -m pytest -q tests/test_harvest_shard.py tests/test_harvest_resume.py -> 7 passed in 294 s
+ls ml/data/previews | wc -l -> 0
+catalog/v3/shard_fixture.manifest.json: describe_commit e4c1b1bd2b4dd35a21560de82d280a587461ce99,
+  seconds_per_stage A 47.2 B 24.8 C 33.0 D 209.1 E 94.8 F 9.1, songs 100, dropped 0,
+  sha256 features 98339e75..., clap 4130572e..., dropped e3b0c442... (each re-downloaded and hashed: matches)
+```
+
+**What the tests cover:**
+- **Shard test:** one fixture artist end to end into a local store, checking:
+  - row and CLAP alignment, and float16 unit rows;
+  - the SHA256s, the describe commit, timings for A to F, and the dropped count;
+  - the field set against today's `catalog_features.jsonl` with the same `has_lyrics`;
+  - batched CLAP against P4's one-window path (max abs difference 4.1e-08);
+  - that previews are deleted.
+- **Resume test:** the lowest unclaimed shard is taken; a fresh foreign claim is skipped and a stale one taken over; a crash in D keeps the claim and the rerun starts at A; finishing writes the manifest and keys and releases the claim.
+
+Only `catalog/v3/shard_fixture.*` was written; `discovery/` was not touched.
+
+**Gate:** both tests pass; previews empty; the manifest has WP0's describe commit, seconds per stage, the dropped count and matching SHA256s. All met.
+
+Two findings for your call, both in the entry:
+1. **CLAP batch 64 stalls 3 to 5 minutes, once per process, on its first call** (184 s in this run; 185, 235 and 328 s measured). It is not memory: the peak is 3.3 GB of 10 GB. In fresh processes:
+   - batch 16: first call 0.93 s, 8 ms a window;
+   - batch 32: first call 0.89 s, 11 ms a window;
+   - batch 64: first call 185 s, 15 ms a window.
+
+   With one process per shard, about 200 shards come to about 10 hours of stall, and 64 is also the slowest per window. I recommend 32. The fixture ran at section 5's 64.
+2. **Lyric errors:** stage E ended 33 of 87 fetches in error after five 503 retries (38%). `fetch_lyrics_remote`'s own main does a second pass over its errors and the harvester's stage E does not yet; adding it is cheap, for WP5.
+
+PACKET WP4 READY FOR REVIEW
+
 ### 2026-10-30 22:55 IST WP3: discovery started on the Space; first checkpoint on the dataset
 
 - **Secrets:** the owner set `ECHO_ADMIN_TOKEN`; `HF_TOKEN` was already a Space secret. Status shows `hf_token_present true` and `hf_token_role "write"`; the token is read from the gitignored `backend/.env` and never printed.
