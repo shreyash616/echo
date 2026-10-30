@@ -438,6 +438,47 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 13:20 P5 BLOCKED on item 6: live candidate pool 4/11 owner positives (was 6/11)
+
+Deploy done; items 1 to 5 pass. Numbers are in FEEL_ALGORITHM.md under Packet P5 (`7f69cfa`); the essentials:
+
+- Deploy: `py tests/deploy_hf.py` (cached HF login, nothing printed), then `deploy.yml` dispatched: https://github.com/shreyash616/echo/actions/runs/41019595116, **success**. Its `upload-artifacts` did not fail: `ml/upload_artifacts.py` skips missing files with a WARNING (`music_index.faiss`, `track_metadata.json`), re-uploaded the tracked JSON files (same content, LF endings), deleted nothing.
+- 1. Space RUNNING 12:54:38 IST; `/api/health` `{"status":"ok","recommender_loaded":true}`; the dataset's `HARVEST_MANIFEST.json` has `describe_commit` 05def45ef8fad60f19cd0d72c4d807ec6c2410bc.
+- 2. Dataset `ml/data/catalog_features.jsonl` LFS sha256 `ba16a10422a57cbf9f53059b7d8bed19590c604baae58dfcf0459c50f465377e` = manifest (True).
+- 3. `report.py --split tune --validate-live`: **max axis deviation 0.0000** (< 0.001).
+- 4. `test_live_overlap.py`: Boyfriend/Bang Data, Boyfriend/Waiting Around to Die, Bang Data/Waiting Around to Die all 0/10 and 0/20, pass.
+- 5. Live `feel_benchmark.py --split tune` beside offline `report.py`:
+
+  | | live (feel_benchmark) | offline (report.py, 12:40) |
+  |---|---|---|
+  | positives | 81 (9 seeds) | 81 |
+  | hits@10 | 1 (1.23%) | 0 |
+  | hits@20 | 2 (2.47%, Wilson 95% [0.68%, 8.56%]) | 0 |
+  | MRR | 0.0197 | 0.0009 |
+  | negatives in top10 | 1 | 0 |
+  | other | nDCG@20 0.0208; Boyfriend scene test FAIL (outside positives 50.00, inside negatives 45.33); hits only on Get Lucky (R@10 33.3%) | pooled 19, not pooled 62 |
+
+- 6. Local `pytest -q tests/`: 1 failed, 21 passed, 1 skipped (parity: previews deleted), 1 xfailed. **`test_offline_replica` passes now.** The failure is `test_candidate_pool` against the live Space, and Tests on `7f69cfa` fail on that step alone: https://github.com/shreyash616/echo/actions/runs/41020934805.
+
+`test_candidate_pool`, live, P4 index: owner positives in the union pool **4/11** (required >= 6), all positives 20/67.
+
+| seed (pool size) | owner positives |
+|---|---|
+| Simple Man (1,061) | Levee **in** (feel); Stairway to Heaven **out**; Rooster out |
+| Waiting Around to Die (1,034) | Me Gustas Tu **in** (feel); No Surprises **out**; Black out |
+| Bang Data (1,037) | Tidal Wave out |
+| Boyfriend (1,019) | Antidote **in** (clap); For A Reason **in** (clap); Baller out; Roll With Me out |
+
+On the 10-28 index it was 6/11 (2026-10-28 log: Levee, Stairway, No Surprises, Me Gustas Tu, Antidote, For a Reason). Stairway and No Surprises fell out of both CLAP 500 and feel 600 with the re-described catalogue. Nothing retuned, the test untouched. FIX_PLAN_2's later packet already targets this (`candidates_clap = 300`, `candidates_feel = 1500`, done at >= 8 of 11), but that is not P5's to do.
+
+Your call: (a) accept 4/11 as P5's measured state with the candidate-pool step red until the pool packet, or (b) something you name. The Space stays up on the P4 index either way; I have not rolled back.
+
+Second commit (fetch_lyrics flow, harvest_v2 anchors key and excepts) is written and not committed, as you ordered it after the numbers: `redescribe_catalog.fetch_lyrics` now has `clean_title`, `/api/get` again with the cleaned title and no album, `/api/search` by fields then `q=`, Retry-After plus jitter, five 503 retries at 1 s (smoke test into a scratch dir: 5 of 5 fetched through three 503s). `harvest_v2.py`: reads `prompts` from the anchors bundle; 17 broad `except Exception` narrowed to what each block raises (JSON lines: ValueError/KeyError/AttributeError; Deezer, iTunes, LRCLIB: httpx.HTTPError plus the JSON and field errors; file reads and writes: OSError; DSP and CLAP: OSError/ValueError/IndexError/FloatingPointError/RuntimeError/LibrosaError). The worker's logged catch-all at line 877 stays broad, so one bad candidate does not stop a harvest. I commit it on your word, with this item or separately.
+
+Noticed: the candidate-pool p95 is still read in seconds as "ms" (0.47 printed, about 470 ms real), as FIX_PLAN_2 records; untouched.
+
+BLOCKED
+
 ### 2026-10-30 12:50 PACKET P4 READY FOR REVIEW
 
 Commits: `05def45` (none list read one key per line), `9655f41` (manifest, DROPPED, row floors, rebuilt index outputs, log), and the log close-out on top of it. Everything measured is in my 12:20 and 12:40 entries and in FEEL_ALGORITHM.md under Packet P4; the numbers are unchanged.
