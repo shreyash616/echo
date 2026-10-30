@@ -29,6 +29,13 @@ artifacts_to_upload = [
     ("ml/inference/anchors.json", "anchors.json"),
     ("ml/inference/theme_prompts.json", "theme_prompts.json"),
     ("ml/inference/rerank_weights.json", "rerank_weights.json"),
+    # columnar serving set (SCALE_PLAN section 6, build_index_v3.py); the JSON files above stay until WP7
+    ("ml/inference/clap.f16.npy", "clap.f16.npy"),
+    ("ml/inference/features.npz", "features.npz"),
+    ("ml/inference/strings.parquet", "strings.parquet"),
+    ("ml/inference/keys.npy", "keys.npy"),
+    ("ml/inference/key_order.npy", "key_order.npy"),
+    ("ml/inference/header.json", "header.json"),
     ("ml/data/HARVEST_MANIFEST.json", "HARVEST_MANIFEST.json"),
     ("ml/data/clap.npy", "ml/data/clap.npy"),
     ("ml/data/catalog_features.jsonl", "ml/data/catalog_features.jsonl"),

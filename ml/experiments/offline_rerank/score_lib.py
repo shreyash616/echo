@@ -313,8 +313,39 @@ def mmr_select(scores, claps, arts, is_cross, k=20, diversity=0.70, cross_langua
     return selected
 
 
+COLUMNAR_FILES = ("header.json", "features.npz", "strings.parquet", "keys.npy", "key_order.npy", "clap.f16.npy", "feel_matrix.npy")
+
+
 class Catalogue:
     def __init__(self):
+        if all(os.path.exists(f"{HF}/{f}") for f in COLUMNAR_FILES):
+            self._load_columnar()
+        else:
+            self._load_json()
+        self.weights_live = json.load(open(f"{HF}/rerank_weights.json"))
+        self.feature_std = self.header.get("feature_std") or {}
+        self.k_clap = 300  # as config.candidates_clap
+        self.k_feel = 3000  # as config.candidates_feel
+
+    def _load_columnar(self):
+        """build_index_v3's files (SCALE_PLAN section 6), read by the Space's own reader so a row here is
+        the dict the Space assembles; the rows are materialised once, as the replica iterates them."""
+        from pathlib import Path
+        sys.path.insert(0, os.path.abspath("backend"))
+        from app.services.recommender import ColumnarRows, KeyLookup
+        d = Path(HF)
+        self.header = json.loads((d / "header.json").read_text(encoding="utf-8"))
+        rows = ColumnarRows(d, self.header)
+        self.meta = list(rows)
+        self.id_map = KeyLookup(np.load(d / "keys.npy"), np.load(d / "key_order.npy"), rows)
+        self.clap = np.load(d / "clap.f16.npy").astype(np.float32)
+        self.index = faiss.IndexFlatIP(self.clap.shape[1])
+        self.index.add(self.clap)
+        self.feel_matrix = np.load(d / "feel_matrix.npy")
+        self.feel_index = faiss.IndexFlatL2(self.feel_matrix.shape[1])
+        self.feel_index.add(self.feel_matrix)
+
+    def _load_json(self):
         raw = json.load(open(f"{HF}/track_metadata.json"))
         self.header = raw["header"]
         self.meta = raw["tracks"]
@@ -332,11 +363,6 @@ class Catalogue:
             if r.get("itunes_id"):
                 self.id_map[str(r["itunes_id"])] = i
                 self.id_map[f"it_{r['itunes_id']}"] = i
-        self.weights_live = json.load(open(f"{HF}/rerank_weights.json"))
-        self.feature_std = self.header.get("feature_std") or {}
-        self.k_clap = 300  # as config.candidates_clap
-        self.k_feel = 3000  # as config.candidates_feel
-
     def pool(self, seed_key, k_clap=None, k_feel=None):
         k_clap = k_clap or self.k_clap
         k_feel = k_feel or self.k_feel

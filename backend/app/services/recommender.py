@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import hashlib
 import json
 import logging
 import os
@@ -188,6 +189,106 @@ def _window_audio_frames(audio: np.ndarray, sr: int, window_sec: float) -> list[
     return windows
 
 
+COLUMNAR_FILES = ("header.json", "features.npz", "strings.parquet", "keys.npy", "key_order.npy", "clap.f16.npy", "feel_matrix.npy")
+
+
+def _key_hash(s: str) -> int:
+    """build_index_v3.key_hash: blake2b, 8 bytes, little-endian, as an unsigned 64-bit integer."""
+    return int.from_bytes(hashlib.blake2b(s.encode("utf-8"), digest_size=8).digest(), "little")
+
+
+class ColumnarRows:
+    """The catalogue rows from build_index_v3's columns (SCALE_PLAN section 6). rows[i] assembles a
+    dict on demand with the fields, field order and Python types of the JSON row it replaces."""
+
+    def __init__(self, directory: Path, header: dict) -> None:
+        import pyarrow.parquet as pq
+
+        feats = np.load(directory / "features.npz")
+        table = pq.read_table(directory / "strings.parquet")
+        self._n = int(header["rows"])
+        kinds = {c["name"]: c["kind"] for c in header["columns"]}
+        names = [c["name"] for c in header["columns"]]
+        groups = {k: [f for f in names if kinds[f] == k] for k in ("float", "int", "bool", "vec", "str", "strlist")}
+        self._float = np.stack([feats[f] for f in groups["float"]], axis=1)
+        self._int = np.stack([feats[f] for f in groups["int"]], axis=1)
+        self._bool = np.stack([feats[f] for f in groups["bool"]], axis=1)
+        self._vecs = [feats[f] for f in groups["vec"]]
+        text = groups["str"] + groups["strlist"]
+        self._text = {f: table.column(f).to_pylist() for f in text}
+        self._text_rows = list(zip(*(self._text[f] for f in text)))
+        self._dist = (feats["dist_bpm"], feats["dist_p"], feats["dist_len"]) if "felt_bpm_dist" in kinds else None
+        # where each field's value sits in a row's sources: (source, position); sources are the float,
+        # int, bool and text tuples, the vectors and the felt-BPM dict, in that order
+        where = {}
+        for src, k in enumerate(("float", "int", "bool")):
+            where.update({f: (src, j) for j, f in enumerate(groups[k])})
+        where.update({f: (3, j) for j, f in enumerate(text)})
+        where.update({f: (4, j) for j, f in enumerate(groups["vec"])})
+        where["felt_bpm_dist"] = (5, 0)
+        self._orders = [(tuple(o), [where[f] for f in o]) for o in header.get("field_orders") or [names]]
+        self._order_of = feats["field_order"] if "field_order" in feats.files else np.zeros(self._n, dtype=np.int8)
+
+    def __len__(self) -> int:
+        return self._n
+
+    def __getitem__(self, i: int) -> dict:
+        if i < 0:
+            i += self._n
+        if not 0 <= i < self._n:
+            raise IndexError(i)
+        dist = None
+        if self._dist is not None:
+            bpm, p, n = self._dist
+            k = int(n[i])
+            dist = (dict(zip([str(int(b)) for b in bpm[i, :k].tolist()], p[i, :k].tolist())),)
+        srcs = (self._float[i].tolist(), self._int[i].tolist(), self._bool[i].tolist(), self._text_rows[i],
+                [v[i].tolist() for v in self._vecs], dist)
+        fields, plan = self._orders[self._order_of[i]]
+        return dict(zip(fields, [srcs[s][j] for s, j in plan]))
+
+    def __iter__(self):
+        return (self[i] for i in range(self._n))
+
+    def lookup_strings(self, i: int) -> set[str]:
+        """The strings track_id_map.json maps to row i: id, key, deezer_id, itunes_id, it_<itunes_id>."""
+        t = self._text
+        out = {str(t[f][i]) for f in ("id", "key", "deezer_id") if f in t and t[f][i]}
+        it = t["itunes_id"][i] if "itunes_id" in t else None
+        if it:
+            out |= {str(it), f"it_{it}"}
+        return out
+
+
+class KeyLookup:
+    """track_id_map.json as build_index_v3's sorted hashes: get / in / [] by id, key or itunes id. A
+    hash hit is confirmed against the row's own lookup strings, so the answer is exact."""
+
+    def __init__(self, hashes: np.ndarray, order: np.ndarray, rows: ColumnarRows) -> None:
+        self._h, self._o, self._rows = hashes, order, rows
+
+    def get(self, k: str, default: int | None = None) -> int | None:
+        h = np.uint64(_key_hash(str(k)))
+        j = int(np.searchsorted(self._h, h))
+        if j < len(self._h) and self._h[j] == h:
+            r = int(self._o[j])
+            if str(k) in self._rows.lookup_strings(r):
+                return r
+        return default
+
+    def __contains__(self, k: str) -> bool:
+        return self.get(k) is not None
+
+    def __getitem__(self, k: str) -> int:
+        r = self.get(k)
+        if r is None:
+            raise KeyError(k)
+        return r
+
+    def __len__(self) -> int:
+        return len(self._h)
+
+
 class MusicRecommender:
     """
     Online Serving Path for Echo (Section 12.1 - 12.6).
@@ -257,71 +358,77 @@ class MusicRecommender:
             except Exception as exc:
                 logger.warning("Error loading weights from %s: %s", weights_path, exc)
 
-        # 2. Track metadata
-        meta_path = _resolve(settings.track_metadata_path)
-        if meta_path.exists():
-            with open(meta_path, "r", encoding="utf-8") as f:
-                raw_meta = json.load(f)
-            if isinstance(raw_meta, dict) and "tracks" in raw_meta:
-                self._metadata = raw_meta["tracks"]
-                self._metadata_header = raw_meta.get("header", {k: v for k, v in raw_meta.items() if k != "tracks"})
-                self._cut_points = self._metadata_header.get("cut_points")
-                self._feature_std = dict(self._metadata_header.get("feature_std") or {})
-                if not self._feature_std:
-                    logger.error("track_metadata.json header has no feature_std; T2 similarities use std 1.0 on every axis")
-            elif isinstance(raw_meta, list):
-                self._metadata = raw_meta
-            logger.info("Loaded %d track records from %s", len(self._metadata), meta_path)
-
-        # 3. Track id map (maps id, key, deezer_id, itunes_id -> row index)
-        id_map_path = _resolve("ml/inference/track_id_map.json")
-        if id_map_path.exists():
-            with open(id_map_path, "r", encoding="utf-8") as f:
-                self._track_id_map = json.load(f)
+        # 2 to 4b. The columnar set (SCALE_PLAN section 6, build_index_v3.py) when all its files are
+        # present; otherwise the JSON metadata, id map and FAISS files
+        col_dir = _resolve("ml/inference/header.json").parent
+        if all((col_dir / f).exists() for f in COLUMNAR_FILES):
+            self._load_columnar(col_dir)
         else:
-            self._track_id_map = {}
+            # 2. Track metadata
+            meta_path = _resolve(settings.track_metadata_path)
+            if meta_path.exists():
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    raw_meta = json.load(f)
+                if isinstance(raw_meta, dict) and "tracks" in raw_meta:
+                    self._metadata = raw_meta["tracks"]
+                    self._metadata_header = raw_meta.get("header", {k: v for k, v in raw_meta.items() if k != "tracks"})
+                    self._cut_points = self._metadata_header.get("cut_points")
+                    self._feature_std = dict(self._metadata_header.get("feature_std") or {})
+                    if not self._feature_std:
+                        logger.error("track_metadata.json header has no feature_std; T2 similarities use std 1.0 on every axis")
+                elif isinstance(raw_meta, list):
+                    self._metadata = raw_meta
+                logger.info("Loaded %d track records from %s", len(self._metadata), meta_path)
 
-        # Ensure all key representations (key, deezer_id, itunes_id) are indexed
-        for i, rec in enumerate(self._metadata):
-            if rec.get("id"):
-                self._track_id_map[str(rec["id"])] = i
-            k = rec.get("key") or make_track_key(str(rec.get("artist", "")), str(rec.get("title", "")))
-            self._track_id_map[k] = i
-            if rec.get("deezer_id"):
-                self._track_id_map[str(rec["deezer_id"])] = i
-            if rec.get("itunes_id"):
-                self._track_id_map[str(rec["itunes_id"])] = i
-                self._track_id_map[f"it_{rec['itunes_id']}"] = i
+            # 3. Track id map (maps id, key, deezer_id, itunes_id -> row index)
+            id_map_path = _resolve("ml/inference/track_id_map.json")
+            if id_map_path.exists():
+                with open(id_map_path, "r", encoding="utf-8") as f:
+                    self._track_id_map = json.load(f)
+            else:
+                self._track_id_map = {}
 
-        # 4. FAISS index
-        index_path = _resolve(settings.faiss_index_path)
-        if index_path.exists():
-            try:
-                self._index = faiss.read_index(str(index_path))
-                self._dim = self._index.d
-                logger.info("Loaded FAISS index from %s with %d entries, dim=%d", index_path, self._index.ntotal, self._dim)
-                if self._index.ntotal > 0:
-                    self._clap_matrix = self._index.reconstruct_n(0, self._index.ntotal)
-                    logger.info("Extracted CLAP matrix from FAISS index: shape %s", self._clap_matrix.shape)
-            except Exception as exc:
-                logger.warning("Could not read FAISS index from %s: %s", index_path, exc)
+            # Ensure all key representations (key, deezer_id, itunes_id) are indexed
+            for i, rec in enumerate(self._metadata):
+                if rec.get("id"):
+                    self._track_id_map[str(rec["id"])] = i
+                k = rec.get("key") or make_track_key(str(rec.get("artist", "")), str(rec.get("title", "")))
+                self._track_id_map[k] = i
+                if rec.get("deezer_id"):
+                    self._track_id_map[str(rec["deezer_id"])] = i
+                if rec.get("itunes_id"):
+                    self._track_id_map[str(rec["itunes_id"])] = i
+                    self._track_id_map[f"it_{rec['itunes_id']}"] = i
 
-        # 4b. Feel Matrix and Feel Index (S1)
-        feel_mat_path = _resolve("ml/inference/feel_matrix.npy")
-        if feel_mat_path.exists():
-            try:
-                self._feel_matrix = np.load(str(feel_mat_path))
-                logger.info("Loaded feel matrix from %s: shape %s", feel_mat_path, self._feel_matrix.shape)
-            except Exception as exc:
-                logger.warning("Could not load feel matrix: %s", exc)
+            # 4. FAISS index
+            index_path = _resolve(settings.faiss_index_path)
+            if index_path.exists():
+                try:
+                    self._index = faiss.read_index(str(index_path))
+                    self._dim = self._index.d
+                    logger.info("Loaded FAISS index from %s with %d entries, dim=%d", index_path, self._index.ntotal, self._dim)
+                    if self._index.ntotal > 0:
+                        self._clap_matrix = self._index.reconstruct_n(0, self._index.ntotal)
+                        logger.info("Extracted CLAP matrix from FAISS index: shape %s", self._clap_matrix.shape)
+                except Exception as exc:
+                    logger.warning("Could not read FAISS index from %s: %s", index_path, exc)
 
-        feel_idx_path = _resolve("ml/inference/feel_index.faiss")
-        if feel_idx_path.exists():
-            try:
-                self._feel_index = faiss.read_index(str(feel_idx_path))
-                logger.info("Loaded FAISS feel index from %s with %d entries", feel_idx_path, self._feel_index.ntotal)
-            except Exception as exc:
-                logger.warning("Could not load feel index: %s", exc)
+            # 4b. Feel Matrix and Feel Index (S1)
+            feel_mat_path = _resolve("ml/inference/feel_matrix.npy")
+            if feel_mat_path.exists():
+                try:
+                    self._feel_matrix = np.load(str(feel_mat_path))
+                    logger.info("Loaded feel matrix from %s: shape %s", feel_mat_path, self._feel_matrix.shape)
+                except Exception as exc:
+                    logger.warning("Could not load feel matrix: %s", exc)
+
+            feel_idx_path = _resolve("ml/inference/feel_index.faiss")
+            if feel_idx_path.exists():
+                try:
+                    self._feel_index = faiss.read_index(str(feel_idx_path))
+                    logger.info("Loaded FAISS feel index from %s with %d entries", feel_idx_path, self._feel_index.ntotal)
+                except Exception as exc:
+                    logger.warning("Could not load feel index: %s", exc)
 
         # Header feel metadata
         if self._metadata_header:
@@ -458,6 +565,26 @@ class MusicRecommender:
             logger.info("Catalogue vectors passed mandatory assertions: mean_cos=%.4f, all norms > 0", mean_cat_cos)
 
         self._loaded = True
+
+    def _load_columnar(self, directory: Path) -> None:
+        """Rows, id lookup, CLAP index and feel matrix from build_index_v3's files."""
+        header = json.loads((directory / "header.json").read_text(encoding="utf-8"))
+        self._metadata = ColumnarRows(directory, header)
+        self._metadata_header = header
+        self._cut_points = header.get("cut_points")
+        self._feature_std = dict(header.get("feature_std") or {})
+        if not self._feature_std:
+            logger.error("header.json has no feature_std; T2 similarities use std 1.0 on every axis")
+        self._track_id_map = KeyLookup(np.load(directory / "keys.npy"), np.load(directory / "key_order.npy"), self._metadata)
+        self._clap_matrix = np.load(directory / "clap.f16.npy").astype(np.float32)
+        self._dim = self._clap_matrix.shape[1]
+        self._index = faiss.IndexFlatIP(self._dim)
+        self._index.add(self._clap_matrix)
+        self._feel_matrix = np.load(directory / "feel_matrix.npy")
+        self._feel_index = faiss.IndexFlatL2(self._feel_matrix.shape[1])
+        self._feel_index.add(self._feel_matrix)
+        logger.info("Loaded the columnar catalogue from %s: %d rows, CLAP %s from float16, feel %s, %d lookup keys",
+                    directory, len(self._metadata), self._clap_matrix.shape, self._feel_matrix.shape, len(self._track_id_map))
 
     def get_track_record(self, track_id: str | None = None, key: str | None = None) -> dict | None:
         """Returns the stored record for an in-catalogue or cached track, or None."""
