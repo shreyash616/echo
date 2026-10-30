@@ -8,7 +8,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import random
 import httpx
 import pytest
 
@@ -20,36 +19,25 @@ PROHIBITED_FIELDS = {
 }
 
 
+# random.seed(42) + random.sample(tracks, 50) over the P4 ml/inference/track_metadata.json, frozen 2026-10-30
+SEED_IDS = [
+    'it_499382862', 'it_579370568', 'it_1284592099', 'it_1719149437', 'it_574124486',
+    'it_1843747851', 'it_437457923', 'it_1039795394', 'it_86412736', 'it_1721640985',
+    'it_1440826416', 'it_1109715243', 'it_1109715467', 'it_337881842', 'it_1482424952',
+    'it_1697586232', 'it_6818324097', 'it_1472518743', 'it_220206604', 'it_1099841640',
+    'it_1601887785', 'it_1347896328', 'it_1651684672', 'it_1440843591', 'it_1468058181',
+    'it_1437298021', 'it_1482992153', 'it_1440713924', 'it_1261490765', 'it_1586410662',
+    'it_1150135931', 'it_1484416538', 'it_1476836455', 'it_290303022', 'it_1501843720',
+    'it_1410104238', 'it_321508252', 'it_1626390201', 'it_1347880122', 'it_1681874926',
+    'it_717067880', 'it_1443184563', 'it_1426047924', 'it_1456593982', 'it_1523974932',
+    'it_1741452482', 'it_1542855675', 'it_1440933395', 'it_693814938', 'it_1454454180',
+]
+
 def run_no_constant_fields_test(base_url: str):
     client = httpx.Client(base_url=base_url, timeout=30.0)
 
-    # 1. Load catalogue to pick 50 random track IDs, or discover via search if running in CI without artifacts
-    meta_path = os.path.abspath("ml/inference/track_metadata.json")
-    if os.path.exists(meta_path):
-        with open(meta_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        tracks = data.get("tracks", data) if isinstance(data, dict) else data
-        random.seed(42)
-        sample_tracks = random.sample(tracks, 50)
-    else:
-        sample_tracks = []
-        seen_ids = set()
-        for q in ["the", "love", "night", "man", "time", "one", "heart", "world", "you", "fire"]:
-            r = client.get("/api/search", params={"q": q})
-            if r.status_code == 200:
-                res = r.json()
-                items = res.get("results", []) if isinstance(res, dict) else res
-                for it in items:
-                    tid = it.get("id")
-                    if tid and tid not in seen_ids:
-                        seen_ids.add(tid)
-                        sample_tracks.append(it)
-                    if len(sample_tracks) >= 50:
-                        break
-            if len(sample_tracks) >= 50:
-                break
-        if len(sample_tracks) < 50:
-            pytest.skip(f"Could not gather 50 tracks via search (found {len(sample_tracks)})")
+    # 1. The same 50 seeds on the box and in CI (reviewer decision 56344be)
+    sample_tracks = [{"id": tid} for tid in SEED_IDS]
 
     rec_field_values: dict[str, set] = {}
     track_field_values: dict[str, set] = {}
@@ -57,7 +45,7 @@ def run_no_constant_fields_test(base_url: str):
     print(f"\nQuerying /api/track and /api/recommendations for 50 tracks from {base_url}...")
     for track in sample_tracks:
         tid = track.get("id")
-        key = track.get("key") or f"{track.get('artist')}:{track.get('title')}"
+        key = tid  # the Space's id map resolves an id given as key
 
         # 1a. Test /api/track/{tid}
         t_resp = client.get(f"/api/track/{tid}?key={key}")
