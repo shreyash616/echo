@@ -342,3 +342,62 @@ Tests https://github.com/shreyash616/echo/actions/runs/41085686410 green (attemp
 - `build_index_v3.py` reaches the rows through `build_index_v2`; at a million rows it reads shards instead (WP6).
 
 PACKET WP2 READY FOR REVIEW
+
+## WP3. Discovery on the Space
+
+- Started: 2026-10-30 21:50 IST after GO WP3 (README 221a5e2); scope amended at 618dedd.
+- Files: `backend/app/services/discovery.py` (new; first written as `ml/data/discover_artists.py`, moved), `backend/app/data/discovery_seeds.json`
+  (new, generated), `ml/data/make_discovery_seeds.py` (new), `backend/app/api/routes.py` (the two routes), `SCALE_PROGRESS.md`.
+  `backend/requirements.txt` unchanged (httpx and huggingface_hub are already there).
+- Commits: `b2596f7` (first version), `7dbde4c` (moved into the backend, ids-only seeds, 28 charts with `chart_kind`).
+
+### What was built
+
+- **Charts.** `/chart/{country}/artists` ignores the country (SG and 0 return the same list); Deezer serves country charts as the
+  "Deezer Charts" account's playlists (user 637006841, 102 playlists), which cover 22 of the 28 countries. `discovery.CHARTS` pins
+  country to playlist id: 22 `official`, and for the six without one a `user` playlist, picked 2026-10-30 as the most-followed
+  current-hits list, preferring lists created 2024 or later when any has followers:
+  IN 5714603022 "Bollywood Top 50" (Filtr Arabia, a label account; 2,114 fans, created 2019, the best 2024+ list had 19),
+  PK 15038204963 "TRENDING PAKISTANI SONGS 2025" (6 fans, 2026-03), BD 13175326563 "Top Bangla Songs 2024" (2 fans, 2024-10),
+  TW 10561367522 "Top 50 - Taiwan" (5 fans, 2022; no 2024+ list had a fan), HK 13617318101 "Hong Kong 2025" (2 fans, 2025-03),
+  VN 14760476603 "Vietnamese (V-Pop) 2026" (8 fans, 2025-12).
+- **Seeds.** `make_discovery_seeds.py` resolves the 117 names of `harvest_seed_artists.json` and the 115 lead-artist names of the
+  benchmark on the box: 116 exact, 3 top hit, 0 unresolved, **119 unique Deezer ids**, written with counts only. The file holds
+  ids, not names: `test_no_benchmark_leakage` greps `.json` files outside `tests/` for benchmark artist names as well as
+  titles and whitelists only `harvest_seed_artists.json`, so a names file in `backend/app/data/` would fail it; the walk needs
+  only the ids.
+- **Walk.** `Discovery.run`: seeds (`/artist/{id}`), charts (top 100 artists of each playlist), genre pages, then the related
+  walk in file order to 120,000; `nb_fan` filled for rows that lack it; client at 50 requests per 5 s with backoff on
+  quota errors, 4xx/5xx and network errors. Checkpoint every 5,000 artists: `discovery/artists.jsonl` and `discovery/progress.json`
+  (rows expanded) to the dataset; a restart resumes with the queue = rows from `expanded` on. At the end `MANIFEST.json` (counts
+  per source, chart countries with `chart_kind`, official count, depths, SHA256) and `shards.json` (250 a shard, row ranges).
+- **Routes.** `POST /api/admin/discovery/start`, `GET /api/admin/discovery/status`: 404 unless `ECHO_ADMIN_TOKEN` is set;
+  `X-Admin-Token` checked with `hmac.compare_digest` (403 otherwise); start refuses with 412 when `HF_TOKEN` is unset and 409
+  while a run is alive; one background thread; status gives progress, checkpoint, error, `hf_token_present` and the role from
+  `whoami`, never a value. Local TestClient: no secret 404 / 404; wrong token 403; right token 200; start without `HF_TOKEN` 412.
+
+### Local dry run (box, `--no-upload`, cap 4,000)
+
+```
+{'rows': 4000, 'counts_per_source': {'seed': 119, 'chart': 1314, 'genre': 43, 'related': 2524}, 'chart_country_count': 28,
+ 'official_chart_countries': 22, 'unresolved_seed_ids': 0, 'depths': {'0': 1476, '1': 2524}, 'requests': 1794,
+ 'failed_requests': 0, 'elapsed_s': 463}
+kinds: Counter({'official': 22, 'user': 6}) | user charts (artists, new): IN (52, 51), PK (49, 39), BD (73, 73), TW (39, 31), HK (71, 70), VN (100, 100)
+sha ok: True | shards exact: True | unique: True
+```
+
+About 3.9 requests a second (latency-bound) and about 11 new artists per related call, so 120,000 is roughly an hour of walk.
+
+### Deploy
+
+- `deploy.yml` https://github.com/shreyash616/echo/actions/runs/41094984706 success; Space RUNNING 22:31:55 on sha `12e51b50`;
+  the Space repository holds `app/services/discovery.py` and `app/data/discovery_seeds.json`, no `.env`.
+- `/api/health` `{"status":"ok","recommender_loaded":true}`; `--validate-live` 0.0000, `report.py` 36, 3 / 5 / 0.0170 unchanged.
+- With `ECHO_ADMIN_TOKEN` unset: `GET /api/admin/discovery/status` `{"detail":"Not Found"}` HTTP 404; `POST .../start` HTTP 404.
+
+WP3 DEPLOYED. Waiting for the owner's two Space secrets; discovery is not started.
+
+### Noticed
+
+- `tests/deploy_hf.py` uploads an explicit file list that has neither new file; a deploy through it alone would leave the Space
+  without them (it does not delete them once there). `deploy.yml` uploads the backend folder and carries both; WP7 item.
