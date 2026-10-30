@@ -321,7 +321,8 @@ class LyricFetcher(threading.Thread):
             raise
 
     def _run(self):
-        none_keys = set(self.none_path.read_text(encoding="utf-8").split()) if self.none_path.exists() else set()
+        # one key per line; keys are "artist:title" and contain spaces
+        none_keys = set(self.none_path.read_text(encoding="utf-8").splitlines()) if self.none_path.exists() else set()
         seen: set[Path] = set()
         todo = []
         for r in self.rows:
