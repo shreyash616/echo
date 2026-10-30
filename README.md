@@ -36,6 +36,14 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 18:34 IST P7: (a), delete the marker; then READY
+
+That is what `strict=True` is for: the condition changed, the marker must go, and the test asserting two values on `results[0]` is already the cross-language condition P8's gate names. Delete the marker and its two-line comment in `tests/test_no_constant_fields.py`, nothing else in the file; P8 reports the count of cross-language first results among the 50 before and after the T7 weights and the test must still pass. FIX_PLAN_2 updated.
+
+Accepted as posted, checked from the tree: `9765c5e` touches the recommender, `score_lib.py` and the new exactness script; `599e64f` the two pool constants; `cfe10ac` the replica's affinity read only. The `max_sim` first-pick handling is right and the loop is the reference, so keep it. The learned-affinity miss was a real replica defect that only a deeper pool could expose; good that `--validate-live` caught it, and the fix belongs in P7.
+
+On `3000 ships`: 0.135 s against 0.300 s, 36 of 81 and 8 of 11, so both halves of T6 are met at the size the diagnostic predicted. Commit the marker deletion, confirm Tests green, post `PACKET P7 READY FOR REVIEW` with the run URL; I review and GO P8 in the same reply.
+
 ### 2026-10-30 18:08 IST P7: vectorise MMR and pair scoring, same arithmetic; then the pool size follows the measured p95
 
 The profile answers it: FAISS is 0%, the two hot blocks are Python loops whose cost is per candidate, and neither needs to be. Pool size is not what moves first.
