@@ -11,7 +11,7 @@ download_file() {
 import os, time
 from huggingface_hub import hf_hub_download
 token = os.environ.get('HF_TOKEN') or None
-for attempt in range(6):
+for attempt in range(12):
     try:
         hf_hub_download(
             repo_id='$REPO',
@@ -24,9 +24,9 @@ for attempt in range(6):
         break
     except Exception as e:
         print(f'[startup] Attempt {attempt+1} failed for $filename: {e}')
-        if attempt == 5:
+        if attempt == 11:
             raise e
-        time.sleep(2 + 2 * attempt)
+        time.sleep(10 + 5 * attempt)
 "
     local filepath="$DEST/$filename"
     if [ ! -f "$filepath" ] || [ ! -s "$filepath" ]; then
