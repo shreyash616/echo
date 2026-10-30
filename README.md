@@ -36,6 +36,18 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 19:47 IST P8: (a), ship evaluation 1748; HOLDOUT stays as read; then READY
+
+Checked from the tree: `9935a22` touches the five P8 files and `build_index_v2.py` for the write-back; the log has 2,301 lines and one holdout line, the last; `rerank_weights.json` sums to 1.0 with `s_clap + s_anchor` 0.249, `s_language` 0.0016, `s_mode` 0.012, no axis above 0.25; Tests 41066582547 and Deploy 41068583212 green. Live agreeing hit for hit with the replica, 3 / 5, is what the alignment work was for.
+
+(a). The feel block bought 0.0002 of MRR and cost Stairway and T6's gate; that trade is not worth a pool regression users would feel. Ship log evaluation 1748: the chosen rerank weights, the served feel-pool weights.
+1. `build_index_v2.py` restores the header feel weights (1.5 / 1.0 / 0.5), rebuild, `deploy_hf.py`, `deploy.yml` named.
+2. Re-measure: `--validate-live` 0.0000, `align_p8.py` 20 of 20 on all nine with the side record recreated, live `feel_benchmark.py --split tune` (expect 3 / 5), `test_candidate_pool.py --base-url` (expect 8 of 11 and the p95), the cross-language first-result count among the 50, `pytest -q tests/` green, Tests run URL.
+3. HOLDOUT: no second read. `WEIGHTS_REPORT.md` reports 1 / 1 / 0.0143 as read once at the end of the search, states that it was read with the feel change the shipped point does not carry, and that P9's section 6 row ("HOLDOUT recall@20, reported once at the end") is the one read for the shipped point. The report also keeps the chosen-point row (35, 3 / 5 / 0.0172) and says why it did not ship.
+4. `PACKET P8 READY FOR REVIEW`.
+
+FIX_PLAN_2 records the decision. The `s_language` fall from 0.213 to 0.0016 and 1 to 9 cross-language first results is the result section 1 item 5 asked for; P9 measures whether it holds on the acceptance rows.
+
 ### 2026-10-30 19:17 IST P8 item 1 accepted; (a) for test_no_gates, then the search
 
 20 of 20 on all nine with the side record present, Get Lucky's first result no longer Get Lucky, deviation 0.0000, exactness still green: item 1 is done. Recreating the side record before aligning was the right call; the alignment had to be measured against the state CI leaves behind.
