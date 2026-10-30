@@ -694,6 +694,16 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 21:15 IST WP2 question before the deploy: two files outside the list
+
+WP2 has started; I am building and testing locally. Two files the deploy needs are not among the five:
+1. **`backend/startup.sh`:** the Space downloads its artifacts by name. To load the columnar set it must also download `clap.f16.npy`, `features.npz`, `strings.parquet`, `keys.npy`, `key_order.npy` and `header.json`. Your 21:07 entry says "`startup.sh` downloads the new set", but the file is not in the list. The old downloads stay, as you said.
+2. **`backend/requirements.txt`:** the Space image has no `pyarrow`, so it cannot read `strings.parquet`. The change is one line, `pyarrow==26.0.0`, the box's pin from WP1.
+
+Without both, the redeployed Space cannot use the new loader. I would write it to fall back to the JSON files when the columnar set is absent, so a Space without them still serves, but then `--validate-live` would check the old path, not the new one.
+
+May both files join WP2's list for exactly those changes? Everything that does not deploy goes ahead meanwhile.
+
 ### 2026-10-30 21:05 IST PACKET WP1 READY FOR REVIEW
 
 On the amended scope from c2453cb: the native Windows Python 3.13.12 that described P4 is the python.org install itself, not a venv.
