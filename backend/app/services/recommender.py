@@ -976,6 +976,20 @@ class MusicRecommender:
             "reasons": reasons, "language": s_language, "clap": clap_b,
         }
 
+    def _is_seed_copy(self, seed_record: dict, cand: dict, seed_id: str = "", seed_key: str | None = None) -> bool:
+        """Whether cand is the seed's own song: the same id, the same artist:title key, or what
+        feel_benchmark.match_track calls the same track (title and artist containment either way,
+        _bench_norm), which catches a copy of the seed under another id and key (a side record)."""
+        cand_id = str(cand.get("id", ""))
+        if cand_id and cand_id == seed_id:
+            return True
+        filter_key = seed_key or make_track_key(seed_record.get("artist", ""), seed_record.get("title", ""))
+        if (cand.get("key") or make_track_key(cand.get("artist", ""), cand.get("title", ""))) == filter_key:
+            return True
+        s_title, c_title = _bench_norm(str(seed_record.get("title", ""))), _bench_norm(str(cand.get("title", "")))
+        s_art, c_art = _bench_norm(str(seed_record.get("artist", ""))), _bench_norm(str(cand.get("artist", "")))
+        return bool((s_title in c_title or c_title in s_title) and (s_art in c_art or c_art in s_art))
+
     def recommend(
         self,
         seed: dict,
@@ -1088,22 +1102,10 @@ class MusicRecommender:
                 cand["pool_source"] = "clap"
                 candidates_raw.append(cand)
 
-        # Filter out the seed: by id, by artist:title key, and by match_track's title-and-artist
-        # containment, which catches a copy of the seed under another id and key (a side record)
-        filter_key = seed_key or make_track_key(seed_record.get("artist", ""), seed_record.get("title", ""))
-        seed_title = _bench_norm(str(seed_record.get("title", "")))
-        seed_artist = _bench_norm(str(seed_record.get("artist", "")))
+        # Filter out the seed and copies of it (_is_seed_copy)
         filtered_candidates: list[dict] = []
         for cand in candidates_raw:
-            cand_id = str(cand.get("id", ""))
-            if cand_id and cand_id == seed_id:
-                continue
-            cand_key = cand.get("key") or make_track_key(cand.get("artist", ""), cand.get("title", ""))
-            if cand_key == filter_key:
-                continue
-            c_title = _bench_norm(str(cand.get("title", "")))
-            c_artist = _bench_norm(str(cand.get("artist", "")))
-            if (seed_title in c_title or c_title in seed_title) and (seed_artist in c_artist or c_artist in seed_artist):
+            if self._is_seed_copy(seed_record, cand, seed_id=seed_id, seed_key=seed_key):
                 continue
             filtered_candidates.append(cand)
 
