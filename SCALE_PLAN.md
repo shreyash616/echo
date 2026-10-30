@@ -327,15 +327,22 @@ and `GET /api/admin/discovery/status`, both requiring an `X-Admin-Token` header 
 Space secret `ECHO_ADMIN_TOKEN`; when that secret is unset the routes return 404, so no surface exists.
 Status reports progress counts and whether `HF_TOKEN` is present and its role (`HfApi.whoami`), never a
 value. The owner sets `ECHO_ADMIN_TOKEN` and a write-scoped `HF_TOKEN` in the Space settings. No deploy
-while discovery runs, since a deploy restarts the Space. Files: `ml/data/discover_artists.py` (new),
-`backend/app/api/routes.py` (the two routes), `backend/requirements.txt` only if a library is missing,
-`ml/data/harvest_seed_artists.json` (read only).
+while discovery runs, since a deploy restarts the Space. Files (amended 2026-10-30, second time: the Space gets only what the backend upload carries, and the benchmark
+file never enters the serving container): `backend/app/services/discovery.py` (new, the section 4 walk),
+`backend/app/data/discovery_seeds.json` (new, generated on the box by `ml/data/make_discovery_seeds.py` from
+`ml/data/harvest_seed_artists.json` and the artist names in `tests/feel_benchmark_v2.json`; names and Deezer ids
+only, no titles), `ml/data/make_discovery_seeds.py` (new), `backend/app/api/routes.py` (the two routes),
+`backend/requirements.txt` only if a library is missing. Charts: `/chart/{country}` ignores the country, so the
+chart source is the Deezer Charts account's country playlists (user 637006841), a table of country to playlist
+id inside `discovery.py`: 22 official (SG, US, GB, ES, MX, BR, AR, KR, JP, FR, DE, IT, ID, PH, TR, NG, ZA, SA,
+EG, AE, TH, MY) and, for IN, PK, BD, TW, HK, VN, a pinned user playlist each, recorded in the manifest with
+`chart_kind` `official` or `user` per country.
 Verify and paste:
 ```
 python -c "from huggingface_hub import hf_hub_download as d; import json; m=json.load(open(d('shreyash616/echo-ml-artifacts','discovery/MANIFEST.json',repo_type='dataset'))); print(m)"
 ```
 Gate: at least 80,000 artists; counts per source (chart, related, genre) all above zero; at least
-28 chart countries (every one in section 4 step 1); `shards.json` with artist ranges covering every artist exactly once.
+28 chart countries in the manifest with `chart_kind` per country, at least 22 `official`; `shards.json` with artist ranges covering every artist exactly once.
 
 **WP4. Harvester on one fixture shard.** Scope: `ml/data/harvest_v3.py` stages A to F and the
 claim and resume logic of section 5, run on `tests/fixtures/harvest_fixture_shard.json` (5 artists

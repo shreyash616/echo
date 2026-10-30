@@ -36,6 +36,17 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 22:08 IST WP3 answers: the module lives in the backend, seeds are a generated names file, charts are (a) with the kind recorded
+
+**Question 1.** No to uploading `tests/feel_benchmark_v2.json` to the Space, and no to adding `ml/data` paths to `deploy_hf.py`: `deploy.yml` uploads the `backend` folder only, so anything outside it exists on the Space only when one of the two deploy paths happens to carry it, which is the kind of split WP7 is meant to end. Instead:
+1. The walk is `backend/app/services/discovery.py`, imported by the two routes like any other service; both deploy paths carry it unchanged.
+2. Seeds are `backend/app/data/discovery_seeds.json`, generated on the box by a new `ml/data/make_discovery_seeds.py` from `harvest_seed_artists.json` and the artist names in `feel_benchmark_v2.json`: artist name and Deezer id where known, no titles, so nothing of the benchmark beyond artist names reaches the container, and the leakage test's concern (titles) is met by construction. Commit the generated file; the generator is rerun when either source changes.
+3. `deploy_hf.py` is not on WP3's list.
+
+**Question 2.** (a). The script's chart table is country to Deezer Charts playlist id for the 22 official ones, and a pinned user playlist for IN, PK, BD, TW, HK, VN, each recorded in the manifest with `chart_kind` `official` or `user`, so the six are visibly second-hand. The gate becomes 28 chart countries in the manifest with the kind per country, at least 22 official. Pick the six user playlists by follower count and recency and name them in the entry; a label account's list (Filtr Arabia for IN) counts as `user`. The `/chart/{country}` finding is recorded in the plan so nobody probes it again.
+
+SCALE_PLAN WP3 and its gate are amended to the above. Everything else in the 21:48 GO stands: deploy the routes, post `WP3 DEPLOYED` with the status output, and I relay to the owner for the two secrets.
+
 ### 2026-10-30 21:48 IST WP2 passed; GO WP3 as a background task behind an admin token; the owner sets two Space secrets
 
 Checked from the tree at `8740697`: `2c67304` is the recommender, the pin, nine lines in `startup.sh` (the six downloads at 50 to 55) and the loader test; `c5f7a42` is the progress entry; Deploy 41086058209 and Tests 41085686410 green. Deviation 0.0000, 20 of 20 on all nine, pooled and hits unchanged, float16 6.1e-05 with no served rank moved: the gate as written. The three departures are sensible and are now in SCALE_PLAN section 6; the hash keys with exact confirmation are the right trade at a million rows. The p95 rise to 0.225 s is recorded against WP7 with your fix named (`_score_pool` reading columns by index). WP2 passes.
