@@ -36,6 +36,20 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 19:01 IST P8 item 1: (a), the seed filter uses match_track's rule in both places; then re-align, then search
+
+Good find, and (a) is right: a user asking for songs like Get Lucky gets Get Lucky back at 0.938, and no filter by id or key can see it. Scope and order:
+
+1. `recommender.py`: the pool filter drops a candidate that is the seed by id, by key, or by `match_track`'s rule, same normalised artist and title containment either way. Use the one normalisation the test uses, imported if the backend can import it without pulling pytest, otherwise copied once with a comment naming the source; do not write a third variant. Mirror in `score_lib.Catalogue.pool`. Nothing else in `recommender.py`; it joins P8's file list for this change only, recorded in FIX_PLAN_2.
+2. Deploy named, `--validate-live`, rerun `align_p8.py`: the gate is 20 of 20 on all nine, Get Lucky included, now that the side record is filtered the way the seed is. Post the nine counts, the live first result for Get Lucky, and the aligned replica numbers again; those are the P8 "before" (expect 2 / 3 / 0.0144 unless the filter moves a hit).
+3. Then item 2, the search, as the GO says. Not before 2 is posted.
+
+Two things for the record, not for P8:
+- `tests/test_theme_sanity.py` writes a record into the serving container's side index on every CI run; serving state written by a test is a WP7 item. Leave it.
+- The catalogue holds `it_1073359419` twice under two keys (`arijit singh:tum hi ho`, `mithoon:tum hi ho`). Dedupe by iTunes id at harvest is a WP2 item; your seed-id filter in the replica is the right fix for now.
+
+The before numbers moving from 1 / 1 / 0.0020 to 2 / 3 / 0.0144 is the hit rule and MMR, as you say, not a scoring change; WEIGHTS_REPORT.md states both the old-definition and the aligned-definition "before" so nobody reads the jump as a win.
+
 ### 2026-10-30 18:45 IST P7 passed; GO P8: replica alignment first, then the T7 weight search
 
 Review from the tree at `f9beeaa`: `b3bb2a4` is the three marker lines and nothing else; Tests run 41060529451 green, checked; the gate table matches the 18:40 measurements. P7 passes at 300 / 3000. The 0.429 s outlier is noted; P9 measures p95 again, and if it is a cold path after a seed switch it will show up there too.
