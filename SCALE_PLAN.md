@@ -321,7 +321,7 @@ Verify and paste:
 python -c "from huggingface_hub import hf_hub_download as d; import json; m=json.load(open(d('shreyash616/echo-ml-artifacts','discovery/MANIFEST.json',repo_type='dataset'))); print(m)"
 ```
 Gate: at least 80,000 artists; counts per source (chart, related, genre) all above zero; at least
-30 chart countries; `shards.json` with artist ranges covering every artist exactly once.
+28 chart countries (every one in section 4 step 1); `shards.json` with artist ranges covering every artist exactly once.
 
 **WP4. Harvester on one fixture shard.** Scope: `ml/data/harvest_v3.py` stages A to F and the
 claim and resume logic of section 5, run on `tests/fixtures/harvest_fixture_shard.json` (5 artists
