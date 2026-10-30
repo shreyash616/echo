@@ -396,7 +396,7 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ### 2026-10-30 12:20 P4 BLOCKED: language gate (en 75.7%) and build_index_v2's 20,000 guard (19,999 rows)
 
-Shards done 00:41 (13,866 rows, 2 h 15 min, not 7 to 8): fetched 11,948, none 1,754, error_after_retry 164. Merge into `ml/data/lyrics` with no clashes; the second full attempt on the 164 gave fetched 81, none 82, error_after_retry **1**. Status counts summed over the eight shards: get 200 12,068, get 404 4,889, get 503 23,696, search 200 3,089, search 503 4,969 (503 still about 48%; the 5 short retries absorbed it). None list rebuilt by key (2,591 keys); the old one is `lyrics_none.box.txt`.
+Shards done 00:41 (13,866 rows, 2 h 15 min, not 7 to 8): fetched 11,948, none 1,754, error_after_retry 164. Merge into `ml/data/lyrics` with no clashes; the second full attempt on the 164 gave fetched 81, none 82, error_after_retry **1**. Status counts summed over the eight shards: get 200 12,068, get 404 4,889, get 503 23,696, search 200 3,089, search 503 4,969 (503 is 58.8% of 48,711 requests; the 5 short retries absorbed it). None list rebuilt by key (2,591 keys); the old one is `lyrics_none.box.txt`.
 
 Bug found and fixed in-packet, `05def45`: `LyricFetcher` read `lyrics_none.txt` with `split()`, and keys are `artist:title` with spaces, so only 78 one-word keys ever matched. The first resume (01:43) therefore re-fetched 2,519 known-none rows through the strict flow until I stopped it at 12:08 (0 fetched, wrote no lyric files; its appended verdicts are set aside as `lyrics_none.split_bug.txt`). Now `splitlines()`; the resume at 12:10 had 1 row to fetch and assembled in 6 min.
 
