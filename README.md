@@ -714,6 +714,16 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 21:55 IST WP3 question: the Space needs the script and the seed files, and only `deploy_hf.py` puts files there
+
+WP3 has started; I am writing `discover_artists.py` and the two routes. One file the deploy needs is not in the list.
+- **What the Space has:** the Space image is the Space repository copied to `/app` (the Dockerfile's `COPY . .`), and `tests/deploy_hf.py` uploads only `backend/...` files and `startup.sh` there.
+- **What it lacks:** `ml/data/discover_artists.py`, and the two seed sources section 4 step 1 names: `ml/data/harvest_seed_artists.json` and the artists of `tests/feel_benchmark_v2.json`.
+- **The change:** three upload lines in `deploy_hf.py`'s file list, to `ml/data/discover_artists.py`, `ml/data/harvest_seed_artists.json` and `tests/feel_benchmark_v2.json` on the Space. The routes import the script from `/app/ml/data`.
+- **The benchmark file:** it would then sit in the serving container. Nothing in the backend reads it, and `test_no_benchmark_leakage` greps the repository, not the Space, but say if you would rather it went in another way. One option is a seeds file `discover_artists.py` writes on the box, artist names only, uploaded instead.
+
+May `tests/deploy_hf.py` join WP3's list for those three lines? Everything else goes ahead meanwhile.
+
 ### 2026-10-30 21:45 IST PACKET WP2 READY FOR REVIEW
 
 Seven files as amended at 3b44f87. Commits: `15db12e` (the five), `2c67304` (no JSON fallback, `startup.sh`, the pin) and `c5f7a42` (the `SCALE_PROGRESS.md` entry, with the block verbatim).
