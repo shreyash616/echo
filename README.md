@@ -36,6 +36,18 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 21:48 IST WP2 passed; GO WP3 as a background task behind an admin token; the owner sets two Space secrets
+
+Checked from the tree at `8740697`: `2c67304` is the recommender, the pin, nine lines in `startup.sh` (the six downloads at 50 to 55) and the loader test; `c5f7a42` is the progress entry; Deploy 41086058209 and Tests 41085686410 green. Deviation 0.0000, 20 of 20 on all nine, pooled and hits unchanged, float16 6.1e-05 with no served rank moved: the gate as written. The three departures are sensible and are now in SCALE_PLAN section 6; the hash keys with exact confirmation are the right trade at a million rows. The p95 rise to 0.225 s is recorded against WP7 with your fix named (`_score_pool` reading columns by index). WP2 passes.
+
+**GO WP3, discovery on the Space.** The plan said "run from the Space's shell"; nobody has one. Amended in SCALE_PLAN:
+1. `ml/data/discover_artists.py` implements section 4 (seeds, breadth-first `related` walk, genre pages, the 28 chart countries, Deezer's 50 per 5 s), writes `discovery/artists.jsonl`, `discovery/MANIFEST.json` (counts per source, countries, SHA256) and `discovery/shards.json` (ranges covering every artist exactly once) to the dataset, and checkpoints `artists.jsonl` plus a progress marker to the dataset every 5,000 artists; a restart resumes from the marker.
+2. Trigger: `POST /api/admin/discovery/start` and `GET /api/admin/discovery/status` in `routes.py`, both requiring `X-Admin-Token` compared with `hmac.compare_digest` to the Space secret `ECHO_ADMIN_TOKEN`; when the secret is unset both return 404, so a Space without it has no admin surface. Status returns progress counts, the checkpoint, and `hf_token_present` plus the token's role from `HfApi.whoami()`, never a value. The task runs in a background thread; one at a time.
+3. Deploy the routes (named run), then post `WP3 DEPLOYED` with the status output. The owner then sets `ECHO_ADMIN_TOKEN` (any long random string) and a write-scoped `HF_TOKEN` in the Space settings; I will relay. When status shows the token role `write`, start discovery and post the start time and the first checkpoint's counts. No deploy from anyone while it runs.
+4. Meanwhile, since discovery is hours of Space time and WP4 is box-only, **WP4 may start as soon as discovery is checkpointing**: `harvest_v3.py` on the fixture shard, per its block, with the owner's two terminal windows (describe log and the CLAP batch log, per-batch lines added) up for the run. WP4 uploads only `catalog/v3/shard_fixture.*`; it must not touch `discovery/`.
+
+Gate for WP3 unchanged: at least 80,000 artists, every source above zero, 28 chart countries, shards covering every artist exactly once, manifest SHA256 matching the file. Then `PACKET WP3 READY FOR REVIEW`.
+
 ### 2026-10-30 21:25 IST WP2: yes to both files, exactly those changes; no silent fallback
 
 1. `backend/startup.sh` joins WP2's list for one change: download the six columnar files by name (`clap.f16.npy`, `feel_matrix.npy` is already there, `features.npz`, `strings.parquet`, `keys.npy`, `key_order.npy`, `header.json`) with the same 12-attempt loop as the others. The old downloads stay until WP7 removes them.

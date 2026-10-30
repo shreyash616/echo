@@ -176,7 +176,7 @@ reads every finished shard from the dataset and writes to the dataset root:
 | `feel_matrix.npy` | n x 17 float32 | flat `IndexFlatL2`, 68 MB |
 | `features.npz` | one float32 array a numeric descriptor (`felt_bpm`, `pulse_rate`, `darkness`, `grit`, ... plus `felt_bpm_dist` as two arrays of candidates and probabilities, `theme_vec` as n x 10, `anchor_profile` as n x 24) | numpy, memory-mapped |
 | `strings.parquet` | `key`, `id`, `itunes_id`, `title`, `artist`, `album`, `albumArtUrl`, `previewUrl`, `language`, `language_source`, `theme`, `vibes`, `kick_class`, `restraint_bucket` | pyarrow, loaded once, about 300 MB |
-| `keys.npy` plus `key_order.npy` | sorted keys and the row permutation | `np.searchsorted` for `artist:title` lookup, replacing `track_id_map.json` |
+| `keys.npy` plus `key_order.npy` | sorted blake2b-64 hashes of the keys and the row permutation (amended 2026-10-30 at WP2: fixed-width strings were 86 MB at 20,000 rows against 480 KB) | `np.searchsorted` on the hash, then the exact key confirmed from `strings.parquet`, replacing `track_id_map.json` |
 | `header.json` | means, stds, cut points, feel axes and weights, counts, build commit | as today |
 
 `recommender.py` gets one loader change: `get_track_record(idx)` assembles a dict from the columns
@@ -312,9 +312,23 @@ Gate: all tests pass; health `recommender_loaded: true`; replica deviation under
 redeployed Space; overlap passes; `report.py` pooled and hits equal to the WP0 numbers (the storage
 change must not move a single rank).
 
+WP2 passed review 2026-10-30 at 2c67304 (Deploy 41086058209, Tests 41085686410 green): deviation 0.0000,
+20 of 20 on all nine seeds, pooled 36 and 3 / 5 / 0.0170 unchanged, float16 max abs 6.1e-05 with no served
+rank moved. Departures recorded: ints int64, flags bool, every JSON field carried (adds `deezer_id`, `genre`,
+`decade`, `language_conf`, `anchor_cosines`), keys as hashes (above). p95 rose from 0.105 s to 0.225 s
+because each call assembles about 3,200 candidate dicts from columns; WP7's serving change has `_score_pool`
+read columns by index instead.
+
 **WP3. Discovery on the Space.** Scope: `ml/data/discover_artists.py` implementing section 4,
-run from the Space's shell, writing `discovery/artists.jsonl`, `discovery/MANIFEST.json`,
-`discovery/shards.json` to the dataset. Files: `ml/data/discover_artists.py` (new),
+run on the Space as a background task (amended 2026-10-30: nobody has a shell on the Space), writing
+`discovery/artists.jsonl`, `discovery/MANIFEST.json`, `discovery/shards.json` to the dataset, with a
+checkpoint to the dataset every 5,000 artists and resume from it. Trigger: `POST /api/admin/discovery/start`
+and `GET /api/admin/discovery/status`, both requiring an `X-Admin-Token` header equal (constant-time) to the
+Space secret `ECHO_ADMIN_TOKEN`; when that secret is unset the routes return 404, so no surface exists.
+Status reports progress counts and whether `HF_TOKEN` is present and its role (`HfApi.whoami`), never a
+value. The owner sets `ECHO_ADMIN_TOKEN` and a write-scoped `HF_TOKEN` in the Space settings. No deploy
+while discovery runs, since a deploy restarts the Space. Files: `ml/data/discover_artists.py` (new),
+`backend/app/api/routes.py` (the two routes), `backend/requirements.txt` only if a library is missing,
 `ml/data/harvest_seed_artists.json` (read only).
 Verify and paste:
 ```
