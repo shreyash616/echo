@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import hmac
-import importlib.util
 import logging
 import os
 import re
+import tempfile
 import threading
 import time
 import unicodedata
@@ -368,15 +368,6 @@ def _admin_guard(token: str | None) -> None:
         raise HTTPException(status_code=403, detail="forbidden")
 
 
-def _discovery_script() -> Path:
-    here = Path(__file__).resolve()
-    for base in (here.parents[2], here.parents[3]):  # /app on the Space, the repository root locally
-        p = base / "ml" / "data" / "discover_artists.py"
-        if p.exists():
-            return p
-    raise HTTPException(status_code=500, detail="ml/data/discover_artists.py not found")
-
-
 def _hf_token_status() -> dict:
     token = os.environ.get("HF_TOKEN")
     if not token:
@@ -398,12 +389,11 @@ async def admin_discovery_start(x_admin_token: str | None = Header(None, alias="
         t = _DISCOVERY["thread"]
         if t is not None and t.is_alive():
             raise HTTPException(status_code=409, detail="discovery is already running")
-        script = _discovery_script()
-        spec = importlib.util.spec_from_file_location("discover_artists", script)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
+        from app.services import discovery
+
         progress: dict = {}
-        disc = mod.Discovery(script.parent / "discovery", upload=True, progress=progress)
+        work = Path(os.environ.get("ECHO_DISCOVERY_DIR") or tempfile.gettempdir()) / "echo_discovery" / "discovery"
+        disc = discovery.Discovery(work, upload=True, progress=progress)
 
         def run() -> None:
             try:

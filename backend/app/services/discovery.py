@@ -1,16 +1,16 @@
 """
-ml/data/discover_artists.py: the artist universe (SCALE_PLAN section 4, WP3).
+backend/app/services/discovery.py: the artist universe (SCALE_PLAN section 4, WP3).
 
-  python ml/data/discover_artists.py [--out-dir DIR] [--max-artists N] [--no-upload]
+  python backend/app/services/discovery.py [--out-dir DIR] [--max-artists N] [--no-upload]
 
 Run on the Space as a background task (POST /api/admin/discovery/start) or from a shell. Builds
 discovery/artists.jsonl, one artist a line: deezer_id, name, nb_fan, source, depth (and country for
 chart artists), in discovery order:
 
-1. Seeds, depth 0: every artist of tests/feel_benchmark_v2.json (seeds, positives, negatives) and the
-   names in ml/data/harvest_seed_artists.json, resolved with /search/artist; the top 100 artists of
-   each country chart in CHARTS (Deezer serves country charts as the "Deezer Charts" account's
-   playlists, not through /chart/{country}); every artist of /genre/{id}/artists.
+1. Seeds, depth 0: the Deezer ids of app/data/discovery_seeds.json (generated on the box by
+   ml/data/make_discovery_seeds.py, ids only); the top 100 artists of each country chart in CHARTS
+   (Deezer serves country charts as playlists; /chart/{country} ignores the country); every artist
+   of /genre/{id}/artists.
 2. A breadth-first walk over /artist/{id}/related, in file order, until MAX_ARTISTS unique artists or
    a depth with nothing new.
 3. Deezer allows about 50 requests per 5 s: the client keeps that window, and sleeps and retries on
@@ -30,14 +30,13 @@ import hashlib
 import json
 import logging
 import os
-import re
 import threading
 import time
 from pathlib import Path
 
 import httpx
 
-logger = logging.getLogger("discover_artists")
+logger = logging.getLogger("discovery")
 
 API = "https://api.deezer.com"
 REPO = "shreyash616/echo-ml-artifacts"
@@ -46,19 +45,31 @@ CHECKPOINT_EVERY = 5_000
 SHARD_SIZE = 250
 CHART_TOP = 100
 WINDOW_REQUESTS, WINDOW_S = 50, 5.0
-HERE = Path(__file__).resolve().parent
-SEED_FILES = (HERE / "harvest_seed_artists.json", HERE.parent.parent / "tests" / "feel_benchmark_v2.json")
+SEEDS_PATH = Path(__file__).resolve().parents[1] / "data" / "discovery_seeds.json"
 
-# Country charts (section 4 step 1) as Deezer serves them: the "Deezer Charts" account's playlists.
-# country -> (playlist id, kind). The ids are resolved from the account's playlist list at run time.
-CHART_COUNTRIES = {
-    "SG": "Top Singapore", "US": "Top USA", "GB": "Top UK", "ES": "Top Spain", "MX": "Top Mexico",
-    "BR": "Top Brazil", "AR": "Top Argentina", "KR": "Top South Korea", "JP": "Top Japan", "FR": "Top France",
-    "DE": "Top Germany", "IT": "Top Italy", "ID": "Top Indonesia", "PH": "Top Philippines", "TR": "Top Turkey",
-    "NG": "Top Nigeria", "ZA": "Top South Africa", "SA": "Top Saudi Arabia", "EG": "Top Egypt",
-    "AE": "Top United Arab Emirates", "TH": "Top Thailand", "MY": "Top Malaysia",
+# Country charts (section 4 step 1): country -> (Deezer playlist id, chart_kind, title). "official" are the
+# Deezer Charts account's (user 637006841) country playlists. Deezer publishes none for IN, PK, BD, TW, HK
+# or VN, so each of those is a pinned user playlist (reviewer 618dedd), chosen 2026-10-30 by followers
+# and recency.
+CHARTS = {
+    "SG": (1313620765, "official", "Top Singapore"), "US": (1313621735, "official", "Top USA"),
+    "GB": (1111142221, "official", "Top UK"), "ES": (1116190041, "official", "Top Spain"),
+    "MX": (1111142361, "official", "Top Mexico"), "BR": (1111141961, "official", "Top Brazil"),
+    "AR": (1279119721, "official", "Top Argentina"), "KR": (1362510315, "official", "Top South Korea"),
+    "JP": (1362508955, "official", "Top Japan"), "FR": (1109890291, "official", "Top France"),
+    "DE": (1111143121, "official", "Top Germany"), "IT": (1116187241, "official", "Top Italy"),
+    "ID": (1116188761, "official", "Top Indonesia"), "PH": (1362518895, "official", "Top Philippines"),
+    "TR": (1116189071, "official", "Top Turkey"), "NG": (1362516565, "official", "Top Nigeria"),
+    "ZA": (1362528775, "official", "Top South Africa"), "SA": (1362521285, "official", "Top Saudi Arabia"),
+    "EG": (1362501615, "official", "Top Egypt"), "AE": (1362491345, "official", "Top United Arab Emirates"),
+    "TH": (1362524475, "official", "Top Thailand"), "MY": (1362515675, "official", "Top Malaysia"),
+    "IN": (5714603022, "user", "Bollywood Top 50 (Filtr Arabia)"),
+    "PK": (15038204963, "user", "TRENDING PAKISTANI SONGS 2025"),
+    "BD": (13175326563, "user", "Top Bangla Songs 2024"),
+    "TW": (10561367522, "user", "Top 50 - Taiwan"),
+    "HK": (13617318101, "user", "Hong Kong 2025"),
+    "VN": (14760476603, "user", "Vietnamese (V-Pop) 2026"),
 }
-DEEZER_CHARTS_USER = 637006841
 
 
 class Deezer:
@@ -118,26 +129,11 @@ class Deezer:
         return out[:limit] if limit else out
 
 
-def _norm(s: str) -> str:
-    return re.sub(r"[^\w]+", " ", str(s).casefold()).strip()
-
-
-def _lead_artist(s: str) -> str:
-    return re.split(r",|\s+feat\.|\s+ft\.|\s+with\s+|&|\s+x\s+", str(s), flags=re.IGNORECASE)[0].strip()
-
-
-def seed_names() -> list[str]:
-    """Artist names from the seed files, read at run time (the script itself names none)."""
-    names: list[str] = []
-    seeds_path, bench_path = SEED_FILES
-    if seeds_path.exists():
-        names += [str(n) for n in json.loads(seeds_path.read_text(encoding="utf-8"))]
-    if bench_path.exists():
-        for e in json.loads(bench_path.read_text(encoding="utf-8")):
-            for ent in [e.get("seed")] + e.get("positives", []) + e.get("negatives", []):
-                if ent and ent.get("artist"):
-                    names.append(_lead_artist(ent["artist"]))
-    return list(dict.fromkeys(n for n in names if n))
+def seed_ids() -> list[int]:
+    """The Deezer ids of app/data/discovery_seeds.json, in file order."""
+    if not SEEDS_PATH.exists():
+        raise FileNotFoundError(f"{SEEDS_PATH} missing; generate it with ml/data/make_discovery_seeds.py")
+    return [int(i) for i in json.loads(SEEDS_PATH.read_text(encoding="utf-8"))["deezer_ids"]]
 
 
 class Discovery:
@@ -229,34 +225,27 @@ class Discovery:
             self.checkpoint()
 
     def seeds(self) -> None:
-        names = seed_names()
-        self.progress["phase"] = f"seeds ({len(names)} names)"
-        for name in names:
+        ids = seed_ids()
+        self.progress["phase"] = f"seeds ({len(ids)} ids)"
+        for aid in ids:
             if self.stop.is_set():
                 return
-            body = self.dz.get("/search/artist", q=name, limit=5) or {}
-            hits = body.get("data") or []
-            exact = [h for h in hits if _norm(h.get("name")) == _norm(name)]
-            if exact or hits:
-                self.add((exact or hits)[0], "seed", 0)
+            body = self.dz.get(f"/artist/{aid}")
+            if body and body.get("id"):
+                self.add(body, "seed", 0)
             else:
-                self.unresolved.append(name)
+                self.unresolved.append(str(aid))
             self.tick()
 
     def chart_artists(self) -> None:
         self.progress["phase"] = "charts"
-        playlists = {p["title"]: p["id"] for p in self.dz.pages(f"/user/{DEEZER_CHARTS_USER}/playlists")}
-        for cc, title in CHART_COUNTRIES.items():
-            pid = playlists.get(title)
-            if pid is None:
-                self.charts[cc] = {"title": title, "playlist_id": None, "kind": "official", "artists": 0}
-                continue
+        for cc, (pid, kind, title) in CHARTS.items():
             tracks = self.dz.pages(f"/playlist/{pid}/tracks", limit=500)
             artists = list({t["artist"]["id"]: t["artist"] for t in tracks if t.get("artist")}.values())[:CHART_TOP]
             before = len(self.rows)
             for a in artists:
                 self.add(a, "chart", 0, country=cc)
-            self.charts[cc] = {"title": title, "playlist_id": pid, "kind": "official", "artists": len(artists),
+            self.charts[cc] = {"title": title, "playlist_id": pid, "chart_kind": kind, "artists": len(artists),
                                "new": len(self.rows) - before}
             self.tick()
 
@@ -302,10 +291,13 @@ class Discovery:
         manifest = {
             "rows": n, "sha256_artists_jsonl": sha,
             "counts_per_source": dict(collections.Counter(r["source"] for r in self.rows)),
-            "chart_countries": chart_countries, "chart_country_count": len(chart_countries), "charts": self.charts,
+            "chart_countries": chart_countries, "chart_country_count": len(chart_countries),
+            "chart_kind": {cc: self.charts[cc]["chart_kind"] for cc in chart_countries},
+            "official_chart_countries": sum(self.charts[cc]["chart_kind"] == "official" for cc in chart_countries),
+            "charts": self.charts,
             "depths": dict(sorted(collections.Counter(r["depth"] for r in self.rows).items())),
             "expanded": self.expanded, "stopped_by": "cap" if n >= self.max_artists else "no new artists",
-            "unresolved_seed_names": len(self.unresolved), "requests": self.dz.requests, "failed_requests": self.dz.failures,
+            "unresolved_seed_ids": len(self.unresolved), "requests": self.dz.requests, "failed_requests": self.dz.failures,
             "shards": len(shards), "shard_size": SHARD_SIZE, "elapsed_s": round(time.time() - self.started),
             "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         }
