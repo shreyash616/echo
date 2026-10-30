@@ -63,6 +63,14 @@ def make_track_key(artist, title):
     return f"{_norm_artist(artist)}:{_norm_text(title)}"
 
 
+TAU = 1.0  # T2, as recommender.TAU
+MODE_SHRINK = 0.5  # as recommender.MODE_SHRINK
+
+
+def _zsim(a, b, std):
+    return float(np.exp(-abs(a - b) / (TAU * max(std, 1e-6))))
+
+
 def _fold(x):
     if abs(x - 1.0) <= 0.25:
         return min(x, 0.4)
@@ -71,7 +79,9 @@ def _fold(x):
     return min(1.0, x)
 
 
-def features(seed, cand, clap_a, clap_b):
+def features(seed, cand, clap_a, clap_b, fs=None):
+    """fs: the metadata header's feature_std (T2); a missing axis falls back to std 1.0 as the Space does."""
+    fs = fs or {}
     f = {}
     if len(clap_a) and len(clap_b) == len(clap_a) and np.linalg.norm(clap_a) > 0 and np.linalg.norm(clap_b) > 0:
         f["s_clap"] = float(np.clip(np.dot(clap_a, clap_b), 0.0, 1.0))
@@ -100,33 +110,30 @@ def features(seed, cand, clap_a, clap_b):
         ba = float(seed.get("felt_bpm") or seed.get("bpm", 120)); bb = float(cand.get("felt_bpm") or cand.get("bpm", 120))
         f["s_tempo"] = float(np.clip(1.0 - _fold(abs(float(np.log2(ba / bb)))), 0, 1)) if ba > 0 and bb > 0 else 0.5
     g = lambda r, k, dft: float(r.get(k, dft))
-    f["s_pulse"] = float(np.clip(1.0 - abs(g(seed, "pulse_rate", .5) - g(cand, "pulse_rate", .5)), 0, 1))
+    z = lambda k, dft: _zsim(g(seed, k, dft), g(cand, k, dft), fs.get(k, 1.0))
+    f["s_pulse"] = z("pulse_rate", .5)
     kc = 1.0 if seed.get("kick_class") == cand.get("kick_class") else 0.0
-    bb_sim = 1.0 - abs(g(seed, "backbeat", .5) - g(cand, "backbeat", .5))
-    hpb = max(0.0, 1.0 - abs(g(seed, "hits_per_bar", 4.0) - g(cand, "hits_per_bar", 4.0)) / 8.0)
-    sw = max(0.0, 1.0 - abs(g(seed, "swing", .5) - g(cand, "swing", .5)) / 0.2)
-    lag = max(0.0, 1.0 - abs(g(seed, "lag_ms", 0.0) - g(cand, "lag_ms", 0.0)) / 40.0)
+    bb_sim = z("backbeat", .5)
+    hpb = z("hits_per_bar", 4.0)
+    sw = z("swing", .5)
+    lag = z("lag_ms", 0.0)
     f["s_groove"] = float(np.clip(0.4 * kc + 0.2 * bb_sim + 0.2 * hpb + 0.1 * sw + 0.1 * lag, 0, 1))
-    f["s_dark"] = float(np.clip(1.0 - abs(g(seed, "darkness", .5) - g(cand, "darkness", .5)), 0, 1))
-    f["s_grit"] = float(np.clip(1.0 - abs(g(seed, "grit", .5) - g(cand, "grit", .5)), 0, 1))
-    syl = max(0.0, 1.0 - abs(g(seed, "syllable_rate", 2.0) - g(cand, "syllable_rate", 2.0)) / 8.0)
-    sus = 1.0 - abs(g(seed, "sustain_ratio", .5) - g(cand, "sustain_ratio", .5))
-    pit = max(0.0, 1.0 - abs(g(seed, "pitch_range", 12.0) - g(cand, "pitch_range", 12.0)) / 24.0)
-    tun = 1.0 - abs(g(seed, "tuning_depth", .5) - g(cand, "tuning_depth", .5))
-    vib = max(0.0, 1.0 - abs(g(seed, "vibrato", 20.0) - g(cand, "vibrato", 20.0)) / 40.0)
+    f["s_dark"] = z("darkness", .5)
+    f["s_grit"] = z("grit", .5)
+    syl = z("syllable_rate", 2.0)
+    sus = z("sustain_ratio", .5)
+    pit = z("pitch_range", 12.0)
+    tun = 1.0 - abs(g(seed, "tuning_depth", .5) - g(cand, "tuning_depth", .5))  # no T2 std, linear as the Space
+    vib = z("vibrato", 20.0)
     wa = float(seed.get("lyric_words_per_minute") or 0.0); wb = float(cand.get("lyric_words_per_minute") or 0.0)
     parts = [syl, sus, pit, tun, vib]
     if wa > 0 and wb > 0:
         parts.append(max(0.0, 1.0 - abs(wa - wb) / 100.0))
     f["s_vocal"] = float(np.clip(np.mean(parts), 0, 1))
-    f["s_intimacy"] = float(np.clip(1.0 - abs(g(seed, "intimacy", .5) - g(cand, "intimacy", .5)), 0, 1))
-    ba_, bb_ = seed.get("restraint_bucket", "moderate"), cand.get("restraint_bucket", "moderate")
-    if ba_ == bb_:
-        f["s_restraint"] = 1.0
-    elif {ba_, bb_} in ({"restrained", "moderate"}, {"moderate", "saturated"}):
-        f["s_restraint"] = 0.5
-    else:
-        f["s_restraint"] = 0.0
+    f["s_intimacy"] = z("intimacy", .5)
+    dz_lr = abs(g(seed, "loudness_range", 0.0) - g(cand, "loudness_range", 0.0)) / max(fs.get("loudness_range", 1.0), 1e-6)
+    dz_cf = abs(g(seed, "crest_factor", 0.0) - g(cand, "crest_factor", 0.0)) / max(fs.get("crest_factor", 1.0), 1e-6)
+    f["s_restraint"] = float(np.exp(-(dz_lr + dz_cf) / 2.0))
     ta, tb = seed.get("theme_vec"), cand.get("theme_vec")
     both = bool(seed.get("has_lyrics") and cand.get("has_lyrics") and ta and tb and len(ta) == len(tb))
     if both:
@@ -136,16 +143,15 @@ def features(seed, cand, clap_a, clap_b):
     else:
         f["s_meaning"] = 0.5
     f["s_language"] = language_affinity(seed.get("language"), cand.get("language"))
-    if seed.get("riff_flag") or cand.get("riff_flag"):
-        f["s_harm"] = 0.5
-    else:
-        cpb = max(0.0, 1.0 - abs(g(seed, "changes_per_bar", 1.0) - g(cand, "changes_per_bar", 1.0)) / 4.0)
-        lb = 1.0 if seed.get("loop_bars") == cand.get("loop_bars") else 0.0
-        f["s_harm"] = float(np.clip(0.5 * cpb + 0.5 * lb, 0, 1))
+    cpb = z("changes_per_bar", 1.0)
+    lb = 1.0 if seed.get("loop_bars") == cand.get("loop_bars") else 0.0
+    riff = 1.0 if bool(seed.get("riff_flag")) == bool(cand.get("riff_flag")) else 0.0
+    f["s_harm"] = float(np.clip(0.4 * cpb + 0.4 * lb + 0.2 * riff, 0, 1))
+    sim_pol = z("mode_polarity", 0.0)
     if seed.get("mode_undefined") or cand.get("mode_undefined"):
-        f["s_mode"] = 1.0
+        f["s_mode"] = 0.7 + MODE_SHRINK * (sim_pol - 0.7)  # T3.4 as amended a0d9b43
     else:
-        f["s_mode"] = float(np.clip(1.0 - 0.5 * abs(g(seed, "mode_polarity", 0.0) - g(cand, "mode_polarity", 0.0)), 0, 1))
+        f["s_mode"] = sim_pol
     return f, both
 
 
@@ -189,6 +195,7 @@ class Catalogue:
                 self.id_map[str(r["itunes_id"])] = i
                 self.id_map[f"it_{r['itunes_id']}"] = i
         self.weights_live = json.load(open(f"{HF}/rerank_weights.json"))
+        self.feature_std = self.header.get("feature_std") or {}
         self.k_clap = 500
         self.k_feel = 600
 
@@ -215,6 +222,6 @@ class Catalogue:
         seed = self.meta[si]
         rows, flags, idxs, srcs = [], [], [], []
         for idx, src in pool:
-            f, both = features(seed, self.meta[idx], self.clap[si], self.clap[idx])
+            f, both = features(seed, self.meta[idx], self.clap[si], self.clap[idx], self.feature_std)
             rows.append([f[k] for k in AXES]); flags.append(both); idxs.append(idx); srcs.append(src)
         return si, np.array(idxs), np.array(srcs), np.array(rows, dtype=np.float64), np.array(flags, dtype=bool)

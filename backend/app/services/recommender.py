@@ -47,6 +47,16 @@ from app.services.language_affinity import language_affinity
 
 logger = logging.getLogger("recommender")
 
+# T2 (FIX_PLAN_2): a raw-feature difference scores exp(-|a - b| / (TAU * std)), std from the
+# metadata header's feature_std, so one catalogue standard deviation scores 0.37 on every axis
+TAU = 1.0
+# T3.4 as amended a0d9b43: weight of the polarity similarity when either mode is undefined
+MODE_SHRINK = 0.5
+
+
+def _zsim(a: float, b: float, std: float) -> float:
+    return float(np.exp(-abs(a - b) / (TAU * max(std, 1e-6))))
+
 # Default weights from Section 12.6
 DEFAULT_WEIGHTS: dict[str, float] = {
     "s_clap":      0.18,
@@ -171,6 +181,7 @@ class MusicRecommender:
         self._metadata: list[dict] = []
         self._metadata_header: dict[str, Any] = {}
         self._cut_points: dict[str, Any] | None = None
+        self._feature_std: dict[str, float] = {}
         self._track_id_map: dict[str, int] = {}
         self._anchors: dict[str, np.ndarray] = {}
         self._anchor_keys: list[str] = []
@@ -238,6 +249,9 @@ class MusicRecommender:
                 self._metadata = raw_meta["tracks"]
                 self._metadata_header = raw_meta.get("header", {k: v for k, v in raw_meta.items() if k != "tracks"})
                 self._cut_points = self._metadata_header.get("cut_points")
+                self._feature_std = dict(self._metadata_header.get("feature_std") or {})
+                if not self._feature_std:
+                    logger.error("track_metadata.json header has no feature_std; T2 similarities fall back to std 1.0")
             elif isinstance(raw_meta, list):
                 self._metadata = raw_meta
             logger.info("Loaded %d track records from %s", len(self._metadata), meta_path)
@@ -649,29 +663,35 @@ class MusicRecommender:
             else:
                 s_tempo = 0.5
 
+        fs = self._feature_std
+
+        def z(key: str, default: float) -> float:
+            return _zsim(float(seed.get(key, default)), float(cand.get(key, default)), fs.get(key, 1.0))
+
         # 4. s_pulse
-        s_pulse = float(np.clip(1.0 - abs(float(seed.get("pulse_rate", 0.5)) - float(cand.get("pulse_rate", 0.5))), 0.0, 1.0))
+        s_pulse = z("pulse_rate", 0.5)
 
         # 5. s_groove
         kc_eq = 1.0 if seed.get("kick_class") == cand.get("kick_class") else 0.0
-        bb_sim = 1.0 - abs(float(seed.get("backbeat", 0.5)) - float(cand.get("backbeat", 0.5)))
-        hpb_sim = max(0.0, 1.0 - abs(float(seed.get("hits_per_bar", 4.0)) - float(cand.get("hits_per_bar", 4.0))) / 8.0)
-        swing_sim = max(0.0, 1.0 - abs(float(seed.get("swing", 0.5)) - float(cand.get("swing", 0.5))) / 0.2)
-        lag_sim = max(0.0, 1.0 - abs(float(seed.get("lag_ms", 0.0)) - float(cand.get("lag_ms", 0.0))) / 40.0)
+        bb_sim = z("backbeat", 0.5)
+        hpb_sim = z("hits_per_bar", 4.0)
+        swing_sim = z("swing", 0.5)
+        lag_sim = z("lag_ms", 0.0)
         s_groove = float(np.clip(0.4 * kc_eq + 0.2 * bb_sim + 0.2 * hpb_sim + 0.1 * swing_sim + 0.1 * lag_sim, 0.0, 1.0))
 
         # 6. s_dark
-        s_dark = float(np.clip(1.0 - abs(float(seed.get("darkness", 0.5)) - float(cand.get("darkness", 0.5))), 0.0, 1.0))
+        s_dark = z("darkness", 0.5)
 
         # 7. s_grit
-        s_grit = float(np.clip(1.0 - abs(float(seed.get("grit", 0.5)) - float(cand.get("grit", 0.5))), 0.0, 1.0))
+        s_grit = z("grit", 0.5)
 
-        # 8. s_vocal (includes lyric_words_per_minute)
-        syl_sim = max(0.0, 1.0 - abs(float(seed.get("syllable_rate", 2.0)) - float(cand.get("syllable_rate", 2.0))) / 8.0)
-        sus_sim = 1.0 - abs(float(seed.get("sustain_ratio", 0.5)) - float(cand.get("sustain_ratio", 0.5)))
-        pitch_sim = max(0.0, 1.0 - abs(float(seed.get("pitch_range", 12.0)) - float(cand.get("pitch_range", 12.0))) / 24.0)
+        # 8. s_vocal (includes lyric_words_per_minute); tuning_depth and words per minute have no
+        # header std in T2's list and keep their linear terms
+        syl_sim = z("syllable_rate", 2.0)
+        sus_sim = z("sustain_ratio", 0.5)
+        pitch_sim = z("pitch_range", 12.0)
         tune_sim = 1.0 - abs(float(seed.get("tuning_depth", 0.5)) - float(cand.get("tuning_depth", 0.5)))
-        vib_sim = max(0.0, 1.0 - abs(float(seed.get("vibrato", 20.0)) - float(cand.get("vibrato", 20.0))) / 40.0)
+        vib_sim = z("vibrato", 20.0)
         wpm_a = float(seed.get("lyric_words_per_minute") or 0.0)
         wpm_b = float(cand.get("lyric_words_per_minute") or 0.0)
         if wpm_a > 0 and wpm_b > 0:
@@ -681,18 +701,12 @@ class MusicRecommender:
             s_vocal = float(np.clip(np.mean([syl_sim, sus_sim, pitch_sim, tune_sim, vib_sim]), 0.0, 1.0))
 
         # 9. s_intimacy
-        s_intimacy = float(np.clip(1.0 - abs(float(seed.get("intimacy", 0.5)) - float(cand.get("intimacy", 0.5))), 0.0, 1.0))
+        s_intimacy = z("intimacy", 0.5)
 
-        # 10. s_restraint
-        bucket_a = seed.get("restraint_bucket", "moderate")
-        bucket_b = cand.get("restraint_bucket", "moderate")
-        if bucket_a == bucket_b:
-            s_restraint = 1.0
-        elif (bucket_a, bucket_b) in [("restrained", "moderate"), ("moderate", "restrained"),
-                                     ("moderate", "saturated"), ("saturated", "moderate")]:
-            s_restraint = 0.5
-        else:
-            s_restraint = 0.0
+        # 10. s_restraint (z-scored loudness range and crest factor; restraint_bucket is a display label)
+        dz_lr = abs(float(seed.get("loudness_range", 0.0)) - float(cand.get("loudness_range", 0.0))) / max(fs.get("loudness_range", 1.0), 1e-6)
+        dz_cf = abs(float(seed.get("crest_factor", 0.0)) - float(cand.get("crest_factor", 0.0))) / max(fs.get("crest_factor", 1.0), 1e-6)
+        s_restraint = float(np.exp(-(dz_lr + dz_cf) / 2.0))
 
         # 11. s_meaning (theme vector cosine)
         has_l_a = bool(seed.get("has_lyrics"))
@@ -715,20 +729,18 @@ class MusicRecommender:
         # 12. s_language
         s_language = language_affinity(seed.get("language"), cand.get("language"))
 
-        # 13. s_harm
-        if seed.get("riff_flag") or cand.get("riff_flag"):
-            s_harm = 0.5
-        else:
-            cpb_sim = max(0.0, 1.0 - abs(float(seed.get("changes_per_bar", 1.0)) - float(cand.get("changes_per_bar", 1.0))) / 4.0)
-            lb_eq = 1.0 if seed.get("loop_bars") == cand.get("loop_bars") else 0.0
-            s_harm = float(np.clip(0.5 * cpb_sim + 0.5 * lb_eq, 0.0, 1.0))
+        # 13. s_harm (T3.4: no riff override; riff_flag equality is a 0.2 term inside it)
+        cpb_sim = z("changes_per_bar", 1.0)
+        lb_eq = 1.0 if seed.get("loop_bars") == cand.get("loop_bars") else 0.0
+        riff_eq = 1.0 if bool(seed.get("riff_flag")) == bool(cand.get("riff_flag")) else 0.0
+        s_harm = float(np.clip(0.4 * cpb_sim + 0.4 * lb_eq + 0.2 * riff_eq, 0.0, 1.0))
 
-        # 14. s_mode
+        # 14. s_mode (T3.4 as amended a0d9b43: z-scored polarity; an undefined mode shrinks it toward 0.7)
+        sim_pol = z("mode_polarity", 0.0)
         if seed.get("mode_undefined") or cand.get("mode_undefined"):
-            s_mode = 1.0
+            s_mode = 0.7 + MODE_SHRINK * (sim_pol - 0.7)
         else:
-            pol_diff = abs(float(seed.get("mode_polarity", 0.0)) - float(cand.get("mode_polarity", 0.0)))
-            s_mode = float(np.clip(1.0 - 0.5 * pol_diff, 0.0, 1.0))
+            s_mode = sim_pol
 
         features = {
             "s_clap":      s_clap,

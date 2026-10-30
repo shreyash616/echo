@@ -67,6 +67,13 @@ FEEL_AXES = [
     "sustain_ratio",
     "mode_polarity",
 ]
+# T2: catalogue std per raw feature; _compute_pair_score scores |a - b| as exp(-|a - b| / (tau * std))
+FEATURE_STD_AXES = [
+    "darkness", "grit", "intimacy", "pulse_rate", "brightness", "low_share", "roughness",
+    "loudness_range", "crest_factor", "syllable_rate", "sustain_ratio", "pitch_range", "vibrato",
+    "swing", "lag_ms", "hits_per_bar", "backbeat", "changes_per_bar",
+    "mode_polarity",  # s_mode's polarity term, added 2026-10-30 (a0d9b43)
+]
 FEEL_WEIGHTS = {
     "log2_felt_bpm": 1.5,
     "pulse_rate": 0.8,
@@ -341,6 +348,14 @@ def main():
     faiss.write_index(feel_index, str(OUT_FEEL_FAISS_PATH))
     logger.info("Saved FAISS IndexFlatL2 feel index to %s with %d entries", OUT_FEEL_FAISS_PATH, feel_index.ntotal)
 
+    # T2 feature std from the catalogue rows (population std, as feel_std)
+    feature_std = {a: float(np.std([float(r[a]) for r in raw_tracks])) for a in FEATURE_STD_AXES}
+    flat = [a for a, s in feature_std.items() if s <= 0.0]
+    if flat:
+        # a constant feature scores 1.0 on every pair (equal values); the scorer floors std at 1e-6
+        logger.warning("feature_std is zero for %s: constant in the catalogue", flat)
+    logger.info("feature_std: %s", {a: round(s, 4) for a, s in feature_std.items()})
+
     # 7. Save track_metadata.json with Header
     header = {
         "version": "2.0",
@@ -356,6 +371,7 @@ def main():
         "feel_mean": {FEEL_AXES[i]: float(feel_means[i]) for i in range(len(FEEL_AXES))},
         "feel_std": {FEEL_AXES[i]: float(feel_stds[i]) for i in range(len(FEEL_AXES))},
         "feel_weights": FEEL_WEIGHTS,
+        "feature_std": feature_std,
     }
 
     metadata_payload = {
