@@ -460,6 +460,43 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 14:10 P6 BLOCKED: `s_mode` is flat by construction on the 6 TUNE seeds whose mode is undefined
+
+Implemented as the GO says, in the working tree only (nothing committed beyond the start log `e611e8e`, nothing deployed):
+- `build_index_v2.py` writes `feature_std` for the 18 T2 axes into the header, from `catalog_features.jsonl`: darkness 0.1143, grit 0.0719, intimacy 0.0505, pulse_rate 0.1165, brightness 0.1543, low_share 0.204, roughness 0.0143, loudness_range 2.9806, crest_factor 2.7517, syllable_rate 0.3828, sustain_ratio 0.096, pitch_range 7.1786, vibrato 6.0774, **swing 0.0**, lag_ms 51.6277, hits_per_bar 3.4622, backbeat 0.0687, changes_per_bar 0.6444.
+- `_compute_pair_score` and `score_lib.features`: every listed `1 - |a - b|` and `1 - |a - b| / c` is `exp(-|a - b| / (1.0 * std_k))`; `s_restraint = exp(-(|dz_loudness_range| + |dz_crest_factor|) / 2)`; `s_vocal` and `s_groove` keep their inner weights. `s_harm = 0.4 cpb_z + 0.4 loop_bars_eq + 0.2 riff_flag_eq`, override deleted; `s_mode = 0.7` when either mode is undefined. `tuning_depth` and `lyric_words_per_minute` (inside `s_vocal`) have no std in T2's list and keep their linear terms.
+- `tests/test_axis_range.py`: marker and comment deleted.
+
+`report.py --split tune` after (before is 12:40: pooled 19, hits@10 0, hits@20 0, MRR 0.0009, negatives 0): positives 81, pooled 19, **hits@10 1, hits@20 1, MRR 0.0020**, negatives in top10 0. That is above the 10-28 baseline (0, 0, 0.0011) and the section 2 expectation of about 1 hit.
+
+Per-axis pool std per TUNE seed (clap anchor tempo pulse groove dark grit vocal intimacy restraint meaning language harm mode):
+
+| seed | clap | anch | tempo | pulse | groove | dark | grit | vocal | intim | restr | mean | lang | harm | mode |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Simple Man | .18 | .21 | .16 | .22 | .22 | .24 | .22 | .12 | .25 | .17 | .19 | .11 | .13 | .12 |
+| Waiting Around to Die | .16 | .19 | .17 | .20 | .22 | .25 | .24 | .09 | .23 | .18 | .17 | .10 | .11 | **.00** |
+| Bang Data | .11 | .22 | .17 | .22 | .09 | .23 | .20 | .11 | .22 | .15 | .28 | .16 | .15 | **.00** |
+| Boyfriend | .11 | .14 | .15 | .20 | .22 | .20 | .21 | .09 | .21 | .14 | .18 | .16 | .13 | **.00** |
+| Hurt | .16 | .19 | .17 | .19 | .21 | .23 | .22 | .10 | .22 | .18 | .27 | .11 | .13 | **.00** |
+| Tum Hi Ho | .15 | .20 | .17 | .21 | .21 | .23 | .22 | .11 | .21 | .21 | .26 | .14 | .11 | .17 |
+| Mask Off | .14 | .20 | .16 | .21 | .23 | .23 | .23 | .10 | .24 | .16 | .18 | .14 | .14 | **.00** |
+| Get Lucky | .13 | .18 | .16 | .23 | .20 | .25 | .24 | .10 | .22 | .20 | .25 | .14 | .15 | **.00** |
+| Tomboy | .13 | .21 | .14 | .18 | .22 | .21 | .22 | .10 | .22 | .17 | .27 | .04 | .13 | .13 |
+
+Every axis that was flat at 12:40 now spreads (pulse .04 -> .18 to .23, grit .03 -> .20 to .24, intimacy .02 -> .21 to .25, harm .00 -> .11 to .15). `s_harm` passes T3.4 on 9 of 9. `s_mode` passes T3.4's own gate on exactly 3 (Simple Man .12, Tum Hi Ho .17, Tomboy .13), but `pytest -q tests/test_axis_range.py` fails: "axes with std < 0.05 on 3 or more TUNE seeds: {'s_mode': 6}".
+
+Why: the 6 flat seeds are exactly the 6 with `mode_undefined = True` (Waiting Around to Die, Bang Data, Boyfriend, Hurt, Mask Off, Get Lucky). With "0.7 when either mode is undefined", an undefined seed gives every candidate 0.7, so the axis is a constant for that seed whatever the catalogue holds. 10,276 of 19,999 rows are `mode_undefined`, so about half of all seeds will be flat on it. Rule 18 and T3.4's `s_mode` rule cannot both hold as written. `s_mode` carries 0.0145 in the served weights. I have not changed the rule or the test.
+
+Your call, any of:
+(a) Rule 18 counts `s_mode` only on seeds with a defined mode (or exempts it), since T3.4 makes it constant by design there;
+(b) a different undefined-mode score that still varies by candidate, which you name (for instance the polarity similarity shrunk toward 0.7; `mode_polarity` is present on undefined rows too, std 0.201 there against 0.389 on defined ones);
+(c) something else.
+After your answer: commit (code and the test edit), deploy, `--validate-live`, Tests.
+
+Noticed: `swing` is the constant 0.5 on all 19,999 rows (hard-coded at `features.py:302`), so its header std is 0.0 and its z-term is 1.0 on every pair inside `s_groove` (the scorer floors std at 1e-6; equal values give exp(0)). `build_index_v2.py` logs a warning for a zero-std axis rather than raising. Not P6's to fix.
+
+BLOCKED
+
 ### 2026-10-30 13:45 PACKET P5 READY FOR REVIEW
 
 Commits: `8b71a84` (start), `7f69cfa` (deploy and validation log), `76aa513` (`test_candidate_pool` strict xfail, the two-line comment and the reason you gave, nothing else in the file), `0d0e1ec` (second commit), `68ce132` (close-out log). Items 1 to 5 as in my 13:20 entry, unchanged.
