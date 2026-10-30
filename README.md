@@ -611,6 +611,49 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 19:58 IST PACKET P8 READY FOR REVIEW
+
+Shipped as 79c1435 said: log evaluation 1748, the chosen rerank weights with the served feel-pool weights.
+- **Restore:** the P7 header was put back and `build_index_v2.py` run without the flag, so the feel weights come from the existing header (1.5 / 1.0 / 0.5). The feel matrix, feel index, CLAP index and id map are byte-identical to P7's.
+- **`WEIGHTS_REPORT.md` (`f35b878`):**
+  - both "before" definitions;
+  - the chosen-point row (35, 3 / 5 / 0.0172) and why it did not ship;
+  - the shipped row (36, 3 / 5 / 0.0170);
+  - HOLDOUT 1 / 1 / 0.0143 as read once, with the feel change the shipped point does not carry, and P9's section 6 row named as the read for the shipped point.
+- **Deploy:** run 41071072564, Space `6b768fbf`.
+
+| gate | needed | measured |
+|---|---|---|
+| item 1 alignment, every TUNE seed | at least 18 of 20 | 20 of 20, same order, on all nine (side record recreated) |
+| evaluations | at least 500 | 2,300 TUNE, then HOLDOUT once (log line 2301, the only one) |
+| replica objective vs P7 | above | 0.04336 against 0.02777 |
+| live hits@10 / hits@20 vs replica | within one | 3 / 5 against 3 / 5 |
+| no regression below | 1 / 1 / 0.0020 | 3 / 5 / 0.0170 |
+| `--validate-live` | 0.0000 | 0.0000 |
+| `test_no_constant_fields` | passing | passing; cross-language first results 9 of 50 (before 1) |
+| pooled | stated | 36 of 81, unchanged (served feel weights) |
+| owner positives live (T6) | 8 of 11 | 8 of 11; p95 0.143 s |
+| Tests | green | run 41070946227 green |
+
+On Tests: attempt 1 overlapped the Space restart and was green. I reran it after the Space settled (attempt 2), and it is green too.
+
+The cross-language first results:
+- Rammstein (de, 0.85);
+- Blue (en, 0.6);
+- Daddy Yankee (es, 0.55);
+- Jay Park (ko, 0.55);
+- Pink Floyd (en, 0.7);
+- Doc Watson (en, 0.825);
+- Molchat Doma (ru, 0.55);
+- Gazo (en, 0.7);
+- Daft Punk "Reflections" (unknown language, 0.75).
+
+P8 commits: `c5deee7`, `9d1451d`, `3515d2d`, `9935a22`, `f35b878`; logs in `199ad4f`, `14329a6`, `180c46f`, `1e18e81`.
+
+Noticed, not acted on: the 0.42 s outlier recurs once per 20 calls (0.422 s here, 0.429 s in P7). That is now two packets running. P9 re-measures p95.
+
+PACKET P8 READY FOR REVIEW
+
 ### 2026-10-30 19:50 IST P8 BLOCKED: the search beats P7 and live agrees hit for hit, but the new feel-pool weights drop Stairway, so the pool test reads 7 of 11
 
 **Helper.** `3515d2d` puts the three identity checks in `_is_seed_copy`. `test_no_gates` passes untouched, and Tests run 41066582547 is green.
