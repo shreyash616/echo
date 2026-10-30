@@ -488,6 +488,23 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 15:40 P6 BLOCKED on `test_no_constant_fields`: every top recommendation is now same-language
+
+Rule 18 passes at **f = 0.5**, the first rung: `s_mode` std 0.2030, 0.1292, 0.1198, 0.1161, 0.1459, 0.2435, 0.1096, 0.1163, 0.2136 (Simple Man, Waiting Around to Die, Bang Data, Boyfriend, Hurt, Tum Hi Ho, Mask Off, Get Lucky, Tomboy); `pytest -q tests/test_axis_range.py` 1 passed; header `mode_polarity` std 0.3084. Code `977c67c`, log `ccc693d` (full std table there).
+
+- `report.py --split tune`: positives 81, pooled 19, **hits@10 1, hits@20 1, MRR 0.0020**, negatives in top10 0 (before 0, 0, 0.0009; baseline 0, 0, 0.0011).
+- Deploy: `deploy_hf.py`, then `deploy.yml` https://github.com/shreyash616/echo/actions/runs/41032275332 (success). The Space then went to **RUNTIME_ERROR**: `[startup] Attempt 6 failed for track_metadata.json: Response from https://huggingface.co/datasets/shreyash616/echo-ml-artifacts/resolve/main/track_metadata.json is missing the 'X-Repo-Commit' header`. Minutes later the same URL answered 302 with `X-Repo-Commit 14b3620a` from the box, so I restarted the Space once (the deploy's own step, nothing changed). RUNNING at 15:21:10, `{"status":"ok","recommender_loaded":true}`.
+- `report.py --validate-live`: max axis deviation **0.0000**.
+- Tests on `977c67c` red on leakage: my new log line said "fall back" and "Fall" is a benchmark title. Reworded in `ccc693d`; leakage passes locally. The log line only fires when the header lacks `feature_std`; the deployed copy still has the old wording, and I have not redeployed for it.
+
+The blocker: local `pytest -q tests/` gives 1 failure after the reword, `test_no_constant_fields` against the live Space: "Field 'languageAffinity' in recs is constant across all 50 tracks! Value: 1.0". The test reads only `results[0]` per seed. Measured on the same 50 seeds (`random.seed(42)` over the metadata; 39 en, 3 es, 2 hi, 2 fr, 1 each ko, tl, de, ru): the top recommendation is same-language on **50 of 50**; over the top 10 it is 1.0 on 419 of 500, with 81 cross-language (0.525 to 0.9). It passed in P5 on the P4 scoring, so P6 is what moved it: with the feel axes now spread, the 0.21 `s_language` weight (largest in the served file) decides the first slot. That is scoring behaviour, not a defect in the T2 code, and weights are not P6's. The test is in `tests.yml`, so Tests on the P6 commits will be red on it.
+
+Your call: (a) the test checks `languageAffinity` over the top k instead of the first result, as it already exempts the field on `/api/track`; (b) it stays red until P8 (weights), marked the way the pool test is; (c) something else. I have not touched the test.
+
+PACKET P6 is otherwise complete: gate items rule 18, `s_harm`/`s_mode` spread, deviation 0.0000, replica above baseline, `test_axis_range` passing on its own.
+
+BLOCKED
+
 ### 2026-10-30 14:25 P6 still BLOCKED: the shrunk `s_mode` spreads, but 0.3 x the polarity spread is under 0.05 on 6 seeds
 
 Done exactly as 1842fde says, both files: `sim_pol = clip(1 - 0.5 |pol_seed - pol_cand|, 0, 1)` on the row's raw `mode_polarity`; both defined `s_mode = sim_pol`; either undefined `s_mode = 0.7 + 0.3 (sim_pol - 0.7)`. Working tree only; nothing committed or deployed.
