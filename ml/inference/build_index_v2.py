@@ -130,8 +130,8 @@ def main():
 
     N = len(raw_tracks)
     logger.info("Loaded %d track records from %s", N, CATALOG_FEATURES_PATH)
-    if N < 20000:
-        raise ValueError(f"Expected at least 20,000 tracks, got {N}")
+    if N < 19000:  # P4 floor: rows whose preview cannot be decoded are dropped
+        raise ValueError(f"Expected at least 19,000 tracks, got {N}")
 
     # 2. Load CLAP embeddings (download from HF dataset if absent)
     if not CLAP_NPY_PATH.exists():

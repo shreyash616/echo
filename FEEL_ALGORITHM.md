@@ -1476,3 +1476,32 @@ Run these in a browser against the Space after each gate; if any fails, the gate
 ### Packet P4: T1 the data pass (FIX_PLAN_2.md section 5, GO 1928762)
 - Started: 2026-10-28 20:55 IST after GO P4 (1928762).
 - Files: `ml/data/redescribe_catalog.py`, `ml/data/HARVEST_MANIFEST.json`, `ml/data/DROPPED.jsonl`, `ml/inference/build_index_v2.py` (bug fixes only), `tests/test_describe_parity.py` (run only), `FEEL_ALGORITHM.md`.
+- Also touched under reviewer GO 37c3137: `tests/test_no_benchmark_leakage.py` (row floor 20,000 -> 19,000, same as `build_index_v2.py`). Rebuilt index outputs that are tracked: `ml/inference/anchors.json`, `ml/inference/theme_prompts.json`, `ml/inference/track_id_map.json`.
+- Audio: all 20,000 previews fetched and described from audio with the pinned decoder, CLAP HTSAT-base on CUDA, four checkpointed batches of 5,000. One row dropped (The Neighbourhood "A Moment of Silence", ffmpeg returned no audio), so 19,999 rows.
+- Lyrics: the describing box's exit IP got LRCLIB 503 on about 41% of requests whatever the rate, and the Mac and the registered application saw the same; the 503 is LRCLIB-wide load, not rate or IP. The pass ran as eight parallel shards of `fetch_lyrics_remote.py` (reviewer-owned) with the owner's registered app, 13,866 rows in 2 h 15 min, then a second full attempt over the 164 errors, then this script's resume. Whole pass: fetched 12,029, none 1,836, error_after_retry 1; requests get 200 12,143, get 404 5,098, get 503 23,931, search 200 3,260, search 503 5,161 (503 share 58.7%). Recorded in the manifest's `lyrics_pass` with each stage.
+- Bug fixed, `05def45`: `LyricFetcher` read `lyrics_none.txt` with `split()`; keys are `artist:title` with spaces, so only one-word keys matched and a resume re-fetched every known-none row. Now `splitlines()`. The bad resume wrote no lyric files; its appended verdicts are set aside in the work dir.
+- Language cap: the 70% "no language above" gate was withdrawn by the reviewer (37c3137) and is reported only. en share by `language_source`: lyrics 77.6% (13,069 of 16,840), genre 82.7% (2,028 of 2,452), artist_vote 6.7% (40 of 601).
+- Verification 2026-10-30, `HARVEST_MANIFEST.json` (`describe_commit 05def45`, clean; catalogue sha256 `ba16a10422a57cbf9f53059b7d8bed19590c604baae58dfcf0459c50f465377e`, clap sha256 `082bcb064c5a9c8488ecf15fe65b1d69d7bcc036407b1e6fa05498622a0f845b`):
+
+  | gate | value |
+  |---|---|
+  | previews_decoded = rows_described_from_audio = rows >= 19,000 | 19,999 = 19,999 = 19,999 |
+  | rows_with_lyric_file >= 0.75 x rows | 17,408 (87.0%) |
+  | lyrics_pass.error_after_retry <= 0.02 x rows | 1 |
+  | felt_bpm > 150 / < 60 / median | 3.46% / 2.40% / 96 |
+  | language null <= 10% | 0.53% |
+  | language_source = lyrics on lyric-file rows >= 60% | 96.7% |
+  | largest theme <= 30% of non-null | celebration 19.0% |
+  | largest kick class <= 50% | syncopated_808 42.3% |
+  | saturation std >= 0.08 / sustain at 1.0 <= 20% / darkness std > 0.10 | 0.152 / 15.9% / 0.114 |
+  | describe parity >= 18/20 each | kick_class 20/20, restraint_bucket 20/20, felt_bpm 20/20 |
+  | previews directory empty | 0 files |
+
+- kick_class: syncopated_808 42.3%, other 41.2%, sparse_backbeat 15.7%, **four_on_floor 0.83% (under 2%; T5 reopens separately)**. off_beat_ratio p5 0.398, p50 0.644, p95 0.886. restraint_bucket moderate 51.6%, restrained 24.3%, saturated 24.1%.
+- Language: en 75.7%, es 7.8%, fr 6.0%, pa 2.6%, hi 2.1%, ja 1.9%, pt 1.1%, others below 1%. language_source: lyrics 84.2%, genre 12.3%, artist_vote 3.0%, none 0.5%.
+- Theme (non-null): celebration 19.0%, escape 12.6%, defiance 12.0%, wonder 11.6%, swagger 10.3%, longing 8.9%, heartbreak 6.5%, grief 6.4%, resignation 6.4%, devotion 6.3%; null 5,547.
+- Feature std: saturation 0.1519, sustain_ratio 0.096, darkness 0.1143, grit 0.0719, intimacy 0.0505.
+- Index: `build_index_v2.py` built CLAP and feel FAISS indexes on 19,999 rows; anchor max cosine 0.803, first-50 mean cosine 0.654.
+- `report.py --split tune` (reported, no threshold at P4): positives 81, pooled 19, not pooled 62, hits@10 0, hits@20 0, MRR 0.0009, negatives in top10 0.
+- Disk after preview deletion: C: 400G size, 254G used, 146G free.
+- Verification 2026-10-30: `py -m pytest -q tests/` -> 2 failed, 20 passed, 1 skipped, 1 xfailed in 145.84s. `test_describe_parity` skips now that the previews are deleted (it passed 20/20 x3 above, before deletion). `test_offline_replica` compares the local rebuilt artifacts with the live Space, which still serves the 10-28 index (max axis deviation 0.935); expected until the P5 deploy, and CI skips it. `test_no_benchmark_leakage` fails on `ml/data/fetch_lyrics_remote.py` (a docstring example names the benchmark title "Free Bird", added in c1d145b, reviewer-owned); Tests on main have been red on that since c1d145b. Asked on the channel.

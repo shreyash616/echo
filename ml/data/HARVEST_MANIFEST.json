@@ -1,48 +1,292 @@
 {
-  "timestamp": "2026-10-27T23:41:26.324609+00:00",
-  "rows": 20000,
-  "membership_rows": 150069,
-  "distinct_playlists": 1999,
-  "distinct_artists": 2735,
-  "per_language_counts": {
-    "en": 17078,
-    "es": 1170,
-    "hi": 462,
-    "unknown": 446,
-    "fr": 301,
-    "pa": 213,
-    "ja": 128,
-    "ko": 74,
-    "pt": 65,
-    "ru": 57,
-    "tr": 3,
-    "ta": 2,
-    "te": 1
+  "timestamp": "2026-10-30T06:46:08.810232+00:00",
+  "command_line": "py ml/data/redescribe_catalog.py --lrclib-spacing 2.0",
+  "describe_commit": "05def45ef8fad60f19cd0d72c4d807ec6c2410bc",
+  "rows": 19999,
+  "previews_decoded": 19999,
+  "rows_described_from_audio": 19999,
+  "rows_with_lyric_file": 17408,
+  "rows_dropped": 1,
+  "previews_fetched": 0,
+  "lyrics_pass": {
+    "summary": "whole lyric pass for rows without a lyric file at the start of the shard run (13,866 rows): eight parallel shards of fetch_lyrics_remote.py with the registered LRCLIB app, a second full attempt over the shards' 164 errors, then this script's resume over what remained",
+    "rows_to_fetch": 13866,
+    "fetched": 12029,
+    "none": 1836,
+    "error_after_retry": 1,
+    "stages": {
+      "shards": {
+        "fetched": 11948,
+        "none": 1754,
+        "error": 1366,
+        "error_after_retry": 164,
+        "status": {
+          "get 200": 12068,
+          "get 404": 4889,
+          "get 503": 23696,
+          "search 200": 3089,
+          "search 503": 4969
+        }
+      },
+      "second_attempt": {
+        "rows": 164,
+        "fetched": 81,
+        "none": 82,
+        "error_after_retry": 1,
+        "status": {
+          "get 200": 75,
+          "get 404": 209,
+          "get 503": 231,
+          "search 200": 171,
+          "search 503": 192
+        }
+      },
+      "resume": {
+        "to_fetch": 1,
+        "retried": 1,
+        "first_pass_errors": 1,
+        "error_after_retry": 1,
+        "status": {
+          "get 503": 4
+        }
+      }
+    },
+    "status": {
+      "get 200": 12143,
+      "get 404": 5098,
+      "get 503": 23931,
+      "search 200": 3260,
+      "search 503": 5161
+    },
+    "status_503_share": 0.5866
   },
-  "tempo_distribution": {
+  "felt_bpm": {
     "share_gt_150": 0.0346,
     "share_lt_60": 0.024,
-    "median_bpm": 96.0
-  },
-  "catalog_features_sha256": "471812585399885e26ee565a095e435d06f025b7aba7cf87a09e5dcc25aee4ed",
-  "catalog_features_file": "catalog_features.jsonl",
-  "command_line": "py ml/data/redescribe_catalog.py",
-  "target_met": true,
-  "theme_distribution": {
-    "total_with_theme": 10974,
-    "max_share": 0.17235,
-    "themes_ge_3pct_count": 7,
-    "counts": {
-      "celebration": 3447,
-      "devotion": 2262,
-      "longing": 1352,
-      "grief": 1163,
-      "heartbreak": 850,
-      "wonder": 796,
-      "resignation": 630,
-      "swagger": 237,
-      "defiance": 236,
-      "escape": 1
+    "median": 96.0,
+    "histogram_20bpm": {
+      "40-59": 480,
+      "60-79": 4151,
+      "80-99": 5971,
+      "100-119": 3886,
+      "120-139": 4082,
+      "140-159": 1042,
+      "160-179": 265,
+      "180-199": 92,
+      "200-219": 12
     }
-  }
+  },
+  "kick_class": {
+    "syncopated_808": {
+      "count": 8459,
+      "share": 0.423
+    },
+    "other": {
+      "count": 8240,
+      "share": 0.412
+    },
+    "sparse_backbeat": {
+      "count": 3134,
+      "share": 0.1567
+    },
+    "four_on_floor": {
+      "count": 166,
+      "share": 0.0083
+    }
+  },
+  "off_beat_ratio": {
+    "p5": 0.3976,
+    "p50": 0.6441,
+    "p95": 0.8864
+  },
+  "restraint_bucket": {
+    "moderate": {
+      "count": 10324,
+      "share": 0.5162
+    },
+    "restrained": {
+      "count": 4859,
+      "share": 0.243
+    },
+    "saturated": {
+      "count": 4816,
+      "share": 0.2408
+    }
+  },
+  "language": {
+    "en": {
+      "count": 15137,
+      "share": 0.7569
+    },
+    "es": {
+      "count": 1566,
+      "share": 0.0783
+    },
+    "fr": {
+      "count": 1204,
+      "share": 0.0602
+    },
+    "pa": {
+      "count": 509,
+      "share": 0.0255
+    },
+    "hi": {
+      "count": 413,
+      "share": 0.0207
+    },
+    "ja": {
+      "count": 369,
+      "share": 0.0185
+    },
+    "pt": {
+      "count": 217,
+      "share": 0.0109
+    },
+    "de": {
+      "count": 107,
+      "share": 0.0054
+    },
+    "None": {
+      "count": 105,
+      "share": 0.0053
+    },
+    "tl": {
+      "count": 101,
+      "share": 0.0051
+    },
+    "ko": {
+      "count": 97,
+      "share": 0.0049
+    },
+    "nl": {
+      "count": 57,
+      "share": 0.0029
+    },
+    "ru": {
+      "count": 47,
+      "share": 0.0024
+    },
+    "id": {
+      "count": 33,
+      "share": 0.0017
+    },
+    "it": {
+      "count": 17,
+      "share": 0.0009
+    },
+    "ar": {
+      "count": 7,
+      "share": 0.0004
+    },
+    "zh": {
+      "count": 3,
+      "share": 0.0002
+    },
+    "mr": {
+      "count": 2,
+      "share": 0.0001
+    },
+    "tr": {
+      "count": 2,
+      "share": 0.0001
+    },
+    "ta": {
+      "count": 2,
+      "share": 0.0001
+    },
+    "pl": {
+      "count": 1,
+      "share": 0.0001
+    },
+    "ur": {
+      "count": 1,
+      "share": 0.0001
+    },
+    "te": {
+      "count": 1,
+      "share": 0.0001
+    },
+    "sv": {
+      "count": 1,
+      "share": 0.0001
+    }
+  },
+  "language_source": {
+    "lyrics": {
+      "count": 16840,
+      "share": 0.842
+    },
+    "genre": {
+      "count": 2452,
+      "share": 0.1226
+    },
+    "artist_vote": {
+      "count": 601,
+      "share": 0.0301
+    },
+    "none": {
+      "count": 105,
+      "share": 0.0053
+    },
+    "script": {
+      "count": 1,
+      "share": 0.0001
+    }
+  },
+  "language_source_lyrics_share_of_lyric_files": 0.9674,
+  "theme": {
+    "celebration": {
+      "count": 2748,
+      "share": 0.1901
+    },
+    "escape": {
+      "count": 1822,
+      "share": 0.1261
+    },
+    "defiance": {
+      "count": 1733,
+      "share": 0.1199
+    },
+    "wonder": {
+      "count": 1669,
+      "share": 0.1155
+    },
+    "swagger": {
+      "count": 1492,
+      "share": 0.1032
+    },
+    "longing": {
+      "count": 1281,
+      "share": 0.0886
+    },
+    "heartbreak": {
+      "count": 943,
+      "share": 0.0653
+    },
+    "grief": {
+      "count": 930,
+      "share": 0.0644
+    },
+    "resignation": {
+      "count": 926,
+      "share": 0.0641
+    },
+    "devotion": {
+      "count": 908,
+      "share": 0.0628
+    }
+  },
+  "theme_null": 5547,
+  "feature_std": {
+    "saturation": 0.1519,
+    "sustain_ratio": 0.096,
+    "darkness": 0.1143,
+    "grit": 0.0719,
+    "intimacy": 0.0505
+  },
+  "sustain_ratio_share_at_1": 0.1594,
+  "elapsed_s": 351.1,
+  "catalog_features_file": "catalog_features.jsonl",
+  "catalog_features_sha256": "ba16a10422a57cbf9f53059b7d8bed19590c604baae58dfcf0459c50f465377e",
+  "clap_npy_sha256": "082bcb064c5a9c8488ecf15fe65b1d69d7bcc036407b1e6fa05498622a0f845b"
 }
