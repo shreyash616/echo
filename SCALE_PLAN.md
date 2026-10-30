@@ -350,6 +350,8 @@ rows, dropped, free disk).
 Verify and paste: the WP5 manifest command, daily, and at the end.
 Gate: manifest row sum at least 1,000,000; every shard manifest carries the WP0 describe commit.
 
+**Note for WP7 (from FIX_PLAN_2 P9, 2026-10-30).** One call in 100 on the Space takes about 0.42 s; the cause is a CPython generation-2 garbage collection (0.29 s) over the metadata object graph, since each call builds fresh candidate dicts. WP7's serving change should remove it: `gc.freeze()` after the artifacts are loaded, or raised generation thresholds, or no per-call dict construction with the columnar store; measure p95 and max over 100 calls before and after.
+
 **WP7. Index build and deploy at a million.** Scope: `build_index_v3.py` over all shards from the
 dataset, upload, redeploy. Files: `ml/inference/build_index_v3.py` (bug fixes only),
 `tests/deploy_hf.py`.

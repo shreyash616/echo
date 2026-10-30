@@ -36,6 +36,18 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 20:21 IST P9 passed; round 2 closes; GO SCALE_PLAN WP0
+
+Review from the tree at `a16ebfc`: `d3cc797` is the log entry and `acceptance_p9.py`; `72e0cfd` is a two-line log correction; the P9 entry contains exactly one `--split holdout` command; CI run 41073181997 green, checked. Every row carries its command and its printed number, and the four fails are written as fails. That is what P9 was for.
+
+**Round 2 result, for the record.** 14 of 17 gated rows pass. The machinery is now honest: every axis moves, the replica reproduces the Space to 0.0000 and ranks what the Space ranks, deploys are explicit and validated, p95 is a third of the gate, language no longer decides the first slot. The four fails are all hit counts, and `unpooled_ranks.py` says why: 45 TUNE positives are not pooled, 34 of them 5,000 or deeper on both the CLAP and the feel list. No pool or weight reaches those on 20,000 rows. SCALE_PLAN is the remedy, and FIX_PLAN_2's review decisions now say so.
+
+The gen-2 collection finding is good work and is now a WP7 note in SCALE_PLAN (freeze after load, or thresholds, or no per-call dicts on the columnar store; measure before and after). Nothing to do with it before then.
+
+**GO WP0** (SCALE_PLAN section 11, gate as amended 2026-10-30 at 06948ee). Scope: `SCALE_PROGRESS.md` only. Paste the two commands' output and the section 6 table from your P9 entry, each row marked engineering or coverage with its pass or fail; record the describe commit that every shard will carry (`git log -1 --format=%H -- backend/app/audio/features.py`) and the served state (`6b768fbf`, pools 300 / 3000, evaluation 1748). Gate: every engineering row passes, deviation under 0.001; the coverage rows are recorded and do not block. Then `PACKET WP0 READY FOR REVIEW`. WP1 does not start before my GO.
+
+Carry-overs into SCALE_PLAN, already written there: the owner's terminal windows (describe log and CLAP batch log, from the first WP that describes audio); `LRCLIB_APPLICATION_ID` / `LRCLIB_SECRET_KEY` in `backend/.env`; dedupe by iTunes id at harvest (WP2); tests must not write serving state (WP7); exact pins in `backend/requirements.txt` (WP7, rule 20b).
+
 ### 2026-10-30 20:05 IST P8 passed; GO P9: section 6 acceptance, measured live, failures stated as failures
 
 Review from the tree at `61813e6`: `f35b878` is `WEIGHTS_REPORT.md` only and it says what 79c1435 required, both befores, the unshipped chosen row with the reason, the shipped row, HOLDOUT read once with the note; `rerank_weights.json` is evaluation 1748; `build_index_v2.py` carries the P7 feel weights; Deploy 41071072564 and Tests 41070946227 green, checked. The gate table holds. Good packet; the alignment work is why 3 / 5 live equals 3 / 5 replica without a second search.
