@@ -447,6 +447,21 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 13:45 PACKET P5 READY FOR REVIEW
+
+Commits: `8b71a84` (start), `7f69cfa` (deploy and validation log), `76aa513` (`test_candidate_pool` strict xfail, the two-line comment and the reason you gave, nothing else in the file), `0d0e1ec` (second commit), `68ce132` (close-out log). Items 1 to 5 as in my 13:20 entry, unchanged.
+
+- Tests **green** on `0d0e1ec`: https://github.com/shreyash616/echo/actions/runs/41021882376 (overlap success, candidate pool success as xfail, offline replica success).
+- Local `pytest -q tests/`: 21 passed, 1 skipped (`test_describe_parity`, previews deleted), 2 xfailed (`test_axis_range`, `test_candidate_pool`). `test_offline_replica` passes.
+- Second commit `0d0e1ec`: `redescribe_catalog.fetch_lyrics` has the remote flow (`clean_title`, `/api/get` with cleaned title and no album, `/api/search` by fields then `q=`, Retry-After plus up to 30% jitter, five 503 retries at 1 s); `harvest_v2.py` reads `prompts` from the anchors bundle and 17 excepts are narrowed; the worker catch-all (now line 877) stays broad and logged.
+
+Replica vs Space ranking, read from both and measured on the 9 tune seeds:
+The axes agree (0.0000), but the order does not, for four reasons. First, the Space's top 20 is MMR-selected: `recommender.py` 915-967 applies `diversity` 0.70 (the default, since `feel_benchmark` sends only `k=20`), a cap of 2 per artist, and the cross-language budget. `report.py` sorts the pool by the raw weighted score with none of these, and the live top 20 shares only 3 to 9 tracks per seed with the replica's raw top 20. `--validate-live` calls with `diversity=1.0` and compares axis values of shared tracks only, so it never tests the order. Second, the hit rule differs: `feel_benchmark.match_track` accepts key equality or title-and-artist containment, while `report.py` looks up the benchmark key exactly. Both live hits are containment matches to other keys: Get Lucky rank 8 is `earth:september eric kupper extended vocal mix` (replica raw rank 11) standing in for `earth:september` (raw rank 356); Waiting Around to Die rank 19 is `clarence ashley:rising sun blues` (raw rank 33) for `doc watson:rising sun blues`. Third, MRR is defined differently: `feel_benchmark` averages 1/(first hit rank) over seeds, (1/8 + 1/19)/9 = 0.0197, while `report.py` sums 1/rank over all 81 positives and divides by 81. Fourth, the Space adds up to 100 side-index records to the pool (`recommender.py` 859-863, 878-882), which the replica lacks. Pool sizes (500/600) and `rerank_weights.json` are the same on both. For P8: a weight search on `report.py` optimises a pre-MMR exact-key ranking, so it needs the MMR step, the same hit rule and the same MRR definition before its numbers transfer to the Space.
+
+Not touched: the candidate-pool p95 unit bug (P7). No other files.
+
+PACKET P5 READY FOR REVIEW
+
 ### 2026-10-30 13:20 P5 BLOCKED on item 6: live candidate pool 4/11 owner positives (was 6/11)
 
 Deploy done; items 1 to 5 pass. Numbers are in FEEL_ALGORITHM.md under Packet P5 (`7f69cfa`); the essentials:
