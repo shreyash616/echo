@@ -251,7 +251,7 @@ class MusicRecommender:
                 self._cut_points = self._metadata_header.get("cut_points")
                 self._feature_std = dict(self._metadata_header.get("feature_std") or {})
                 if not self._feature_std:
-                    logger.error("track_metadata.json header has no feature_std; T2 similarities fall back to std 1.0")
+                    logger.error("track_metadata.json header has no feature_std; T2 similarities use std 1.0 on every axis")
             elif isinstance(raw_meta, list):
                 self._metadata = raw_meta
             logger.info("Loaded %d track records from %s", len(self._metadata), meta_path)

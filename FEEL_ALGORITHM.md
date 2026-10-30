@@ -1528,3 +1528,24 @@ Run these in a browser against the Space after each gate; if any fails, the gate
 - Started: 2026-10-30 13:55 IST after GO P6 (e647fd5).
 - Files: `backend/app/services/recommender.py`, `ml/inference/build_index_v2.py` (header std), `ml/experiments/offline_rerank/score_lib.py`, `tests/test_axis_range.py` (marker removed), `FEEL_ALGORITHM.md`; `tests/deploy_hf.py` run.
 - Before (P4 index, served weights, 2026-10-30 12:40): positives 81, pooled 19, hits@10 0, hits@20 0, MRR 0.0009, negatives in top10 0.
+- Code `977c67c`: `build_index_v2.py` writes `feature_std` for the 18 T2 axes plus `mode_polarity` (a0d9b43) into the header (darkness 0.1143, grit 0.0719, intimacy 0.0505, pulse_rate 0.1165, brightness 0.1543, low_share 0.204, roughness 0.0143, loudness_range 2.9806, crest_factor 2.7517, syllable_rate 0.3828, sustain_ratio 0.096, pitch_range 7.1786, vibrato 6.0774, swing 0.0 (constant, warned), lag_ms 51.6277, hits_per_bar 3.4622, backbeat 0.0687, changes_per_bar 0.6444, mode_polarity 0.3084). `_compute_pair_score` and `score_lib.features`: listed terms `exp(-|a - b| / std)`, `tau = 1.0`; `s_restraint = exp(-(|dz_lr| + |dz_cf|) / 2)`; `s_harm = 0.4 cpb_z + 0.4 loop_bars_eq + 0.2 riff_flag_eq`, override deleted; `s_mode` = z-scored polarity similarity, and `0.7 + f (sim_pol - 0.7)` when either mode is undefined, **f = 0.5** (first rung of the a0d9b43 ladder). `tuning_depth` and words per minute stay linear inside `s_vocal`. `test_axis_range` marker deleted.
+- Ladder history for the record: "0.7 when undefined" (T3.4 as written) left `s_mode` constant on the 6 undefined-mode TUNE seeds; the linear polarity shrunk by 0.3 (1842fde) gave 0.020 to 0.046 on them; z-scored polarity with f = 0.5 gives 0.110 to 0.244 on all nine.
+- `report.py --split tune` after: positives 81, pooled 19, hits@10 1, hits@20 1, MRR 0.0020, negatives in top10 0 (before: 0, 0, 0.0009; 10-28 baseline 0, 0, 0.0011). `pytest -q tests/test_axis_range.py`: 1 passed.
+- Per-axis pool std per TUNE seed (clap anchor tempo pulse groove dark grit vocal intimacy restraint meaning language harm mode):
+
+  | seed | std over pool |
+  |---|---|
+  | Simple Man | 0.18 0.21 0.16 0.22 0.22 0.24 0.22 0.12 0.25 0.17 0.19 0.11 0.13 0.20 |
+  | Waiting Around to Die | 0.16 0.19 0.17 0.20 0.22 0.25 0.24 0.09 0.23 0.18 0.17 0.10 0.11 0.13 |
+  | Bang Data | 0.11 0.22 0.17 0.22 0.09 0.23 0.20 0.11 0.22 0.15 0.28 0.16 0.15 0.12 |
+  | Boyfriend | 0.11 0.14 0.15 0.20 0.22 0.20 0.21 0.09 0.21 0.14 0.18 0.16 0.13 0.12 |
+  | Hurt | 0.16 0.19 0.17 0.19 0.21 0.23 0.22 0.10 0.22 0.18 0.27 0.11 0.13 0.15 |
+  | Tum Hi Ho | 0.15 0.20 0.17 0.21 0.21 0.23 0.22 0.11 0.21 0.21 0.26 0.14 0.11 0.24 |
+  | Mask Off | 0.14 0.20 0.16 0.21 0.23 0.23 0.23 0.10 0.24 0.16 0.18 0.14 0.14 0.11 |
+  | Get Lucky | 0.13 0.18 0.16 0.23 0.20 0.25 0.24 0.10 0.22 0.20 0.25 0.14 0.15 0.12 |
+  | Tomboy | 0.13 0.21 0.14 0.18 0.22 0.21 0.22 0.10 0.22 0.17 0.27 0.04 0.13 0.21 |
+
+- Deploy 2026-10-30: `deploy_hf.py` (uploads and restart), `deploy.yml` https://github.com/shreyash616/echo/actions/runs/41032275332 success. The Space then went to RUNTIME_ERROR: startup could not download `track_metadata.json` ("Response from .../resolve/main/track_metadata.json is missing the 'X-Repo-Commit' header", six attempts). The same URL returned 302 with `X-Repo-Commit 14b3620a` from the box minutes later; one `restart_space` and it was RUNNING at 15:21:10 with `{"status":"ok","recommender_loaded":true}`.
+- `report.py --validate-live`: max axis deviation **0.0000**.
+- Leak found by Tests on `977c67c`: my new log line in `recommender.py` said "fall back", and "Fall" is a benchmark title; reworded. (The deployed copy still has the old string; it is only logged when the header lacks `feature_std`.)
+- `pytest -q tests/`: 2 failed before the reword (leakage; `test_no_constant_fields`), 20 passed, 1 skipped, 1 xfailed. `test_no_constant_fields` fails on the live Space: `languageAffinity` of the top recommendation is 1.0 for all 50 sampled seeds (39 en, 11 other). Over the top 10 of the same 50 seeds it is 1.0 on 419 of 500 and 0.525 to 0.9 on 81. Asked on the channel.
