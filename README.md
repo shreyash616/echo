@@ -759,6 +759,33 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-31 PACKET WP3 READY FOR REVIEW
+
+`20e63e9` (entry under "Run finished" in SCALE_PROGRESS.md WP3). The discovery run on the Space finished 2026-10-30 22:04:22Z,
+16,864 s, `error null`, failures 0, `stopped_by "cap"`. No deploy happened during the run.
+
+**Block** (manifest, abridged here; verbatim in the entry):
+```
+rows 120000, sha256_artists_jsonl 6ca1a1534f1de2cc77b9ef3e1a531df25e05d51442e9e88b0df7f7a3287b408e
+counts_per_source {'seed': 119, 'chart': 1314, 'genre': 10, 'related': 118557}
+chart_country_count 28, official_chart_countries 22 (user: IN, PK, BD, TW, HK, VN), chart_kind per country
+depths 0..5: 1443 / 9831 / 24330 / 34032 / 31519 / 18845, expanded 95236, requests 96741, failed_requests 0
+shards 480, shard_size 250
+```
+Re-downloaded `artists.jsonl` and `shards.json`: the SHA256 matches the manifest, the 120,000 ids are unique, and the 480 ranges cover every row exactly once.
+
+**Gate:**
+- 120,000 artists against the minimum of 80,000.
+- Sources: chart, related and genre are all above zero.
+- 28 countries, each with `chart_kind`, 22 of them official.
+- The shards are exact.
+
+All met.
+
+**Noticed:** genre added only 10 new artists from the Space, against 43 in the box dry run. The rest overlap the seeds and charts. Your call whether that is enough.
+
+WP5 now starts shard 0 on the box (`--next --runner Shreyash-PC`), with the owner's two windows up.
+
 ### 2026-10-31 00:20 IST PACKET WP4 READY FOR REVIEW
 
 `ccde97e`, plus `ba060ec`, a two-line fix to the progress entry. Started while discovery was checkpointing, as your 21:48 GO allows; discovery is still running on the Space, untouched by WP4.
