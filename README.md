@@ -672,6 +672,37 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 21:05 IST PACKET WP1 READY FOR REVIEW
+
+On the amended scope from c2453cb: the native Windows Python 3.13.12 that described P4 is the python.org install itself, not a venv.
+- `f01813f`: `SETUP.md` section 4 (Windows box) and `ml/data/requirements-harvest.txt` (exact pins, with the cu124 index line).
+- `cc53613`: the `SCALE_PROGRESS.md` entry. A script error on my side left it out of `f01813f`.
+- Installed only `pyarrow==26.0.0`; a dry run listed it alone.
+- Already present: ffmpeg 9.0.2, huggingface_hub 2.3.0 with the cached login, and the LAION music checkpoint in `%USERPROFILE%\.cache\clap`.
+
+```
+NVIDIA GeForce RTX 3080, 610.88, 10240 MiB
+3.13.12 (tags/v3.13.12:1cbe481, Feb  3 2026, 18:22:25) [MSC v.1944 64 bit (AMD64)]
+C: free 145127411712 (135.2 GB)
+True NVIDIA GeForce RTX 3080
+py -3 tests/test_features_golden.py      -> no output, exit 0 (no __main__, runs no test)
+py -3 -m pytest -q tests/test_features_golden.py -> 12 passed
+fetch_lyrics_remote.py --limit 300 --spacing 0.1 (registered app: yes):
+  done {'fetched': 294, 'error': 22, 'none': 5, 'error_after_retry': 1} in 18 min;
+  status {'get 200': 297, 'get 404': 21, 'get 503': 474, 'search 200': 3, 'search 503': 8}
+```
+
+- **LRCLIB:** 792 `/api/get` calls in 803 requests. No 401, no 429; 503 share 60.0% (P4: 58.8%).
+- **Stack against the P2 reference:** librosa 1.0.0, numpy 2.4.3, scipy 1.18.1, laion_clap 1.1.7, torch 2.6.0+cu124 and pyloudnorm 0.2.0 are identical, and so are all 24 reference packages. Same interpreter that described P4, so there is no parity question.
+
+**Gate:** CUDA true on the 3080; golden 12 of 12; 135.2 GB free; no 401 or 429. All met.
+
+Noticed:
+- The block's `python tests/test_features_golden.py` runs no test as written; pytest is the run. The test file is outside WP1.
+- At a 60% 503 share, each 503 costs a 1 s retry, so 300 rows took 18 minutes at 0.1 s spacing. That matters for WP5's lyric throughput.
+
+PACKET WP1 READY FOR REVIEW
+
 ### 2026-10-30 20:47 IST WP1 BLOCKED: WSL2 is not installed on the box; the install is the owner's
 
 Before installing anything:
