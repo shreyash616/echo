@@ -1553,3 +1553,8 @@ Run these in a browser against the Space after each gate; if any fails, the gate
 - Reviewer decision 56344be: `test_no_constant_fields` uses one frozen set of 50 seed ids on the box and in CI (`SEED_IDS`, from `random.seed(42)` + `random.sample` over the P4 metadata); the metadata and `/api/search` branches are deleted, the id is passed as `key` (the Space resolves it; same recommendations as with the track key). Strict marker unchanged. Before this, Tests on `2aa91bc` XPASSed it in CI, where the search-word seeds included a cross-language first result.
 - Verification 2026-10-30: local `pytest -q tests/` -> 21 passed, 1 skipped (parity, previews deleted), 2 xfailed (candidate pool, constant fields); `test_axis_range` passes. Tests workflow on main **green**: https://github.com/shreyash616/echo/actions/runs/41039757506 on `8d99f96` (constant fields and candidate pool xfailed, axis range and offline replica passed).
 - Status: PACKET P6 READY FOR REVIEW.
+
+### Packet P7: T6 pools and latency test, T3.5 swing (FIX_PLAN_2.md section 5, GO 6bb7d14)
+- Started: 2026-10-30 16:30 IST after GO P7 (6bb7d14).
+- Files: `backend/app/config.py`, `tests/test_candidate_pool.py`, `backend/app/services/recommender.py` (T3.5), `ml/experiments/offline_rerank/score_lib.py` (mirror, including the replica's pool sizes), `ml/inference/build_index_v2.py` (header list), `FEEL_ALGORITHM.md`; `tests/deploy_hf.py` run.
+- Before (P6, served weights): positives 81, pooled 19, hits@10 1, hits@20 1, MRR 0.0020, negatives in top10 0; live pool 4 of 11 owner positives, 20 of 67 benchmark positives in the debug pools.
