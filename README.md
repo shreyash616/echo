@@ -470,6 +470,30 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 14:25 P6 still BLOCKED: the shrunk `s_mode` spreads, but 0.3 x the polarity spread is under 0.05 on 6 seeds
+
+Done exactly as 1842fde says, both files: `sim_pol = clip(1 - 0.5 |pol_seed - pol_cand|, 0, 1)` on the row's raw `mode_polarity`; both defined `s_mode = sim_pol`; either undefined `s_mode = 0.7 + 0.3 (sim_pol - 0.7)`. Working tree only; nothing committed or deployed.
+
+`report.py --split tune`: positives 81, pooled 19, hits@10 1, hits@20 1, MRR 0.0020, negatives in top10 0 (unchanged from 14:10; `s_mode` carries 0.0145). `pytest -q tests/test_axis_range.py`: **fails**, `{'s_mode': 6}`; every other axis passes as in 14:10.
+
+| seed | seed mode | s_mode std | min / max | share of pool undefined | `sim_pol` std (= s_mode std / 0.3) | shrink factor that reaches 0.05 |
+|---|---|---|---|---|---|---|
+| Simple Man | defined | 0.1004 | 0.595 / 1.000 | 0.51 | - | - |
+| Waiting Around to Die | undefined | 0.0290 | 0.633 / 0.790 | 0.50 | 0.097 | 0.52 |
+| Bang Data | undefined | 0.0223 | 0.687 / 0.790 | 0.59 | 0.074 | 0.67 |
+| Boyfriend | undefined | 0.0227 | 0.666 / 0.790 | 0.63 | 0.076 | 0.66 |
+| Hurt | undefined | 0.0456 | 0.579 / 0.790 | 0.39 | 0.152 | 0.33 |
+| Tum Hi Ho | defined | 0.1717 | 0.259 / 1.000 | 0.34 | - | - |
+| Mask Off | undefined | 0.0203 | 0.672 / 0.790 | 0.70 | 0.068 | 0.74 |
+| Get Lucky | undefined | 0.0205 | 0.694 / 0.790 | 0.68 | 0.068 | 0.73 |
+| Tomboy | defined | 0.1169 | 0.467 / 1.000 | 0.32 | - | - |
+
+For an undefined seed every candidate goes through the shrink, so the axis std is exactly 0.3 x the `sim_pol` std over the pool. That is 0.07 to 0.15 here, because undefined-mode tracks have polarities near zero (std 0.201 against 0.389 on defined rows). The arithmetic, not a proposal: a factor of 0.67 leaves 2 failing seeds (Mask Off, Get Lucky), which rule 18 allows; 0.74 or more passes all nine; 1.0 is "no shrink". I have not changed the factor, the rule or the test.
+
+Your call on the factor (or another form). After it: commit, deploy, `--validate-live`, Tests, READY.
+
+BLOCKED
+
 ### 2026-10-30 14:10 P6 BLOCKED: `s_mode` is flat by construction on the 6 TUNE seeds whose mode is undefined
 
 Implemented as the GO says, in the working tree only (nothing committed beyond the start log `e611e8e`, nothing deployed):
