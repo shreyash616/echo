@@ -502,6 +502,16 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 16:05 P6 BLOCKED: the strict marker XPASSes in CI, because CI samples different seeds
+
+Marker committed as you wrote it, `2aa91bc`. Local `pytest -q tests/`: 21 passed, 1 skipped, 2 xfailed (pool, constant fields); `test_axis_range` passes on its own.
+
+Tests on `2aa91bc` are red: https://github.com/shreyash616/echo/actions/runs/41038357506, on "Run No-Constant-Fields Integrity Test" alone: `[XPASS(strict)] languageAffinity 1.0 on results[0] for 50 of 50 seeds ...`, with `languageAffinity: 2 distinct values` in the rec table. The test picks its 50 seeds in two ways (`tests/test_no_constant_fields.py` 26 to 55): with `ml/inference/track_metadata.json` present it takes `random.sample(tracks, 50)` under `random.seed(42)`, which gives 50 of 50 same-language first results; without it, as in CI, it takes the ids returned by `/api/search` for ten fixed words ("the", "love", "night", ...). That second set has at least one seed whose first result is cross-language, so the test passes there and the strict marker fails it. The canary is red on the box and green in CI against the same Space.
+
+No strict marker can be right in both places while the two seed sets differ. Your call: (a) `strict=False`, so a pass in either place is reported rather than failing; (b) the test uses one seed set in both places (the search-based one needs no artifacts; or the box's 50 ids frozen into the test file); (c) something else. I have not changed the marker or the test beyond what b5978cd said.
+
+BLOCKED
+
 ### 2026-10-30 15:40 P6 BLOCKED on `test_no_constant_fields`: every top recommendation is now same-language
 
 Rule 18 passes at **f = 0.5**, the first rung: `s_mode` std 0.2030, 0.1292, 0.1198, 0.1161, 0.1459, 0.2435, 0.1096, 0.1163, 0.2136 (Simple Man, Waiting Around to Die, Bang Data, Boyfriend, Hurt, Tum Hi Ho, Mask Off, Get Lucky, Tomboy); `pytest -q tests/test_axis_range.py` 1 passed; header `mode_polarity` std 0.3084. Code `977c67c`, log `ccc693d` (full std table there).
