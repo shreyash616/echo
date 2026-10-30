@@ -318,10 +318,10 @@ COLUMNAR_FILES = ("header.json", "features.npz", "strings.parquet", "keys.npy", 
 
 class Catalogue:
     def __init__(self):
-        if all(os.path.exists(f"{HF}/{f}") for f in COLUMNAR_FILES):
-            self._load_columnar()
-        else:
-            self._load_json()
+        missing = [f for f in COLUMNAR_FILES if not os.path.exists(f"{HF}/{f}")]
+        if missing:  # no fallback to the JSON files, as the Space (WP2)
+            raise FileNotFoundError(f"columnar catalogue incomplete in {HF}: missing {missing}")
+        self._load_columnar()
         self.weights_live = json.load(open(f"{HF}/rerank_weights.json"))
         self.feature_std = self.header.get("feature_std") or {}
         self.k_clap = 300  # as config.candidates_clap
@@ -345,24 +345,6 @@ class Catalogue:
         self.feel_index = faiss.IndexFlatL2(self.feel_matrix.shape[1])
         self.feel_index.add(self.feel_matrix)
 
-    def _load_json(self):
-        raw = json.load(open(f"{HF}/track_metadata.json"))
-        self.header = raw["header"]
-        self.meta = raw["tracks"]
-        self.index = faiss.read_index(f"{HF}/music_index.faiss")
-        self.clap = self.index.reconstruct_n(0, self.index.ntotal)
-        self.feel_matrix = np.load(f"{HF}/feel_matrix.npy")
-        self.feel_index = faiss.read_index(f"{HF}/feel_index.faiss")
-        self.id_map = {}
-        for i, r in enumerate(self.meta):
-            if r.get("id"):
-                self.id_map[str(r["id"])] = i
-            self.id_map[r.get("key") or make_track_key(r.get("artist", ""), r.get("title", ""))] = i
-            if r.get("deezer_id"):
-                self.id_map[str(r["deezer_id"])] = i
-            if r.get("itunes_id"):
-                self.id_map[str(r["itunes_id"])] = i
-                self.id_map[f"it_{r['itunes_id']}"] = i
     def pool(self, seed_key, k_clap=None, k_feel=None):
         k_clap = k_clap or self.k_clap
         k_feel = k_feel or self.k_feel

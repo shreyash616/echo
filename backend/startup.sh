@@ -45,6 +45,15 @@ download_file "anchors.json"
 download_file "rerank_weights.json"
 download_file "language_affinity.json"
 
+# Columnar catalogue (SCALE_PLAN section 6, WP2); the loader reads only these. The JSON downloads above
+# stay until WP7 removes them; feel_matrix.npy is already synced.
+download_file "clap.f16.npy"
+download_file "features.npz"
+download_file "strings.parquet"
+download_file "keys.npy"
+download_file "key_order.npy"
+download_file "header.json"
+
 # Optional artifacts
 python -c "
 import os

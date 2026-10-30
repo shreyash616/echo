@@ -1,12 +1,13 @@
 """
 tests/test_columnar_loader.py: the columnar catalogue (SCALE_PLAN section 6, WP2) against the JSON files it replaces.
-Asserts, when ml/inference holds both sets (skips otherwise):
+Asserts (the first five when ml/inference holds both sets, skipped otherwise):
 - every assembled row has the JSON row's fields in the JSON row's order and the same Python types;
 - text, int and bool values are equal; every float equals the JSON value rounded to float32;
 - every key of track_id_map.json looks up the same row, and an absent key looks up nothing;
 - clap.f16.npy is the unit-norm CLAP rows to float16 precision (max abs error at most 5e-4);
 - feel_matrix.npy is the matrix feel_index.faiss holds;
-- the recommender loads the columnar set and returns the same row by key and by id.
+- the recommender loads the columnar set and returns the same row by key and by id;
+- with a file missing or unreadable the recommender stays unloaded and logs the file (no JSON fallback).
 """
 from __future__ import annotations
 
@@ -24,8 +25,8 @@ D = Path(os.environ.get("ECHO_ARTIFACT_DIR", "ml/inference"))
 COLUMNAR = ("header.json", "features.npz", "strings.parquet", "keys.npy", "key_order.npy", "clap.f16.npy", "feel_matrix.npy")
 JSONSET = ("track_metadata.json", "track_id_map.json", "music_index.faiss", "feel_index.faiss")
 
-pytestmark = pytest.mark.skipif(not all((D / f).exists() for f in COLUMNAR + JSONSET),
-                                reason="columnar and JSON artifacts not both present")
+needs_artifacts = pytest.mark.skipif(not all((D / f).exists() for f in COLUMNAR + JSONSET),
+                                     reason="columnar and JSON artifacts not both present")
 
 
 @pytest.fixture(scope="module")
@@ -46,6 +47,7 @@ def _same(a, b) -> bool:
     return type(a) is type(b) and a == b
 
 
+@needs_artifacts
 def test_rows_equal_json(both):
     header, rows, js = both
     assert len(rows) == len(js) == header["rows"]
@@ -59,6 +61,7 @@ def test_rows_equal_json(both):
     assert not bad, f"{len(bad)} mismatches, first {bad[:5]}"
 
 
+@needs_artifacts
 def test_lookup_equals_track_id_map(both):
     from app.services.recommender import KeyLookup
     _, rows, _ = both
@@ -70,6 +73,7 @@ def test_lookup_equals_track_id_map(both):
     assert lk.get("nobody at all:no such title") is None and "it_0" not in lk
 
 
+@needs_artifacts
 def test_clap_f16_and_feel_matrix():
     import faiss
     index = faiss.read_index(str(D / "music_index.faiss"))
@@ -83,6 +87,7 @@ def test_clap_f16_and_feel_matrix():
     assert np.array_equal(np.load(D / "feel_matrix.npy"), fi.reconstruct_n(0, fi.ntotal))
 
 
+@needs_artifacts
 def test_recommender_loads_columnar(both):
     from app.services.recommender import ColumnarRows, recommender
     _, rows, js = both
@@ -95,3 +100,23 @@ def test_recommender_loads_columnar(both):
         assert by_id == rows[recommender._track_id_map[r["id"]]]
         assert by_key == rows[recommender._track_id_map[r["key"]]]
     assert recommender._index.ntotal == len(js) and recommender._feel_index.ntotal == len(js)
+
+
+# The no-fallback branch (reviewer 3b44f87): runs without artifacts, in a scratch directory
+@pytest.mark.parametrize("case", ["missing", "unreadable"])
+def test_incomplete_set_leaves_recommender_unloaded(case, tmp_path, monkeypatch, caplog):
+    from app.services.recommender import COLUMNAR_FILES as FILES, MusicRecommender
+    d = tmp_path / "ml" / "inference"
+    d.mkdir(parents=True)
+    for f in FILES:
+        if case == "missing" and f == "strings.parquet":
+            continue
+        (d / f).write_bytes(b"not an artifact")
+    monkeypatch.chdir(tmp_path)
+    rec = MusicRecommender()
+    with caplog.at_level("ERROR", logger="recommender"):
+        rec.load()
+    assert rec._loaded is False
+    named = "strings.parquet" if case == "missing" else "header.json"
+    assert any(named in r.getMessage() and "not loaded" in r.getMessage() for r in caplog.records), \
+        [r.getMessage() for r in caplog.records]

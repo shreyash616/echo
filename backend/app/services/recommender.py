@@ -358,77 +358,18 @@ class MusicRecommender:
             except Exception as exc:
                 logger.warning("Error loading weights from %s: %s", weights_path, exc)
 
-        # 2 to 4b. The columnar set (SCALE_PLAN section 6, build_index_v3.py) when all its files are
-        # present; otherwise the JSON metadata, id map and FAISS files
+        # 2 to 4b. The columnar catalogue (SCALE_PLAN section 6, build_index_v3.py). No fallback to the
+        # JSON files: a missing or unreadable file leaves the recommender unloaded, and /api/health says so
         col_dir = _resolve("ml/inference/header.json").parent
-        if all((col_dir / f).exists() for f in COLUMNAR_FILES):
+        missing = [f for f in COLUMNAR_FILES if not (col_dir / f).exists()]
+        if missing:
+            logger.error("Columnar catalogue incomplete in %s, missing %s: recommender not loaded", col_dir, missing)
+            return
+        try:
             self._load_columnar(col_dir)
-        else:
-            # 2. Track metadata
-            meta_path = _resolve(settings.track_metadata_path)
-            if meta_path.exists():
-                with open(meta_path, "r", encoding="utf-8") as f:
-                    raw_meta = json.load(f)
-                if isinstance(raw_meta, dict) and "tracks" in raw_meta:
-                    self._metadata = raw_meta["tracks"]
-                    self._metadata_header = raw_meta.get("header", {k: v for k, v in raw_meta.items() if k != "tracks"})
-                    self._cut_points = self._metadata_header.get("cut_points")
-                    self._feature_std = dict(self._metadata_header.get("feature_std") or {})
-                    if not self._feature_std:
-                        logger.error("track_metadata.json header has no feature_std; T2 similarities use std 1.0 on every axis")
-                elif isinstance(raw_meta, list):
-                    self._metadata = raw_meta
-                logger.info("Loaded %d track records from %s", len(self._metadata), meta_path)
-
-            # 3. Track id map (maps id, key, deezer_id, itunes_id -> row index)
-            id_map_path = _resolve("ml/inference/track_id_map.json")
-            if id_map_path.exists():
-                with open(id_map_path, "r", encoding="utf-8") as f:
-                    self._track_id_map = json.load(f)
-            else:
-                self._track_id_map = {}
-
-            # Ensure all key representations (key, deezer_id, itunes_id) are indexed
-            for i, rec in enumerate(self._metadata):
-                if rec.get("id"):
-                    self._track_id_map[str(rec["id"])] = i
-                k = rec.get("key") or make_track_key(str(rec.get("artist", "")), str(rec.get("title", "")))
-                self._track_id_map[k] = i
-                if rec.get("deezer_id"):
-                    self._track_id_map[str(rec["deezer_id"])] = i
-                if rec.get("itunes_id"):
-                    self._track_id_map[str(rec["itunes_id"])] = i
-                    self._track_id_map[f"it_{rec['itunes_id']}"] = i
-
-            # 4. FAISS index
-            index_path = _resolve(settings.faiss_index_path)
-            if index_path.exists():
-                try:
-                    self._index = faiss.read_index(str(index_path))
-                    self._dim = self._index.d
-                    logger.info("Loaded FAISS index from %s with %d entries, dim=%d", index_path, self._index.ntotal, self._dim)
-                    if self._index.ntotal > 0:
-                        self._clap_matrix = self._index.reconstruct_n(0, self._index.ntotal)
-                        logger.info("Extracted CLAP matrix from FAISS index: shape %s", self._clap_matrix.shape)
-                except Exception as exc:
-                    logger.warning("Could not read FAISS index from %s: %s", index_path, exc)
-
-            # 4b. Feel Matrix and Feel Index (S1)
-            feel_mat_path = _resolve("ml/inference/feel_matrix.npy")
-            if feel_mat_path.exists():
-                try:
-                    self._feel_matrix = np.load(str(feel_mat_path))
-                    logger.info("Loaded feel matrix from %s: shape %s", feel_mat_path, self._feel_matrix.shape)
-                except Exception as exc:
-                    logger.warning("Could not load feel matrix: %s", exc)
-
-            feel_idx_path = _resolve("ml/inference/feel_index.faiss")
-            if feel_idx_path.exists():
-                try:
-                    self._feel_index = faiss.read_index(str(feel_idx_path))
-                    logger.info("Loaded FAISS feel index from %s with %d entries", feel_idx_path, self._feel_index.ntotal)
-                except Exception as exc:
-                    logger.warning("Could not load feel index: %s", exc)
+        except Exception as exc:
+            logger.error("Columnar catalogue in %s unreadable, %s: recommender not loaded", col_dir, exc)
+            return
 
         # Header feel metadata
         if self._metadata_header:
@@ -567,20 +508,35 @@ class MusicRecommender:
         self._loaded = True
 
     def _load_columnar(self, directory: Path) -> None:
-        """Rows, id lookup, CLAP index and feel matrix from build_index_v3's files."""
-        header = json.loads((directory / "header.json").read_text(encoding="utf-8"))
-        self._metadata = ColumnarRows(directory, header)
+        """Rows, id lookup, CLAP index and feel matrix from build_index_v3's files; an unreadable file
+        raises RuntimeError naming it."""
+        def read(name: str, fn):
+            try:
+                return fn()
+            except Exception as exc:
+                raise RuntimeError(f"{name}: {type(exc).__name__}: {exc}") from exc
+
+        header = read("header.json", lambda: json.loads((directory / "header.json").read_text(encoding="utf-8")))
+        rows = read("features.npz / strings.parquet", lambda: ColumnarRows(directory, header))
+        hashes = read("keys.npy", lambda: np.load(directory / "keys.npy"))
+        order = read("key_order.npy", lambda: np.load(directory / "key_order.npy"))
+        clap = read("clap.f16.npy", lambda: np.load(directory / "clap.f16.npy").astype(np.float32))
+        feel = read("feel_matrix.npy", lambda: np.load(directory / "feel_matrix.npy"))
+        if not len(rows) == clap.shape[0] == feel.shape[0] == int(header["rows"]) or len(hashes) != len(order):
+            raise RuntimeError(f"sizes disagree: rows {len(rows)}, clap {clap.shape[0]}, feel {feel.shape[0]}, "
+                               f"header {header['rows']}, keys {len(hashes)}, key_order {len(order)}")
+        self._metadata = rows
         self._metadata_header = header
         self._cut_points = header.get("cut_points")
         self._feature_std = dict(header.get("feature_std") or {})
         if not self._feature_std:
             logger.error("header.json has no feature_std; T2 similarities use std 1.0 on every axis")
-        self._track_id_map = KeyLookup(np.load(directory / "keys.npy"), np.load(directory / "key_order.npy"), self._metadata)
-        self._clap_matrix = np.load(directory / "clap.f16.npy").astype(np.float32)
-        self._dim = self._clap_matrix.shape[1]
+        self._track_id_map = KeyLookup(hashes, order, rows)
+        self._clap_matrix = clap
+        self._dim = clap.shape[1]
         self._index = faiss.IndexFlatIP(self._dim)
-        self._index.add(self._clap_matrix)
-        self._feel_matrix = np.load(directory / "feel_matrix.npy")
+        self._index.add(clap)
+        self._feel_matrix = feel
         self._feel_index = faiss.IndexFlatL2(self._feel_matrix.shape[1])
         self._feel_index.add(self._feel_matrix)
         logger.info("Loaded the columnar catalogue from %s: %d rows, CLAP %s from float16, feel %s, %d lookup keys",
