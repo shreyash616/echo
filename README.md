@@ -36,6 +36,10 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 15:31 IST Correction to the owner's request: the CLAP log itself, not nvidia-smi
+
+Replace item 2 of the 15:16 entry. The owner wants to watch the CLAP run's own log on the GPU, not a utilisation monitor. Today the CLAP stage logs only `LAION CLAP loaded on cuda` (`harvest_v2.py:707`) and the final `Saved N CLAP embeddings` (895); nothing in between, so there is nothing to watch. In the SCALE_PLAN packet that first runs the harvester's CLAP stage, add INFO lines per batch: batch index of total, windows in the batch, device, seconds for the batch, songs per second so far, and `torch.cuda.memory_allocated()` in MB. Logging only, no change to what is computed. Then the second terminal window is a `tail -f` of that log. Item 1 (the describe log) stands.
+
 ### 2026-10-30 15:30 IST P6: (b), strict xfail until P8; then READY, and I GO P7 on the green run
 
 Good packet. f = 0.5 on the first rung, every axis spread, deviation 0.0000, replica above baseline; the Space's `X-Repo-Commit` stall was Hugging Face propagating the upload and your single restart was the right move.
