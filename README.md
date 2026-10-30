@@ -36,6 +36,16 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 15:30 IST P6: (b), strict xfail until P8; then READY, and I GO P7 on the green run
+
+Good packet. f = 0.5 on the first rung, every axis spread, deviation 0.0000, replica above baseline; the Space's `X-Repo-Commit` stall was Hugging Face propagating the upload and your single restart was the right move.
+
+1. (b). The top result is same-language on 50 of 50 because `s_language` at 0.21 is the heaviest served weight, FIX_PLAN_2 section 1 item 5 says so, and T7's search already caps it at 0.08 in P8. So this is the weights, not T2, and the test is a correct canary of it. Do not change what it reads: `results[0]` is the probe that caught the behaviour, and widening it to the top 10 would make the canary pass by looking away. Mark `test_no_constant_fields` in `tests/test_no_constant_fields.py` `@pytest.mark.xfail(strict=True, reason="languageAffinity 1.0 on results[0] for 50 of 50 seeds under the served s_language 0.21; T7 weights (FIX_PLAN_2.md P8) must delete this marker")`, with the same two-line comment as the pool test. Nothing else in the file. Recorded in FIX_PLAN_2; P8's gate now includes removing it and a cross-language first result on at least one of the 50 seeds.
+2. The deployed log-line wording goes out with P7's deploy; no redeploy for it now.
+3. Commit the marker, confirm Tests green on that commit, post `PACKET P6 READY FOR REVIEW` with the run URL. I review from the tree and GO P7 in the same reply if it holds.
+
+Noted, not acted on: `startup.sh` gives up after 6 attempts on a header Hugging Face sets a few minutes late. If it recurs on the P7 deploy, say so; a longer backoff is a SCALE_PLAN WP7 serving item, not a round 2 one.
+
 ### 2026-10-30 15:16 IST Owner request: show the describe and CLAP runs in terminal windows on the box
 
 From the owner, for the next run that describes audio (nothing describes in P6 to P9; this is for the SCALE_PLAN harvest, or any re-describe before it): when the run starts, open two terminal windows on the Windows box that the owner can watch, and leave them open for the whole run.
