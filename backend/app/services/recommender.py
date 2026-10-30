@@ -9,6 +9,7 @@ Core functions:
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import os
@@ -131,6 +132,16 @@ def _norm_artist(s: str) -> str:
 
 def make_track_key(artist: str, title: str) -> str:
     return f"{_norm_artist(artist)}:{_norm_text(title)}"
+
+
+@functools.lru_cache(maxsize=None)
+def _bench_norm(s: str) -> str:
+    """tests/feel_benchmark.py normalize_title, copied once because the backend cannot import tests/:
+    the seed filter drops a candidate that feel_benchmark.match_track would call the seed (P8)."""
+    t = re.sub(r"\(.*?\)", "", s)
+    t = re.sub(r"\[.*?\]", "", t)
+    t = re.sub(r"[^\w\s]", "", t).strip().lower()
+    return re.sub(r"\s+", " ", t)
 
 
 def extract_raw_feel(r: dict) -> list[float]:
@@ -1077,8 +1088,11 @@ class MusicRecommender:
                 cand["pool_source"] = "clap"
                 candidates_raw.append(cand)
 
-        # Filter out seed id and matching artist:title
+        # Filter out the seed: by id, by artist:title key, and by match_track's title-and-artist
+        # containment, which catches a copy of the seed under another id and key (a side record)
         filter_key = seed_key or make_track_key(seed_record.get("artist", ""), seed_record.get("title", ""))
+        seed_title = _bench_norm(str(seed_record.get("title", "")))
+        seed_artist = _bench_norm(str(seed_record.get("artist", "")))
         filtered_candidates: list[dict] = []
         for cand in candidates_raw:
             cand_id = str(cand.get("id", ""))
@@ -1086,6 +1100,10 @@ class MusicRecommender:
                 continue
             cand_key = cand.get("key") or make_track_key(cand.get("artist", ""), cand.get("title", ""))
             if cand_key == filter_key:
+                continue
+            c_title = _bench_norm(str(cand.get("title", "")))
+            c_artist = _bench_norm(str(cand.get("artist", "")))
+            if (seed_title in c_title or c_title in seed_title) and (seed_artist in c_artist or c_artist in seed_artist):
                 continue
             filtered_candidates.append(cand)
 

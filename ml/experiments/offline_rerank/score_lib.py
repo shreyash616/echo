@@ -4,11 +4,12 @@ Reads the served artifacts from ECHO_ARTIFACT_DIR (default ml/inference) and mus
 live debug=1 axes exactly; report.py --validate-live checks that. Any change to the scoring in
 recommender.py must be mirrored here, and the validation re-run, before a weight search.
 """
-import json, os, re
+import json, os, re, sys
 import numpy as np
 import faiss
 
 HF = os.environ.get("ECHO_ARTIFACT_DIR", "ml/inference")
+sys.path.insert(0, os.path.abspath("tests"))  # feel_benchmark.match_track, used by Catalogue.pool
 AXES = ["s_clap", "s_anchor", "s_tempo", "s_pulse", "s_groove", "s_dark", "s_grit", "s_vocal",
         "s_intimacy", "s_restraint", "s_meaning", "s_language", "s_harm", "s_mode"]
 AUDIO_KEYS = AXES[:10]
@@ -345,13 +346,15 @@ class Catalogue:
         _, If = self.feel_index.search(self.feel_matrix[si:si + 1].astype(np.float32), min(k_feel, self.feel_index.ntotal))
         feel_idx = {int(i) for i in If[0] if i >= 0}
         out = []
-        seed_id = str(self.meta[si].get("id", ""))
+        from feel_benchmark import match_track  # the Space's seed filter is this rule (P8, copied there once)
+        seed_row = self.meta[si]
+        seed_id = str(seed_row.get("id", ""))
         for idx in clap_idx | feel_idx:
             r = self.meta[idx]
             if seed_id and str(r.get("id", "")) == seed_id:  # the Space drops the seed's id too (duplicate rows)
                 continue
             key = r.get("key") or make_track_key(r.get("artist", ""), r.get("title", ""))
-            if key == seed_key:
+            if key == seed_key or match_track(r, seed_row):
                 continue
             src = "both" if (idx in clap_idx and idx in feel_idx) else ("clap" if idx in clap_idx else "feel")
             out.append((idx, src))
