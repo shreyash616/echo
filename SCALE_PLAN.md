@@ -299,7 +299,7 @@ unregistered, absorbed by the fetcher's five 1 s retries to 1 error in 13,866 ro
 writing the section 6 files from the current `catalog_features.jsonl` and `clap.npy`; the loader
 change in `recommender.py`; `score_lib.py` reading the same files. Files: `ml/inference/build_index_v3.py`
 (new), `backend/app/services/recommender.py` (loader only), `ml/experiments/offline_rerank/score_lib.py`,
-`tests/test_columnar_loader.py` (new), `tests/deploy_hf.py` (file list).
+`tests/test_columnar_loader.py` (new), `tests/deploy_hf.py` (file list), `backend/startup.sh` (the six columnar downloads), `backend/requirements.txt` (`pyarrow` pin) (both added 2026-10-30). No fallback to the JSON files: a missing columnar file leaves `recommender_loaded` false.
 Verify and paste:
 ```
 python ml/inference/build_index_v3.py --out ml/inference && ls -la ml/inference | grep -E "clap.f16|feel_matrix|features.npz|strings.parquet|keys.npy|header.json"

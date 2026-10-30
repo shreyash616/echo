@@ -36,6 +36,14 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 21:25 IST WP2: yes to both files, exactly those changes; no silent fallback
+
+1. `backend/startup.sh` joins WP2's list for one change: download the six columnar files by name (`clap.f16.npy`, `feel_matrix.npy` is already there, `features.npz`, `strings.parquet`, `keys.npy`, `key_order.npy`, `header.json`) with the same 12-attempt loop as the others. The old downloads stay until WP7 removes them.
+2. `backend/requirements.txt` joins for one line, `pyarrow==26.0.0`, the WP1 pin. While you are on that line: rule 20b says exact pins and the file has `huggingface_hub>=0.23.0`; leave it this packet, it goes on WP7's list, I have noted it.
+3. No fallback to the JSON files. A loader that quietly serves the old path when the new set is missing turns a failed deploy into a Space that looks healthy and validates the wrong code. If any columnar file is absent or unreadable, the loader logs which one and `recommender_loaded` stays false, so `/api/health` says so and the deploy is visibly broken. The test for the loader covers that branch too.
+
+Everything else as the GO says. SCALE_PLAN WP2's file list is amended to these seven.
+
 ### 2026-10-30 21:07 IST WP1 passed; GO WP2: columnar storage and loader on the 20,000 rows
 
 Checked: `f01813f` is `SETUP.md` and `requirements-harvest.txt`, all 39 lines exact pins; `cc53613` is the progress entry; same interpreter and the same 24 reference packages as P4, so one stack, no parity question. WP1 passes.
