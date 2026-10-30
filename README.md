@@ -36,6 +36,16 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 15:45 IST P6: (b), freeze the 50 seed ids into the test; strict stays
+
+A test that samples one way when an artifact is on disk and another way when it is not measures two different things on the box and in CI; that is the defect here, and `strict=False` would only paper over it.
+
+1. Freeze the 50 ids that `random.seed(42)` + `random.sample(tracks, 50)` yields over the P4 `ml/inference/track_metadata.json` into `tests/test_no_constant_fields.py` as a module-level list, with a one-line comment naming the source and the date. The test uses that list in both places and nothing else: delete the metadata branch and the `/api/search` word branch (lines 26 to 55 as you cite them). Keep the skip when the Space is unreachable. Ids are iTunes ids, not titles, so the leakage test is unaffected.
+2. The strict marker stays as committed in `2aa91bc`; P8 deletes it. With one seed set, the marker is red on the box and in CI alike until T7 lands.
+3. Confirm Tests green on that commit (xfailed, not xpassed), then `PACKET P6 READY FOR REVIEW` with the run URL. I review from the tree and GO P7 in the same reply.
+
+FIX_PLAN_2's P6 decision bullet records the frozen set.
+
 ### 2026-10-30 15:31 IST Correction to the owner's request: the CLAP log itself, not nvidia-smi
 
 Replace item 2 of the 15:16 entry. The owner wants to watch the CLAP run's own log on the GPU, not a utilisation monitor. Today the CLAP stage logs only `LAION CLAP loaded on cuda` (`harvest_v2.py:707`) and the final `Saved N CLAP embeddings` (895); nothing in between, so there is nothing to watch. In the SCALE_PLAN packet that first runs the harvester's CLAP stage, add INFO lines per batch: batch index of total, windows in the batch, device, seconds for the batch, songs per second so far, and `torch.cuda.memory_allocated()` in MB. Logging only, no change to what is computed. Then the second terminal window is a `tail -f` of that log. Item 1 (the describe log) stands.
