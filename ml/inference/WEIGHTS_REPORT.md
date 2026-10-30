@@ -1,60 +1,59 @@
-# Weights Report (S7)
+# Weights report (T7, P8)
 
-- Date: 2026-10-28
-- Total evaluations logged: 387 (Requirement: >= 200)
-- Restarts in simplex: 10
-- Step size: 0.02
+- Search: `ml/training/search_weights.py` on the replica (`score_lib`), pools 300 / 3000; 2300 TUNE evaluations, then HOLDOUT once; wall time 2.5 min. Log: `ml/training/weight_search_log.jsonl`.
+- Every evaluation ranks the post-MMR top 20 the Space returns (diversity 0.70, artist cap 2, cross-language budget; the seed and copies of it dropped) and counts a hit by `feel_benchmark.match_track`.
+- Objective: 0.5 x hits@20 + 0.3 x MRR + 0.2 x hits@10, each as a share of all TUNE positives (a positive not returned is a miss), minus 0.5 per negative in the top 10.
+- Constraints: no axis above 0.25, s_clap + s_anchor <= 0.25, s_language <= 0.08, s_mode <= 0.05, weights sum to 1. 20 restarts (the served weights projected, then Dirichlet draws), coordinate ascent at steps [0.04, 0.02, 0.01]; feel-pool weights by coordinate ascent at steps [0.2, 0.1] in [0.1, 3.0], swing left out.
 
-## Best Rerank Weights
+## TUNE, replica
 
-```json
-{
-  "s_clap": 0.0673,
-  "s_anchor": 0.1829,
-  "s_tempo": 0.08,
-  "s_pulse": 0.0555,
-  "s_groove": 0.0103,
-  "s_dark": 0.0103,
-  "s_grit": 0.0036,
-  "s_vocal": 0.1221,
-  "s_intimacy": 0.0559,
-  "s_restraint": 0.0748,
-  "s_meaning": 0.0013,
-  "s_language": 0.2129,
-  "s_harm": 0.1085,
-  "s_mode": 0.0145
-}
-```
+| state | result |
+|---|---|
+| before, old definition (pre-MMR raw-score rank, exact key; P7 report) | hits@10 1, hits@20 1, MRR 0.0020 |
+| before, aligned definition (served weights, this search's evaluation) | pooled 36 of 81, hits@10 2, hits@20 3, MRR 0.0144, negatives 0, objective 0.02777 |
+| after (chosen weights) | pooled 35 of 81, hits@10 3, hits@20 5, MRR 0.0172, negatives 0, objective 0.04342 |
 
-## Performance Summary
+## HOLDOUT, evaluated once with the chosen weights (5 seeds in the catalogue)
 
-| Split | Metric | Baseline (Pre-Search) | Optimized (Post-Search) |
-|---|---|---|---|
-| TUNE | Objective | 0.0096 | 0.0318 |
-| TUNE | Recall@20 | 0.0123 | 0.0370 |
-| TUNE | Recall@10 | 0.0000 | 0.0123 |
-| TUNE | MRR | 0.0074 | 0.0320 |
-| TUNE | Negatives@10 | 0 | 0 |
-| HOLDOUT (eval once) | Objective | — | 0.0937 |
-| HOLDOUT (eval once) | Recall@20 | — | 0.1429 |
-| HOLDOUT (eval once) | Recall@10 | — | 0.0000 |
-| HOLDOUT (eval once) | MRR | — | 0.0265 |
+pooled 4 of 14, hits@10 1, hits@20 1, MRR 0.0143, negatives 0, objective 0.05429
 
-## Ablation Table (Objective with Each Axis Zeroed)
+## Rerank weights
 
-| Axis | Best Weight | Objective without Axis | Recall@20 without Axis | Delta Objective |
-|---|---|---|---|---|
-| `s_clap` | 0.0673 | 0.0234 | 0.0247 | -0.0084 |
-| `s_anchor` | 0.1829 | 0.0407 | 0.0123 | +0.0089 |
-| `s_tempo` | 0.0800 | 0.0314 | 0.0370 | -0.0004 |
-| `s_pulse` | 0.0555 | 0.0200 | 0.0247 | -0.0119 |
-| `s_groove` | 0.0103 | 0.0228 | 0.0247 | -0.0091 |
-| `s_dark` | 0.0103 | 0.0318 | 0.0370 | +0.0000 |
-| `s_grit` | 0.0036 | 0.0318 | 0.0370 | +0.0000 |
-| `s_vocal` | 0.1221 | 0.0107 | 0.0123 | -0.0211 |
-| `s_intimacy` | 0.0559 | 0.0220 | 0.0247 | -0.0099 |
-| `s_restraint` | 0.0748 | 0.0141 | 0.0123 | -0.0178 |
-| `s_meaning` | 0.0013 | 0.0318 | 0.0370 | +0.0000 |
-| `s_language` | 0.2129 | 0.0157 | 0.0123 | -0.0161 |
-| `s_harm` | 0.1085 | 0.0000 | 0.0000 | -0.0318 |
-| `s_mode` | 0.0145 | 0.0318 | 0.0370 | +0.0000 |
+| axis | served | chosen |
+|---|---|---|
+| `s_clap` | 0.0673 | 0.2305 |
+| `s_anchor` | 0.1829 | 0.0180 |
+| `s_tempo` | 0.0800 | 0.1442 |
+| `s_pulse` | 0.0555 | 0.0308 |
+| `s_groove` | 0.0103 | 0.0065 |
+| `s_dark` | 0.0103 | 0.0209 |
+| `s_grit` | 0.0036 | 0.1104 |
+| `s_vocal` | 0.1221 | 0.2169 |
+| `s_intimacy` | 0.0559 | 0.0504 |
+| `s_restraint` | 0.0748 | 0.0635 |
+| `s_meaning` | 0.0013 | 0.0197 |
+| `s_language` | 0.2129 | 0.0016 |
+| `s_harm` | 0.1085 | 0.0743 |
+| `s_mode` | 0.0145 | 0.0123 |
+
+## Feel-pool weights
+
+| axis | served | chosen |
+|---|---|---|
+| `log2_felt_bpm` | 1.50 | 1.70 |
+| `pulse_rate` | 0.80 | 0.80 |
+| `hits_per_bar` | 0.80 | 0.80 |
+| `darkness` | 1.00 | 0.80 |
+| `brightness` | 0.60 | 0.60 |
+| `low_share` | 0.50 | 0.50 |
+| `grit` | 0.80 | 0.80 |
+| `roughness` | 0.80 | 0.80 |
+| `intimacy` | 0.80 | 0.80 |
+| `reverb_tail` | 0.50 | 0.50 |
+| `loudness_range` | 0.60 | 0.60 |
+| `crest_factor` | 0.40 | 0.40 |
+| `lag_ms` | 0.50 | 0.50 |
+| `swing` | 0.40 | 0.40 |
+| `syllable_rate` | 0.60 | 0.60 |
+| `sustain_ratio` | 0.60 | 0.60 |
+| `mode_polarity` | 0.50 | 0.70 |

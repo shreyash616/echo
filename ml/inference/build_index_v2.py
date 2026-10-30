@@ -120,8 +120,33 @@ def extract_raw_feel(r: dict) -> list[float]:
     ]
 
 
+def resolve_feel_weights(argv: list[str]) -> dict[str, float]:
+    """The feel-pool weights (T6/T7, one source, the header): `--feel-weights-from <log>` takes the
+    "chosen" record of ml/training/weight_search_log.jsonl; otherwise the existing header's
+    feel_weights, so a rebuild keeps what the search wrote; FEEL_WEIGHTS only for a first build."""
+    if "--feel-weights-from" in argv:
+        log_path = Path(argv[argv.index("--feel-weights-from") + 1])
+        chosen = [json.loads(l) for l in log_path.read_text(encoding="utf-8").splitlines() if '"chosen"' in l]
+        chosen = [r for r in chosen if r.get("eval_type") == "chosen"]
+        if not chosen:
+            raise RuntimeError(f"no chosen record in {log_path}")
+        w = chosen[-1]["feel_weights"]
+        logger.info("Feel weights from the chosen record of %s", log_path)
+    elif OUT_METADATA_PATH.exists():
+        w = json.loads(OUT_METADATA_PATH.read_text(encoding="utf-8")).get("header", {}).get("feel_weights") or FEEL_WEIGHTS
+        logger.info("Feel weights from the existing header of %s", OUT_METADATA_PATH)
+    else:
+        w = FEEL_WEIGHTS
+    missing = [a for a in FEEL_AXES if a not in w]
+    if missing:
+        raise RuntimeError(f"feel weights missing axes {missing}")
+    return {a: float(w[a]) for a in FEEL_AXES}
+
+
 def main():
     logger.info("=== Starting Step R4: Index Build & Quantile Bucketing ===")
+    feel_weights = resolve_feel_weights(sys.argv[1:])
+    logger.info("Feel weights: %s", feel_weights)
 
     # 1. Load catalog features (download from HF dataset if absent)
     if not CATALOG_FEATURES_PATH.exists():
@@ -336,7 +361,7 @@ def main():
     feel_means = np.mean(raw_feel_mat, axis=0)
     feel_stds = np.std(raw_feel_mat, axis=0)
     feel_stds[feel_stds == 0] = 1.0
-    feel_weights_vec = np.array([FEEL_WEIGHTS[a] for a in FEEL_AXES], dtype=np.float32)
+    feel_weights_vec = np.array([feel_weights[a] for a in FEEL_AXES], dtype=np.float32)
 
     feel_mat = ((raw_feel_mat - feel_means) / feel_stds) * feel_weights_vec
     feel_mat = feel_mat.astype(np.float32)
@@ -370,7 +395,7 @@ def main():
         "feel_axes": FEEL_AXES,
         "feel_mean": {FEEL_AXES[i]: float(feel_means[i]) for i in range(len(FEEL_AXES))},
         "feel_std": {FEEL_AXES[i]: float(feel_stds[i]) for i in range(len(FEEL_AXES))},
-        "feel_weights": FEEL_WEIGHTS,
+        "feel_weights": feel_weights,
         "feature_std": feature_std,
     }
 
