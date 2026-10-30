@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
+import importlib.util
 import logging
+import os
 import re
+import threading
 import time
 import unicodedata
+from pathlib import Path
 import numpy as np
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from fastapi import APIRouter, UploadFile, File, Header, HTTPException, Query
 
 from app.config import settings
 from app.models.schemas import IdentifyResponse, SearchResponse, TrackResult
@@ -345,6 +350,90 @@ async def get_client_config() -> dict:
 @router.get("/health")
 async def health() -> dict:
     return {"status": "ok", "recommender_loaded": recommender._loaded}
+
+
+# ---- Admin: artist discovery as a background task (SCALE_PLAN WP3) ----------------------------------
+# Both routes exist only when the Space secret ECHO_ADMIN_TOKEN is set (404 otherwise) and require it in
+# X-Admin-Token, compared in constant time. Status reports progress and whether HF_TOKEN is present and
+# its role, never a value.
+_DISCOVERY: dict = {"thread": None, "progress": {}, "error": None, "started_at": None, "finished_at": None}
+_DISCOVERY_LOCK = threading.Lock()
+
+
+def _admin_guard(token: str | None) -> None:
+    secret = os.environ.get("ECHO_ADMIN_TOKEN")
+    if not secret:
+        raise HTTPException(status_code=404, detail="Not Found")
+    if not token or not hmac.compare_digest(token.encode("utf-8"), secret.encode("utf-8")):
+        raise HTTPException(status_code=403, detail="forbidden")
+
+
+def _discovery_script() -> Path:
+    here = Path(__file__).resolve()
+    for base in (here.parents[2], here.parents[3]):  # /app on the Space, the repository root locally
+        p = base / "ml" / "data" / "discover_artists.py"
+        if p.exists():
+            return p
+    raise HTTPException(status_code=500, detail="ml/data/discover_artists.py not found")
+
+
+def _hf_token_status() -> dict:
+    token = os.environ.get("HF_TOKEN")
+    if not token:
+        return {"hf_token_present": False, "hf_token_role": None}
+    try:
+        from huggingface_hub import HfApi
+        role = (HfApi(token=token).whoami().get("auth", {}).get("accessToken", {}) or {}).get("role")
+    except Exception as exc:
+        role = f"unknown (whoami failed: {type(exc).__name__})"
+    return {"hf_token_present": True, "hf_token_role": role}
+
+
+@router.post("/admin/discovery/start")
+async def admin_discovery_start(x_admin_token: str | None = Header(None, alias="X-Admin-Token")) -> dict:
+    _admin_guard(x_admin_token)
+    if not os.environ.get("HF_TOKEN"):
+        raise HTTPException(status_code=412, detail="HF_TOKEN is not set; discovery could not checkpoint to the dataset")
+    with _DISCOVERY_LOCK:
+        t = _DISCOVERY["thread"]
+        if t is not None and t.is_alive():
+            raise HTTPException(status_code=409, detail="discovery is already running")
+        script = _discovery_script()
+        spec = importlib.util.spec_from_file_location("discover_artists", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        progress: dict = {}
+        disc = mod.Discovery(script.parent / "discovery", upload=True, progress=progress)
+
+        def run() -> None:
+            try:
+                disc.run()
+            except Exception as exc:  # the thread's last word, readable through status
+                logger.exception("discovery failed")
+                _DISCOVERY["error"] = f"{type(exc).__name__}: {str(exc)[:300]}"
+            finally:
+                _DISCOVERY["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+        _DISCOVERY.update({"progress": progress, "error": None, "finished_at": None,
+                           "started_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")})
+        _DISCOVERY["thread"] = threading.Thread(target=run, name="discovery", daemon=True)
+        _DISCOVERY["thread"].start()
+    logger.info("admin | discovery started")
+    return {"started": True, "started_at": _DISCOVERY["started_at"]}
+
+
+@router.get("/admin/discovery/status")
+async def admin_discovery_status(x_admin_token: str | None = Header(None, alias="X-Admin-Token")) -> dict:
+    _admin_guard(x_admin_token)
+    t = _DISCOVERY["thread"]
+    return {
+        "running": bool(t is not None and t.is_alive()),
+        "started_at": _DISCOVERY["started_at"],
+        "finished_at": _DISCOVERY["finished_at"],
+        "error": _DISCOVERY["error"],
+        "progress": dict(_DISCOVERY["progress"]),
+        **(await asyncio.to_thread(_hf_token_status)),
+    }
 
 
 @router.post("/identify", response_model=IdentifyResponse)
