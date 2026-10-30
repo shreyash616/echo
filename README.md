@@ -599,6 +599,44 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 19:50 IST P8 BLOCKED: the search beats P7 and live agrees hit for hit, but the new feel-pool weights drop Stairway, so the pool test reads 7 of 11
+
+**Helper.** `3515d2d` puts the three identity checks in `_is_seed_copy`. `test_no_gates` passes untouched, and Tests run 41066582547 is green.
+
+**Search** (`9935a22`, `search_weights.py` rewritten on `score_lib`; detail in FEEL_ALGORITHM's P8 log).
+- 2,300 TUNE evaluations, wall 149 s. HOLDOUT is evaluated once, at log line 2301, the only holdout line.
+- Objective: shares of the 81 positives, minus 0.5 per negative in the top 10.
+- Constraints as T7: 20 restarts (the served weights projected, then Dirichlet draws inside the constraints) with coordinate ascent; then the feel-pool weights; then the rerank weights again.
+
+| TUNE, replica | pooled | hits@10 | hits@20 | MRR | negatives | objective |
+|---|---|---|---|---|---|---|
+| before, old definition | 36 | 1 | 1 | 0.0020 | 0 | |
+| before, aligned (served weights) | 36 | 2 | 3 | 0.0144 | 0 | 0.02777 |
+| chosen | **35** | **3** | **5** | **0.0172** | 0 | 0.04342 |
+| HOLDOUT, once (5 seeds, 14 positives) | 4 | 1 | 1 | 0.0143 | 0 | |
+
+- **Chosen rerank weights:** s_clap 0.230, s_anchor 0.018, s_tempo 0.144, s_pulse 0.031, s_groove 0.006, s_dark 0.021, s_grit 0.110, s_vocal 0.217, s_intimacy 0.050, s_restraint 0.064, s_meaning 0.020, s_language 0.002, s_harm 0.074, s_mode 0.012. s_language fell from 0.213.
+- **Chosen feel-pool weights:** `log2_felt_bpm` 1.5 to 1.7, `darkness` 1.0 to 0.8, `mode_polarity` 0.5 to 0.7. Written to the header through `build_index_v2.py --feel-weights-from`; the rebuilt replica reproduces 35, 3 / 5 / 0.0172.
+
+**Live** (artifacts and code deployed, run 41068583212, Space `855b37d6`):
+- `--validate-live` 0.0000.
+- `align_p8.py` with the side record recreated: 20 of 20, same order, on all nine.
+- `feel_benchmark.py --split tune`: hits@10 **3**, hits@20 **5**, the replica's exactly; negatives 0; mean per-seed MRR 0.1545.
+- Cross-language first results among the 50 frozen seeds: **1 before, 9 after**.
+
+**The blocker.** `pytest -q tests/`: 22 passed, 1 skipped, 1 failed.
+- `test_candidate_pool`: owner **7 of 11**. Stairway to Heaven left Simple Man's pool under the new feel weights; all positives 34 / 67. p95 0.177 s.
+- The feel block's whole gain is MRR 0.0170 to 0.0172 (objective 0.04336 to 0.04342): same hits, one owner positive fewer.
+- The best point at the served feel weights is log evaluation 1748: the chosen rerank weights, 3 / 5 / 0.0170, pooled 36, the pool P7 measured at 8 of 11 live.
+
+Your call:
+- **(a)** Ship the chosen rerank weights with the served feel-pool weights (evaluation 1748). `build_index_v2.py` restores the header, deploy, re-measure.
+  - HOLDOUT was read with the feel change. Evaluating it again for (a) would be a second look, so say whether to report it or carry the once-read 1 / 1 with the note.
+- **(b)** Rerun the search with the pool gate as a constraint on the feel block (owner positives pooled at least 8 of 11, TUNE pooled at least 35). HOLDOUT again once at the end of that run.
+- **(c)** Something else you name.
+
+The Space serves the chosen point now. BLOCKED
+
 ### 2026-10-30 19:25 IST P8 item 1: 20 of 20 on all nine; Tests red on test_no_gates, which reads the seed filter as an artist gate
 
 **Done as 19:01 said** (`9d1451d`):
