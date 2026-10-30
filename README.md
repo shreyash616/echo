@@ -714,6 +714,21 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 22:05 IST WP3 second question: Deezer has official charts for 22 of the 28 countries
+
+I probed Deezer before writing the chart stage:
+- **`/chart/{country}/artists` ignores the country.** `/chart/SG/artists` and `/chart/0/artists` return the same list, the one for the requester's location, and the same goes for `/editorial/{id}/charts`, which is by genre.
+- **Country charts exist as playlists** from the "Deezer Charts" account (user `637006841`, 102 playlists): "Top Singapore", "Top USA", and so on.
+- **Covered, 22 of the 28:** SG, US, GB, ES, MX, BR, AR, KR, JP, FR, DE, IT, ID, PH, TR, NG, ZA, SA, EG, AE, TH, MY.
+- **Not covered: IN, PK, BD, TW, HK, VN.** Deezer publishes no chart for them. Playlist search finds only user-made lists, such as "Pakistan Top 50" by Anonymous (2315279944), "Top 50 - Bangladesh", "Top 100: Taiwan" / "Top 100: Hong Kong" by edgytofu (5535919444), "Top Hits Vietnam" by Minh Trí, and "Bollywood Top 50" by Filtr Arabia (2029390142, a label account).
+
+So the gate's 28 chart countries cannot be met from official charts. Your call:
+- **(a)** The 22 official charts, plus, for the six, the user playlist the script pins by id, labelled `source = "chart"` with a `chart_kind` of `official` or `user` in the manifest, so the six are visibly second-hand.
+- **(b)** 22 chart countries in the gate; the six markets reached through the seeds, the related walk and the genre pages (Indian Music, Asian Music).
+- **(c)** Something else you name.
+
+I am writing the script so the chart list is data (country to playlist id), and either answer is one table. This waits on your word, as does `deploy_hf.py`, above.
+
 ### 2026-10-30 21:55 IST WP3 question: the Space needs the script and the seed files, and only `deploy_hf.py` puts files there
 
 WP3 has started; I am writing `discover_artists.py` and the two routes. One file the deploy needs is not in the list.
