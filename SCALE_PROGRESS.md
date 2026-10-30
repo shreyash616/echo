@@ -108,3 +108,83 @@ against the 30 GB gate. Owner steps, then the packet resumes:
    `HF_TOKEN` in `~/.bashrc`), typed by the owner.
 
 PACKET WP1 BLOCKED
+
+### Resumed under the amended scope (README c2453cb): native Windows, no WSL2
+
+- Amended 2026-10-30 20:50 IST: the native Windows Python 3.13.12 that described P4 is the harvest stack (FIX_PLAN_2
+  rule 20b); SCALE_PLAN sections 2, 3 and WP1 drop WSL2. The interpreter is the python.org install itself,
+  `C:\Users\Shreyash Padhi\AppData\Local\Programs\Python\Python313\python.exe`, not a venv.
+- Files: `SETUP.md` (section 4, Windows box), `ml/data/requirements-harvest.txt` (new), `SCALE_PROGRESS.md`.
+- Installed: `pyarrow==26.0.0` only (`pip install --dry-run pyarrow` listed it alone; nothing else moved).
+  Already present: ffmpeg 9.0.2 (gyan.dev full build), huggingface_hub 2.3.0 with the cached login, the LAION
+  checkpoint `%USERPROFILE%\.cache\clap\music_audioset_epoch_15_esc_90.14.pt` (2,352,471,003 bytes).
+
+### Verification block, verbatim
+
+```
+PS> nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
+name, driver_version, memory.total [MiB]
+NVIDIA GeForce RTX 3080, 610.88, 10240 MiB
+
+PS> py -3 -c "import sys; print(sys.version)"
+3.13.12 (tags/v3.13.12:1cbe481, Feb  3 2026, 18:22:25) [MSC v.1944 64 bit (AMD64)]
+
+PS> (Get-PSDrive C).Free
+145127411712   (135.2 GB)
+
+PS> py -3 -c "import torch, laion_clap, librosa, lingua, pyarrow; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+True NVIDIA GeForce RTX 3080
+
+PS> py -3 tests/test_features_golden.py
+(no output, exit 0: the file defines pytest tests and has no __main__ block, so run directly it executes none)
+
+PS> py -3 -m pytest -q tests/test_features_golden.py
+12 passed, 3 warnings in 25.92s
+
+PS> py -3 ml/data/fetch_lyrics_remote.py --tracks ml/inference/track_metadata.json --out <scratch>/wp1_lrclib --limit 300 --spacing 0.1
+20:42:07 300 rows to fetch (19699 skipped), spacing 0.10 s
+20:42:07 registered app: yes
+20:58:28 status after 300 rows: {'get 200': 278, 'get 404': 15, 'get 503': 435, 'search 200': 1, 'search 503': 2}
+20:58:28 retrying 21 errors once
+21:00:10 done {'fetched': 294, 'error': 22, 'none': 5, 'error_after_retry': 1} in 18 min; status {'get 200': 297, 'get 404': 21, 'get 503': 474, 'search 200': 3, 'search 503': 8}
+```
+
+(The `error on <id>` lines, one per row whose five 503 retries ran out, are left out above; there were 22.)
+
+LRCLIB: 803 requests, 792 of them `/api/get`: 200 x 297, 404 x 21, 503 x 474; `/api/search`: 200 x 3, 503 x 8.
+**No 401, no 429.** 503 share 60.0% of all requests (59.8% of `/api/get`), against 58.8% measured in P4; the
+fetcher's retries left 1 row in error out of 300. The credentials were read from `backend/.env` by the fetcher;
+no value was printed.
+
+### Stack identity against the P2 reference (rule 20b)
+
+| package | P2 reference (FEEL_ALGORITHM P2 log) | `pip freeze` now |
+|---|---|---|
+| librosa | 1.0.0 | 1.0.0 |
+| numpy | 2.4.3 | 2.4.3 |
+| scipy | 1.18.1 | 1.18.1 |
+| laion_clap | 1.1.7 | 1.1.7 |
+| torch | 2.6.0+cu124 | 2.6.0+cu124 |
+| pyloudnorm | 0.2.0 | 0.2.0 |
+
+All 24 packages of the P2 reference line are identical (faiss-cpu, lingua-language-detector, llvmlite, numba,
+sentence-transformers, soundfile, torchaudio, torchvision, transformers and laion_clap's runtime deps
+included). Same interpreter, same stack as P4's describe, so the golden parity question does not arise.
+
+### Gate
+
+- CUDA true on the RTX 3080: yes.
+- Golden tests pass on this machine: 12 of 12 under pytest.
+- At least 30 GB free: 135.2 GB.
+- No 401 and no 429 in the LRCLIB calls: none; 503 share reported (60.0%).
+
+### Noticed
+
+- `python tests/test_features_golden.py`, as the block writes it, runs no test (no `__main__`); the pytest
+  line above is the run. Changing the test file is outside WP1.
+- 300 rows took 18 minutes at 0.1 s spacing: the 503s each cost a 1 s retry sleep, so the spacing is not
+  the rate limit at a 60% 503 share. That bears on WP5's lyric throughput estimate.
+- The packet's code went out in `f01813f` without this entry (a script error on my side); this entry is the
+  follow-up commit.
+
+PACKET WP1 READY FOR REVIEW
