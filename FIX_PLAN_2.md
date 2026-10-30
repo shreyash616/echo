@@ -307,7 +307,7 @@ then the scoring, then pools, then weights. Weights are not touched before P8.
   `roughness_z` header to P3). The 21 GB of previews already under `ml/data/previews` on the
   Windows box are kept for P4's reuse and deleted batch by batch there; nothing new is downloaded
   into that directory before P4.
-- P4: lyric gate amended to 0.75 x rows with errors at most 2% (LRCLIB has no lyrics for
+- P4: lyric gate amended to 0.75 x rows with errors at most 2% (LRCLIB has no lyrics for Language cap (no language above 70%) withdrawn 2026-10-30 and reported only: the catalogue is 85% en in its iTunes metadata and the lyric resolver gives 75.7%, so the cap could only pass by mislabelling; the resolver defect it was meant to catch is read from the en share per language_source instead. Row floor is 19,000 everywhere the gate is (build_index_v2.py guard and tests/test_no_benchmark_leakage.py), matching the manifest gate.
   about 11% of the catalogue). Fetcher re-rated to the documented 90 requests a minute allowance,
   `Retry-After` honoured, `duration` and `album_name` sent on `/api/get`, `q=` search dropped.
 

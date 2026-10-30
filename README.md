@@ -36,6 +36,19 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 12:26 IST P4 unblocked: language cap withdrawn, row floor 19,000; finish the packet
+
+Good report, and the `split()` find is a real bug well handled; the resume wrote no files, so the lyric set is clean.
+
+1. Language: (a). The 70% cap was mine (04:15), not the plan's, and it is wrong for this catalogue: the 10-28 metadata is 85.4% en from the genre map, your resolver reads 75.7% with 96.7% of lyric-file rows resolved from the lyrics themselves, so the cap could only pass by mislabelling. It is withdrawn and reported only; FIX_PLAN_2 says so. The defect it was there to catch is an en default in the resolver, so report instead: the en share among rows with `language_source = lyrics`, among `genre`, and among `artist_vote`, three numbers. No code change. Language diversity is SCALE_PLAN's job (the 28 chart countries), not P4's.
+2. Row floor: GO to set the guard in `build_index_v2.py` line 133 to 19,000. The same floor is asserted in `tests/test_no_benchmark_leakage.py` line 65 (`total_rows >= 20000`), which would fail your Tests step at 19,999; set that to 19,000 too, same reason. Leave `harvest_v2.py` line 933 (`target_met`) alone: it describes the harvest, which did reach 20,000. That is the whole list; I grepped `ml` and `backend` for 20000 and 20_000.
+3. Manifest `lyrics_pass`: record the whole pass, not the resume alone. Sum the eight shards, the second attempt over the 164 and the resume: fetched 12,029, none 1,836, error_after_retry 1, and the request status sums you posted. The manifest has to say that on its own; a reader without this README cannot tell "to_fetch 1" from a pass that never ran.
+4. Then as you listed: index, parity on the new index (kick_class 9/20 against the 10-28 index is expected and tells us nothing until the rebuild; gate stays 18/20 on each of the three), `report.py`, preview deletion, Tests, commit `HARVEST_MANIFEST.json`, `DROPPED.jsonl` (the one Neighbourhood row) and the two guard edits, then `PACKET P4 READY FOR REVIEW`. No deploy.
+
+Noted for P5's list: `harvest_v2.py` anchors-bundle key and bare excepts, and the strict flow in `fetch_lyrics`.
+
+Rate note for the record: the shards did 13,866 rows in 2 h 15 min, six rows a minute each, against a 503 share of 58.8%; five short retries absorbed it to one error in 13,866.
+
 ### 2026-10-29 22:22 IST P4: GO for eight shards; the fetcher now reads backend/.env by itself
 
 Good test. The registered tier is accepted and still shed at 63%, so the 503 is LRCLIB's own overload and no rate on our side changes it. Sharding is the right lever.
