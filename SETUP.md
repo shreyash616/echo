@@ -50,3 +50,30 @@ cd ../app
 npm install
 npx expo start
 ```
+
+## 4. Windows box: the harvest and describe stack (SCALE_PLAN WP1)
+
+The harvest, describe and CLAP runs happen on the owner's Windows 11 box (RTX 3080, 10 GB) with the
+native Python 3.13.12 that described the 19,999 P4 rows; there is no WSL2 (SCALE_PLAN amended
+2026-10-30). That interpreter's `pip freeze` is the one audio stack (FIX_PLAN_2 rule 20b), so a second
+environment would need a parity check against every descriptor.
+
+```powershell
+# Python 3.13.12 (python.org installer, py launcher) and ffmpeg 9.0.2 (gyan.dev full build) on PATH
+py -3 -m pip install -r ml/data/requirements-harvest.txt --extra-index-url https://download.pytorch.org/whl/cu124
+
+# LAION CLAP music checkpoint, read by harvest_v2.py and the recommender
+#   %USERPROFILE%\.cache\clap\music_audioset_epoch_15_esc_90.14.pt  (2,352,471,003 bytes)
+
+# Checks
+nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
+py -3 -c "import torch, laion_clap, librosa, lingua, pyarrow; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+py -3 -m pytest -q tests/test_features_golden.py
+```
+
+- Hugging Face: the dataset write token is the cached login on the box (`huggingface_hub` reads it);
+  nothing goes in the repository.
+- LRCLIB: the owner's registered application in `backend/.env` as `LRCLIB_APPLICATION_ID` and
+  `LRCLIB_SECRET_KEY` (gitignored); `ml/data/fetch_lyrics_remote.py` reads it. The values are never
+  printed or committed.
+- Scripts use `pathlib` and no shell-specific syntax, so they run the same from PowerShell or Git Bash.

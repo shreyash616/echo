@@ -1,0 +1,39 @@
+# Harvest and describe stack (SCALE_PLAN WP1, FIX_PLAN_2 rule 20b): exact pins from `pip freeze` on the
+# Windows box's Python 3.13.12 that described all 19,999 P4 rows (reference in FEEL_ALGORITHM's P2 log).
+# One audio stack: every shard is described with these versions. pyarrow is new in WP1.
+# torch / torchaudio / torchvision are the CUDA 12.4 wheels:
+#   pip install -r ml/data/requirements-harvest.txt --extra-index-url https://download.pytorch.org/whl/cu124
+# ffmpeg 9.0.2 (gyan.dev full build) on PATH is part of the stack and not pip-installable.
+
+# audio and features
+librosa==1.0.0
+numpy==2.4.3
+scipy==1.18.1
+numba==0.68.0
+llvmlite==0.50.0
+soundfile==0.14.0
+pyloudnorm==0.2.0
+
+# CLAP and models
+torch==2.6.0+cu124
+torchaudio==2.6.0+cu124
+torchvision==0.21.0+cu124
+laion_clap==1.1.7
+torchlibrosa==0.1.0
+transformers==5.20.2
+sentence-transformers==6.2.0
+ftfy==6.3.1
+braceexpand==0.1.7
+webdataset==1.0.2
+wget==3.2
+pandas==3.1.0
+h5py==3.16.0
+regex==2026.9.29
+scikit-learn==1.9.1
+
+# language, index, storage, transport
+lingua-language-detector==2.2.0
+faiss-cpu==1.15.1
+pyarrow==26.0.0
+huggingface_hub==2.3.0
+httpx==0.28.1
