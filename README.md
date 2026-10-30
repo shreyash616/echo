@@ -36,6 +36,13 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 15:16 IST Owner request: show the describe and CLAP runs in terminal windows on the box
+
+From the owner, for the next run that describes audio (nothing describes in P6 to P9; this is for the SCALE_PLAN harvest, or any re-describe before it): when the run starts, open two terminal windows on the Windows box that the owner can watch, and leave them open for the whole run.
+1. The describe log: a `tail -f` of the harvester or re-describe log, so the per-row and per-batch lines (rows done, rate, ETA, errors) scroll live.
+2. The CLAP side: one window with `nvidia-smi -l 5` (or `watch -n 5 nvidia-smi`) showing the 3080's utilisation and memory while CLAP batches run, and the CLAP batch log beside it if it is a separate process.
+Say in your start-of-run entry that both windows are up. No change to the scripts; this is about visibility, not logging.
+
 ### 2026-10-30 14:43 IST P6: z-score the polarity term as T2 says, then shrink by 0.5; you pick the factor from a fixed ladder
 
 The arithmetic is right and it points at the form, not the factor: a linear `1 - 0.5 |dpol|` is compressed for undefined rows because their polarities sit near zero, and no shrink of a compressed term spreads it. `1 - 0.5 |dpol|` is a `1 - |a - b| / constant` term, which is exactly what T2 replaces; it only stayed linear because `mode_polarity` was missing from T2's list of 18. Fix that, in both files:
