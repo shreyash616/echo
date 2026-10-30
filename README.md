@@ -545,6 +545,38 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 16:50 P7 BLOCKED on latency: live p95 1.030 s at 300 / 1500; profile below
+
+The backoff worked: redeployed with `0dbcf85` (`deploy.yml` https://github.com/shreyash616/echo/actions/runs/41045004233), RUNNING at 16:32:39, health ok twice; runtime sha = Space repo sha `d4a3d6dc`; the Space's `startup.sh` has `range(12)` and its `config.py` 300 / 1500. (The one restart on the old code at 16:31 was overtaken by the redeploy.)
+
+- `--validate-live`: max axis deviation **0.0000**. Replica unchanged: pooled 30, hits@10 1, hits@20 1, MRR 0.0023.
+- Live `python tests/test_candidate_pool.py --base-url ...` (exit 1):
+
+  | seed (pool) | owner positives |
+  |---|---|
+  | Simple Man (1,743) | Levee in (feel); Stairway out; Rooster out |
+  | Waiting Around to Die (1,722) | Black in, No Surprises in, Me Gustas Tu in (feel) |
+  | Bang Data (1,700) | Tidal Wave out |
+  | Boyfriend (1,687) | Antidote in, For A Reason in (both); Baller out; Roll With Me in (feel) |
+
+  Owner positives **7 / 11** (required >= 8); all positives in the debug pools 29 / 67.
+- 20 `X-Process-Time` values (s): 0.694, 0.748, 1.003, 0.660, 0.662, 1.052, 0.772, 0.712, 0.709, 0.679, 0.836, 0.795, 0.788, 0.892, 1.028, 0.677, 0.677, 0.748, 0.744, 0.671. **p95 1.030 s**, min 0.660 s; the gate is 0.300 s.
+
+Profile, as you asked, of one in-catalogue call (Simple Man, the same `recommender.recommend` the route calls, then the route's `_to_track` x 20), in-process on the box with `cProfile`; nothing in the code times the blocks, so this is the profiler, not timestamps. The box runs the call in 0.345 to 0.364 s wall, about half the Space's 0.66 to 1.05 s, so read the shares, not the seconds:
+
+| block | profiled s | share | what dominates |
+|---|---|---|---|
+| FAISS search (CLAP 300 + feel 1500) | 0.001 | 0% | 2 calls |
+| pair-scoring loop | 0.279 | 42% | 1,743 `_compute_pair_score`, about 160 us each (dict gets, `z()` 22,659 times, `np.clip` 13,853, `norm` 10,276) |
+| MMR | about 0.37 | 56% | `recommender.py:957`, `max(float(np.dot(cand_clap, s_clap)) for s_clap in selected_claps)`: 361,627 generator steps and 333,838 `np.dot` on 512-d vectors (every remaining candidate against every selected one, for each of the 20 picks) |
+| response assembly | about 0.0003 | 0% | `_to_track` x 20 |
+
+Both big blocks scale with pool size: pair scoring linearly, MMR linearly per pick. So feel 3,000 would roughly double both on this code; at 300 / 1500 the Space is already 3.4x over the gate. I have tuned nothing and changed no pool. Tests on the P7 commits will be red on `test_candidate_pool` (p95 and 7 < 8), which has no marker now.
+
+Your call on what moves.
+
+BLOCKED
+
 ### 2026-10-30 16:25 P7 BLOCKED: the Space does not come up after the deploy (X-Repo-Commit stall, twice); diagnostic below
 
 **The Space is down.** Code `17e48bc` (pools 300 / 1500 mirrored in `score_lib`, T3.5, `test_candidate_pool` in seconds with 20 timed calls, owner assert `>= 8`, marker deleted); `deploy_hf.py` ran clean; `deploy.yml` https://github.com/shreyash616/echo/actions/runs/41043081080 success. Then:
