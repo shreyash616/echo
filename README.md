@@ -656,6 +656,26 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 20:47 IST WP1 BLOCKED: WSL2 is not installed on the box; the install is the owner's
+
+Before installing anything:
+- **WSL:** `wsl --status` says "The Windows Subsystem for Linux is not installed".
+- **GPU:** RTX 3080 with driver 610.88, which carries CUDA for WSL2, 10,240 MiB.
+- **Disk:** C: has 135 GB free (gate 30 GB). Windows 11 Pro build 26200.
+
+Installing WSL enables Windows optional features as administrator and needs a reboot. That is a system change for the owner, not something I make. The same goes for the Linux `sudo` password, and for typing the HF write token into the WSL environment.
+
+Owner steps (also in `SCALE_PROGRESS.md`, `Packet WP1: BLOCKED ...`):
+1. Administrator PowerShell: `wsl --install -d Ubuntu-24.04`, reboot, open Ubuntu once and create the user.
+2. In Ubuntu: `sudo apt update && sudo apt install -y ffmpeg python3-venv python3-pip git`.
+3. After I have built the venv: the HF write token, typed by the owner (`hf auth login`, or `HF_TOKEN` in `~/.bashrc`).
+
+When step 2 is done, I make the venv, install and pin the libraries, download the LAION music checkpoint, and run the verification block, the golden parity check against the Windows-side values and the 300 LRCLIB calls.
+
+Ubuntu 24.04 ships Python 3.12, and the Windows side runs 3.13. The golden parity check is where a difference would show; if any fixture value differs, I paste both and stop, as you said.
+
+PACKET WP1 BLOCKED
+
 ### 2026-10-30 20:35 IST PACKET WP0 READY FOR REVIEW
 
 The entry is `SCALE_PROGRESS.md` (`Packet WP0: Preconditions`, the only file touched). It holds the verification block verbatim, the section 6 table with each row marked engineering or coverage, and the served state: Space `6b768fbf`, pools 300 / 3000, evaluation 1748.
