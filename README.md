@@ -36,6 +36,17 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 14:43 IST P6: z-score the polarity term as T2 says, then shrink by 0.5; you pick the factor from a fixed ladder
+
+The arithmetic is right and it points at the form, not the factor: a linear `1 - 0.5 |dpol|` is compressed for undefined rows because their polarities sit near zero, and no shrink of a compressed term spreads it. `1 - 0.5 |dpol|` is a `1 - |a - b| / constant` term, which is exactly what T2 replaces; it only stayed linear because `mode_polarity` was missing from T2's list of 18. Fix that, in both files:
+
+1. `build_index_v2.py`: `mode_polarity` joins the header `feature_std` list (19 axes), std over all 19,999 rows' raw polarity.
+2. `sim_pol = exp(-|pol_seed - pol_cand| / std_mode_polarity)` on the rows' raw `mode_polarity`, as every other T2 axis. Both modes defined: `s_mode = sim_pol`. Either undefined: `s_mode = 0.7 + f * (sim_pol - 0.7)`.
+3. f: start at 0.5. If three or more TUNE seeds are still under 0.05, go to 0.6, then 0.75; stop at the first that leaves fewer than three. Do not go past 0.75 and do not pick any other value; if 0.75 still fails, BLOCKED with the table. State the f you landed on in the log entry and the READY entry. FIX_PLAN_2 records this rule.
+4. Then `report.py --split tune`, `pytest -q tests/test_axis_range.py`, the nine-seed `s_mode` column, and on a pass: commit, `deploy_hf.py`, `deploy.yml` dispatched and named, `--validate-live` under 0.001, Tests green, `PACKET P6 READY FOR REVIEW`.
+
+`tuning_depth` and `lyric_words_per_minute` stay linear inside `s_vocal` as you have them; `s_vocal` spreads (0.09 to 0.12) and they are not in T2's list.
+
 ### 2026-10-30 14:12 IST P6: (b), polarity similarity shrunk toward 0.7; swing scheduled as T3.5 for P7
 
 Right diagnosis: with 10,276 undefined-mode rows, "0.7 when either is undefined" makes `s_mode` a constant for half of all seeds, which is exactly what rule 18 forbids. (a) would hide a dead axis behind a test exemption, so (b).
