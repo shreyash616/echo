@@ -577,6 +577,43 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 19:20 IST P8 item 1 BLOCKED: 8 of 9 seeds share 20 of 20 in order; Get Lucky 11, from one side-index record that is the seed itself
+
+Item 1 code is `c5deee7`; no weight has been touched.
+- **MMR:** `score_lib.mmr_select` is the Space's vectorised MMR (diversity 0.70, artist cap 2, cross-language budget). `report.py` ranks the post-MMR top 20 and counts hits with `feel_benchmark.match_track`, imported. MRR stays over all 81 positives.
+- **Seed-id filter:** `Catalogue.pool` now also drops the seed's id, as the Space's filter does. The catalogue holds the Tum Hi Ho iTunes track twice: rows 49 and 4888, both `it_1073359419`, keyed `arijit singh:tum hi ho` and `mithoon:tum hi ho`. The replica kept row 4888, which made Tum Hi Ho 19 of 20 before the fix.
+
+**Alignment, served weights, 300 / 3000** (`align_p8.py`, live plain `/api/recommendations` against the replica's `top20`, by catalogue id):
+
+| seed | shared of 20 |
+|---|---|
+| Simple Man | 20, same order |
+| Waiting Around to Die | 20, same order |
+| Bang Data | 20, same order |
+| Boyfriend | 20, same order |
+| Hurt | 20, same order |
+| Tum Hi Ho | 20, same order |
+| Mask Off | 20, same order |
+| Get Lucky | **11** |
+| Tomboy | 20, same order |
+
+**Side index.** There is no endpoint for `ntotal`. But `recommend` adds `min(100, ntotal)` records to every pool, so I counted the `debug=1` `candidate_pool` ids that are not catalogue rows: **1** on every seed.
+- **The record:** Deezer `67238735`, Daft Punk "Get Lucky (feat. Pharrell Williams and Nile Rodgers)", key `daft punk:get lucky feat pharrell williams and nile rodgers`.
+- **Who creates it:** `tests/test_theme_sanity.py` searches "Get Lucky Daft Punk" and calls `/api/track` on the hit, which is a Deezer id. The Space describes it cold and writes it to the container's `ml/data/extra_records.jsonl` and the side index. So every Tests run after a restart puts it back.
+- **Why it matters:** neither the seed-id filter nor the key filter catches it, so the Space returns **Get Lucky as Get Lucky's first recommendation** (score 0.938). Its CLAP vector then pushes MMR away from the songs nearest the seed, and nine picks change.
+- **Can the replica hold it?** Not exactly. Its CLAP vector and descriptors come from a Deezer preview described on the Space and exist only in that container. A stand-in (the seed's catalogue CLAP row at the live score) brings Get Lucky to 15 of 20. On the other eight seeds it is in the pool but never reaches the top 20.
+
+**Aligned replica at the served weights** (the P8 "before"): positives 81, pooled 36, hits@10 **2**, hits@20 **3**, MRR **0.0144**, negatives 0; `--validate-live` 0.0000.
+- The jump from 1 / 1 / 0.0020 is the hit rule plus MMR.
+- Earth, Wind & Fire "September" counts at rank 1 for Get Lucky through its Eric Kupper Extended Vocal Mix row, by `match_track`'s containment.
+
+Your call:
+- **(a), my recommendation:** the Space drops a pool candidate that is the seed under `match_track`'s rule (same normalised artist, title containment) as well as by id and key. This fixes the self-recommendation users see, and the side record then stays out of Get Lucky's top 20 as it does for the other eight. It needs `backend/app/services/recommender.py` and the replica filter in `score_lib.py`, plus a deploy, so it adds a file to P8's list.
+- **(b)** Item 1's gate is read on the eight seeds and Get Lucky is reported with the cause, leaving the Space as is.
+- **(c)** Something else you name.
+
+BLOCKED
+
 ### 2026-10-30 18:45 IST PACKET P7 READY FOR REVIEW
 
 As decided in 2db6d17, `b3bb2a4` deletes the strict xfail marker and its two-line comment from `tests/test_no_constant_fields.py` and nothing else.
