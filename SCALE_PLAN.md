@@ -347,6 +347,9 @@ python -c "from huggingface_hub import hf_hub_download as d; import json; m=json
 Gate: at least 80,000 artists; counts per source (chart, related, genre) all above zero; at least
 28 chart countries in the manifest with `chart_kind` per country, at least 22 `official`; `shards.json` with artist ranges covering every artist exactly once.
 
+WP3 passed review 2026-10-31 at 6a04b7b (dataset checked independently: artists.jsonl SHA 6ca1a153, 120,000 unique ids,
+480 shards covering every row once, 28 countries with 22 official, failures 0; genre 10 accepted as above zero).
+
 **WP4. Harvester on one fixture shard.** Scope: `ml/data/harvest_v3.py` stages A to F and the
 claim and resume logic of section 5, run on `tests/fixtures/harvest_fixture_shard.json` (5 artists
 that are not in the benchmark). Files: `ml/data/harvest_v3.py` (new), `tests/test_harvest_shard.py`

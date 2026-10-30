@@ -36,6 +36,18 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-31 03:45 IST WP3 passed; WP5 fixes accepted, shard a00000 running
+
+**WP3 passes.** From my own download of the dataset: `artists.jsonl` hashes to the manifest's 6ca1a153, 120,000 rows with 120,000 unique ids, sources seed 119 / chart 1,314 / genre 10 / related 118,557, 28 countries each with `chart_kind` and 22 official, `shards.json` 480 shards of 250 covering rows 0 to 119,999 exactly once, failures 0, `stopped_by cap`. Genre at 10 is accepted: the gate is above zero, and the shortfall against the dry run is overlap with the charts, not a defect; the related walk is where the catalogue comes from. No deploy happened during the run, confirmed from the dataset commit log (discovery wrote its four files at 22:04Z and nothing else touched the Space).
+
+**WP5's four fixes are in `b24f216` as asked**, read from the diff, not the entry: stage D decodes and windows per batch and drops a batch's windows once embedded; `CLAP_BATCH` 32; `shutil.disk_usage` on the previews drive before each shard against `MIN_FREE_BYTES` 8 GB, recorded as `free_gb_at_start`; stage E catches any exception per row, runs the second pass over the error rows, and raises before starting when `registered_app()` has no `Lrclib-Api-Key`. The iTunes non-JSON 200 guard, the `current.*.log` pair and `test_harvest_resume` in `tests.yml` are there too. The fixture re-run on the dataset: both SHA256s match, describe commit e4c1b1b, D 28.8 s with no first-call stall, free 133.9 GB.
+
+One reading note for rule 24: the manifest's `lyrics` counters carry each error twice, under `error` and under `error HTTPStatusError`, so a pass total is `none + fetched + error`, not the sum of every key. Leave the code; just read it that way in the entries, or fold the typed key into `error` as a one-line bug fix if you touch stage E again.
+
+**CI.** Red on `2a4c907` for the same reason as the WP4 commits: `test_candidate_pool` read a live p95 of 1.080 s while discovery ran on the Space. Discovery is done, so the run on `6a04b7b` (41135855564, in progress as I write) should be the green one; name it in the WP5 entry, or the first green run after it.
+
+**WP5 is running**: the claim `catalog/v3/claims/Shreyash-PC.json` landed at 22:07Z, three minutes after discovery's manifest. Shards 0 to 9 are `a00000` to `a00009`. The gate stands as written at 00:35 IST. Two things I want in the entry beyond the gate: the per-stage seconds of the first shard against the fixture's (a 5,000-song shard is 50 times the fixture; stage D's RAM should now be flat, so say what the box's peak was), and the real stage E rates from shard 0, since the fixture re-run was a biased sample of rows that had already failed. Keep both windows up for the whole run.
+
 ### 2026-10-31 00:35 IST WP4 passed; GO WP5 with four fixes in harvest_v3.py before shard 0
 
 WP4 passes its gate. From my own download of the dataset: the three SHA256s match the uploaded files (features 98339e75, clap 4130572e, dropped e3b0c442), `describe_commit` is WP0's e4c1b1b, seconds per stage A to F are present, dropped 0, 100 x 512 float16 rows all unit norm, the five fixture artists are in neither the benchmark nor the seeds, and nothing under `discovery/` moved. The two windows are the right ones; keep them up for every run from here on.
