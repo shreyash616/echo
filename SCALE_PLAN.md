@@ -127,7 +127,8 @@ previews using a `multiprocessing.Pool` of 10 workers, with the header cut point
 catalogue passed in (for `kick_class` and `restraint_bucket`). Output: one descriptor dict a song.
 
 **Stage D, CLAP.** One process, CUDA: for all songs in the shard, decode at 48 kHz, cut three
-consecutive 10 s windows from 0 s as `recommender.py` does, batch 64 windows through the official
+consecutive 10 s windows from 0 s as `recommender.py` does, batch 32 windows (amended 2026-10-31: 64 stalls
+3 to 5 minutes on its first call per process and is slower a window; measured on WP4) through the official
 LAION loader (`CLAP_Module(enable_fusion=False, amodel="HTSAT-base")` with the music checkpoint),
 mean the three windows, L2-normalise, store float16. The audio tower weights are loaded once per
 shard.
@@ -153,6 +154,8 @@ today), `shard_00042.clap.f16.npy` (n x 512 float16, row order equal to the feat
 `shard_00042.manifest.json` (artist range, song count, dropped count, SHA256 of both files,
 describe code commit hash, date). After `hf_hub_download` of the uploaded manifest confirms the
 SHA256s, the shard id is appended to `catalog/v3/MANIFEST.json` and the shard's previews are deleted.
+
+Errored rows get a second pass at the end of the stage (amended 2026-10-31, WP4 review).
 
 **Resume.** On start the harvester reads `catalog/v3/MANIFEST.json` and `discovery/shards.json`,
 takes the lowest unfinished shard not claimed by another runner (`claims/<runner>.json` with a
@@ -357,6 +360,14 @@ python -c "from huggingface_hub import hf_hub_download as d; import json; print(
 Gate: both tests pass; previews directory empty; the fixture shard manifest on the dataset shows
 `describe_commit` equal to WP0's hash, seconds per stage, dropped count, and SHA256s that match the
 uploaded files.
+
+WP4 passed review 2026-10-31 at 5668950 (dataset manifest checked independently: SHA256s match, describe commit
+e4c1b1b, dropped 0, 100 unit float16 rows). Accepted as built: the global key set in `catalog/v3/keys.txt`, claims under
+`catalog/v3/claims/`, `shard_<id>.dropped.jsonl`, previews deleted before the MANIFEST append. Required before WP5's
+shard 0, each named in the WP5 entry: stage D streams windows per batch (the fixture code holds 5.76 MB a song in RAM,
+28.8 GB at 5,000 songs); `CLAP_BATCH` 32; the rule 23 disk check; stage E catches every exception per row, runs the
+second pass, and stops when the LRCLIB application headers are absent; the fixture shard re-run once after the fixes.
+One runner only until claims and the `MANIFEST.json` / `keys.txt` appends are made safe against a second runner.
 
 **WP5. Ten real shards.** Scope: run `harvest_v3.py` on shards 0 to 9 from `discovery/shards.json`
 on the Windows box. No code changes except bug fixes inside `harvest_v3.py`, each named in the

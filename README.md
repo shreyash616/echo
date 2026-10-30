@@ -36,6 +36,32 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-31 00:35 IST WP4 passed; GO WP5 with four fixes in harvest_v3.py before shard 0
+
+WP4 passes its gate. From my own download of the dataset: the three SHA256s match the uploaded files (features 98339e75, clap 4130572e, dropped e3b0c442), `describe_commit` is WP0's e4c1b1b, seconds per stage A to F are present, dropped 0, 100 x 512 float16 rows all unit norm, the five fixture artists are in neither the benchmark nor the seeds, and nothing under `discovery/` moved. The two windows are the right ones; keep them up for every run from here on.
+
+CI is red on all three WP4 commits for one reason that is not WP4's: `test_candidate_pool` reads a live p95 of 0.51 to 0.68 s against the Space while discovery runs on its CPU. It clears when discovery finishes; the WP5 entry names a green Tests run taken after that.
+
+I read `harvest_v3.py` against section 5. Six things, then the GO.
+
+**Fix before shard 0 (binding; each named in the WP5 entry):**
+1. **Stage D keeps every decoded window in RAM before the first batch** (`harvest_v3.py:351-357`: the loop appends `w.astype(np.float32)` for every song, then batching starts). Three 10 s windows at 48 kHz float32 are 5.76 MB a song; a 250-artist shard of 5,000 songs is 28.8 GB resident, before `embs`. Stream it: decode and window one batch of songs at a time, embed, write into `embs`, drop the windows. Nothing else about D changes.
+2. **`CLAP_BATCH` 32.** Your measurement is accepted (first call 0.89 s against 185 s, and 11 ms a window against 15). Section 5 is amended below. The per-batch log line stays.
+3. **Rule 23 is not implemented.** No free-disk check exists in the file. Before every shard, `shutil.disk_usage` on the drive holding `ml/data/previews`; under 8 GB free, log it and stop. The plan's hard rule, section 3 line 82.
+4. **Stage E worker catches only `httpx.HTTPError`** (`harvest_v3.py:405`). Any other exception on one row, a `JSONDecodeError` on an HTML error body or an `OSError` on the write, kills that daemon thread; `join()` returns normally and the rest of that thread's 1/24 of the rows is silently never fetched and lands as `has_lyrics` false. Catch `Exception` per row, count it as `error`, continue. Then the second pass over the error rows that you proposed, `fetch_lyrics_remote` main's. And stop before stage E when `registered_app()` returns no headers, as WP1 does; 24 anonymous fetchers are not what LRCLIB agreed to.
+
+After the four land: re-run `--shard-file tests/fixtures/harvest_fixture_shard.json` and the two tests once (the WP6 rule, a code change re-verifies the fixture shard), paste the block, then start shard 0. Add `tests/test_harvest_resume.py` to `tests.yml`; it is offline and runs in seconds. `test_harvest_shard.py` stays box-only.
+
+**One runner only, for WP5 and WP6.** `next_shard` then `claim` is check-then-write, and `finish()` is a read-modify-write of `MANIFEST.json` and `keys.txt` with plain `upload_file` and no parent commit (`harvest_v3.py:558-566`): two runners finishing within seconds of each other lose a shard entry and its keys. Section 5's "never collide" does not hold yet. The Windows box is the only runner until that is fixed; if the owner wants the Space added in WP6, the fix reopens WP4 first. Two more traps for a second runner, noted not required now: `ml/inference/header.json` is not in git (the box has it; a fresh checkout dies at `harvest_v3.py:321`), and `rc.lyric_path` is cwd-relative, so the harvester must run from the repo root.
+
+**Accepted deviations, plan amended:** the global key set lives in `catalog/v3/keys.txt` (MANIFEST.json keeps the shard summaries); claims under `catalog/v3/claims/`; `_is_clean_track_name` from harvest_v2, the same filter the existing catalogue went through; `shard_<id>.dropped.jsonl`; previews deleted before the MANIFEST append (a failed `finish` reruns from A, so nothing is lost). Cheap guard worth taking if it fires: iTunes `r.json()` at `:243` on a non-JSON 200 kills the shard; a crash costs that shard's A to D.
+
+**The owner's windows across ten shards.** Your log files are per shard, so the two `Get-Content -Wait` windows would die at each shard boundary. Also append both loggers to a stable pair, `harvest_v3_work/current.describe.log` and `current.clap.log` (truncated at each shard start), and point the windows there, so the owner opens them once for the whole run.
+
+**GO WP5** under SCALE_PLAN: shards 0 to 9 on the box, no code changes beyond the fixes above and bug fixes named in the entry. Gate unchanged: 10 shards complete with matching SHA256s and ids in `MANIFEST.json`, at least 40,000 rows, dropped under 10%, free disk within 3 GB of WP1's value, previews empty, songs an hour and the projected finish date for a million from the ten manifests' `seconds_per_stage`; over 14 days, stop and report before WP6. Every number from a manifest on the dataset, named (rule 24).
+
+WP3 is still open: discovery's checkpoint at 85 min reads 61,472 artists, 29,236 requests, 0 failures, 28 countries with 22 official. Post `PACKET WP3 READY FOR REVIEW` when it finishes; WP5 does not wait for it.
+
 ### 2026-10-30 22:37 IST WP3 deploy accepted; waiting on the owner's two secrets
 
 Checked: `7dbde4c` is the routes, `discovery.py`, the generated seeds (119 Deezer ids, no names, right call on the leakage test) and the generator; the guard at `routes.py:364-367` is the 404-when-unset plus `hmac.compare_digest`; status answers 404 from here too; Deploy 41094984706 green; serving unchanged. The six user playlists and their fan counts are recorded and that is the honest picture for those markets.
