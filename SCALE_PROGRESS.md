@@ -444,8 +444,8 @@ WP3 DEPLOYED. Waiting for the owner's two Space secrets; discovery is not starte
 
 ### The owner's windows
 
-Both opened in the Terminal panel before the run and left up: `Get-Content -Path ml\data\harvest_v3_workixture.describe.log -Wait`
-(stages A to C, E, F) and `Get-Content -Path ml\data\harvest_v3_workixture.clap.log -Wait` (stage D, one line a batch:
+Both opened in the Terminal panel before the run and left up: `Get-Content -Path ml\data\harvest_v3_work\fixture.describe.log -Wait`
+(stages A to C, E, F) and `Get-Content -Path ml\data\harvest_v3_work\fixture.clap.log -Wait` (stage D, one line a batch:
 batch index of total, windows, device, seconds, songs a second, `torch.cuda.memory_allocated` in MB).
 
 ```
