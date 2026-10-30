@@ -505,3 +505,64 @@ Only `catalog/v3/shard_fixture.*` is on the dataset under `catalog/`; nothing un
 - `test_harvest_shard` takes about 5 minutes (network, the CLAP stall); it is not in `tests.yml`.
 
 PACKET WP4 READY FOR REVIEW
+
+## WP5. Shards 0 to 9 on the box
+
+- Started: 2026-10-31 00:38 IST after GO WP5 (README ce741ca). One runner only, the Windows box (`Shreyash-PC`), for WP5 and WP6.
+- Files: `ml/data/harvest_v3.py` (the four fixes and the log pair), `.github/workflows/tests.yml` (`test_harvest_resume`),
+  `SCALE_PROGRESS.md`. Commit `b24f216`.
+
+### The fixes before shard 0, as ce741ca named them
+
+1. Stage D streams: songs are decoded and windowed only as the next batch needs them; a batch's windows are dropped once
+   embedded, so memory holds one batch of audio. Stage C keeps each preview's decoded length (`_n22`, not written) so the
+   batch total in the log line is exact without a second decode (`_window_count`).
+2. `CLAP_BATCH = 32`.
+3. Rule 23: `shutil.disk_usage` on the previews drive before every shard; under 8 GB free (`redescribe_catalog.MIN_FREE_BYTES`)
+   it logs and stops. The free space at shard start is recorded in each manifest (`free_gb_at_start`).
+4. Stage E: each row's fetch catches any exception, counted as `error` with its type; a second pass runs over the error rows;
+   stage E refuses to start when `registered_app()` gives no `Lrclib-Api-Key`.
+
+Also: an iTunes 200 without JSON is retried rather than killing the shard; `test_harvest_resume` in `tests.yml`.
+
+### The owner's two windows, once for the whole run
+
+Both loggers also write `ml/data/harvest_v3_work/current.describe.log` and `current.clap.log`, truncated at each shard start.
+`Get-Content -Wait` follows a truncated file (checked: after a truncate it printed the next shard's lines from the top). The two
+windows now run `Get-Content -Path ml\data\harvest_v3_work\current.describe.log -Encoding UTF8 -Wait` and the same for
+`current.clap.log`; `-Encoding UTF8` because the default code page showed Altin Gun's dotless i as mojibake.
+
+### Fixture shard re-verified after the code change (the WP6 rule)
+
+```
+$ python ml/data/harvest_v3.py --shard-file tests/fixtures/harvest_fixture_shard.json
+stage A done in 49.8 s | B 25.7 s | C 34.6 s | D 28.8 s | E 61.9 s | F: uploaded and read back, SHA256s match
+shard fixture done in 213 s: 100 songs, 0 dropped, 100 previews deleted
+
+current.clap.log:
+CLAP batch 1/10 | windows 32 | device cuda | 1.31 s | 2.88 songs/s | cuda 778 MB
+CLAP batch 2/10 | windows 32 | device cuda | 0.21 s | 4.14 songs/s | cuda 778 MB
+...
+CLAP batch 10/10 | windows 12 | device cuda | 0.08 s | 6.10 songs/s | cuda 778 MB
+CLAP done: 100 songs, 300 windows, 16.4 s
+
+$ python -m pytest -q tests/test_harvest_shard.py tests/test_harvest_resume.py
+7 passed, 1 warning in 98.64s (0:01:38)
+
+$ ls ml/data/previews | wc -l
+0
+
+catalog/v3/shard_fixture.manifest.json (downloaded): songs 100, dropped 0, describe_commit e4c1b1bd2b4dd35a21560de82d280a587461ce99,
+seconds_per_stage A 49.8 B 25.7 C 34.6 D 28.8 E 61.9 F 10.8, free_gb_at_start 133.9,
+sha256 features e39a826a..., clap 8c738a57..., dropped e3b0c442...
+```
+
+- Stage D 209 s to 29 s: no first-call stall at batch 32 (1.31 s), 0.21 s a batch after.
+- The CLAP file's SHA256 changed from WP4's (4130572e to 8c738a57): a different batch size reorders the GPU arithmetic, so float16
+  bits move within rounding; the batched-against-one-window parity in `test_harvest_shard` still passes.
+- Stage E on this rerun fetched only the 45 rows that had no lyric file after WP4, that is the rows that had already failed
+  (33 errors, 14 none, less any the test run fetched): first pass 5 fetched, 9 none, 31 errors; the second pass over the 31
+  fetched 5 more and left 23. Biased sample; shard 0 gives the real rate.
+- Free disk at the start 133.9 GB (WP1: 135.2 GB).
+
+Shards 0 to 9 wait for `discovery/shards.json`, written when discovery finishes.
