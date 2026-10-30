@@ -78,6 +78,9 @@ jobs:
       - name: Run Axis Range Test
         run: pytest tests/test_axis_range.py
 
+      - name: Run Harvester Claim and Resume Test
+        run: pytest tests/test_harvest_resume.py
+
       - name: Run Feel Benchmark on TUNE (report-only)
         run: |
           python tests/feel_benchmark.py --split tune --base-url https://shreyash616-echo-backend.hf.space || true

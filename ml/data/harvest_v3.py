@@ -42,6 +42,7 @@ import hashlib
 import json
 import logging
 import multiprocessing as mp
+import shutil
 import socket
 import subprocess
 import sys
@@ -77,7 +78,7 @@ MAX_PER_ARTIST = 20
 ITUNES_SPACING_S = 3.0          # 20 requests a minute
 FETCH_WORKERS = 8
 DESCRIBE_WORKERS = 10
-CLAP_BATCH = 64
+CLAP_BATCH = 32                 # 64 stalls 3 to 5 minutes on its first call (WP4; reviewer ce741ca)
 LYRIC_WORKERS = 24
 LYRIC_SPACING_S = 0.06          # shared across the fetchers: about 1,000 requests a minute app-wide
 STALE_CLAIM_S = 6 * 3600
@@ -170,23 +171,48 @@ def describe_commit() -> str:
                           cwd=ROOT, capture_output=True, text=True).stdout.strip()
 
 
+_CURRENT: dict[str, tuple[logging.Logger, logging.Handler]] = {}
+
+
 def shard_logger(shard: str, kind: str) -> logging.Logger:
+    """The shard's own <shard>.<kind>.log, plus current.<kind>.log truncated at each shard start, so the
+    owner's two Get-Content -Wait windows are opened once for a whole multi-shard run."""
     WORK.mkdir(parents=True, exist_ok=True)
+    fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
     lg = logging.getLogger(f"harvest_v3.{shard}.{kind}")
     lg.setLevel(logging.INFO)
     if not lg.handlers:
         fh = logging.FileHandler(WORK / f"{shard}.{kind}.log", encoding="utf-8")
-        fh.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
+        fh.setFormatter(fmt)
         lg.addHandler(fh)
         lg.addHandler(logging.StreamHandler(sys.stdout))
+    if kind in _CURRENT:  # the previous shard's handle on the current file
+        old_lg, old_h = _CURRENT.pop(kind)
+        old_lg.removeHandler(old_h)
+        old_h.close()
+    ch = logging.FileHandler(WORK / f"current.{kind}.log", mode="w", encoding="utf-8")
+    ch.setFormatter(fmt)
+    lg.addHandler(ch)
+    _CURRENT[kind] = (lg, ch)
     return lg
 
 
 def _describe_only(args):
-    """redescribe_catalog._describe_one without the decoded audio (stage D decodes again)."""
+    """redescribe_catalog._describe_one without the decoded audio (stage D decodes again), with its length."""
     res = rc._describe_one(args)
-    res.pop("y", None)
+    y = res.pop("y", None)
+    if y is not None:
+        res["n22"] = int(len(y))
     return res
+
+
+def _window_count(n22: int) -> int:
+    """recommender._window_audio_frames' window count for a 22.05 kHz decode resampled to 48 kHz (for the log's total)."""
+    n = int(np.ceil(n22 * 48000 / 22050))
+    win = 480000
+    k = n // win
+    k += (n - k * win) >= win // 2
+    return max(k, 1)
 
 
 class Harvester:
@@ -241,7 +267,11 @@ class Harvester:
                     continue
                 if r.status_code != 200:
                     return None
-                return r.json()
+                try:
+                    return r.json()
+                except ValueError:  # a 200 with a non-JSON body: retried like a transient failure
+                    self.log.info("iTunes %s: 200 without JSON, retry", url.rsplit("/", 1)[-1])
+                    time.sleep(5 * 2 ** attempt)
             return None
 
         from harvest_v2 import _is_clean_track_name, _norm_str
@@ -334,6 +364,7 @@ class Harvester:
                     self.drop(song, "C", res["drop"])
                 else:
                     song.update(res["dsp"])
+                    song["_n22"] = res["n22"]
                     kept.append(song)
                 if (i + 1) % 50 == 0 or i + 1 == len(jobs):
                     self.log.info("C: %d/%d described | %.2f songs/s", i + 1, len(jobs), (i + 1) / max(time.time() - t0, 0.1))
@@ -348,34 +379,48 @@ class Harvester:
 
         model = rc.load_clap()
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        windows, owner = [], []
+        # streamed: songs are decoded and windowed only as the next batch needs them, and a batch's windows
+        # are dropped once embedded, so memory holds one batch of audio, not the shard's (reviewer ce741ca)
+        n_windows = sum(_window_count(s["_n22"]) for s in self.songs)
+        n_batches = (n_windows + CLAP_BATCH - 1) // CLAP_BATCH
+        per_song: list[list[np.ndarray]] = [[] for _ in self.songs]
+        pending: list[tuple[int, np.ndarray]] = []
+        state = {"b": 0, "windows": 0, "songs_done": 0}
+        t0 = time.time()
+
+        def embed(batch: list[tuple[int, np.ndarray]]) -> None:
+            tb = time.time()
+            with torch.no_grad():
+                e = model.get_audio_embedding_from_data(x=np.stack([w for _, w in batch]), use_tensor=False)
+            for (j, _), row in zip(batch, e):
+                per_song[j].append(np.asarray(row, dtype=np.float32))
+            state["b"] += 1
+            state["windows"] += len(batch)
+            mem = torch.cuda.memory_allocated() / 2 ** 20 if device == "cuda" else 0.0
+            self.clap_log.info("CLAP batch %d/%d | windows %d | device %s | %.2f s | %.2f songs/s | cuda %.0f MB",
+                               state["b"], n_batches, len(batch), device, time.time() - tb,
+                               state["songs_done"] / max(time.time() - t0, 1e-6), mem)
+
         for j, s in enumerate(self.songs):
             y = decode_preview((PREVIEWS / f"{s['itunes_id']}.m4a").read_bytes())
             y48 = librosa.resample(y, orig_sr=22050, target_sr=48000, res_type="soxr_hq")
-            for w in _window_audio_frames(y48, 48000, window_sec=10.0):
-                windows.append(w.astype(np.float32))
-                owner.append(j)
-        n_batches = (len(windows) + CLAP_BATCH - 1) // CLAP_BATCH
-        embs = np.zeros((len(windows), 512), dtype=np.float32)
-        t0 = time.time()
-        with torch.no_grad():
-            for b in range(n_batches):
-                tb = time.time()
-                chunk = np.stack(windows[b * CLAP_BATCH:(b + 1) * CLAP_BATCH])
-                embs[b * CLAP_BATCH:b * CLAP_BATCH + len(chunk)] = model.get_audio_embedding_from_data(x=chunk, use_tensor=False)
-                songs_done = len({owner[i] for i in range(min((b + 1) * CLAP_BATCH, len(owner)))})
-                mem = torch.cuda.memory_allocated() / 2 ** 20 if device == "cuda" else 0.0
-                self.clap_log.info("CLAP batch %d/%d | windows %d | device %s | %.2f s | %.2f songs/s | cuda %.0f MB",
-                                   b + 1, n_batches, len(chunk), device, time.time() - tb,
-                                   songs_done / max(time.time() - t0, 1e-6), mem)
-        owner_arr = np.array(owner)
+            pending += [(j, w.astype(np.float32)) for w in _window_audio_frames(y48, 48000, window_sec=10.0)]
+            del y, y48
+            state["songs_done"] = j
+            while len(pending) >= CLAP_BATCH:
+                embed(pending[:CLAP_BATCH])
+                pending = pending[CLAP_BATCH:]
+        state["songs_done"] = len(self.songs)
+        if pending:
+            embed(pending)
+            pending = []
         out, kept = [], []
         anchors = json.loads(ANCHORS.read_text(encoding="utf-8"))
         prompts = anchors.get("prompts", anchors)
         anchor_keys = list(prompts)
         anchor_matrix = np.array([prompts[k] for k in anchor_keys], dtype=np.float32)
         for j, s in enumerate(self.songs):
-            mean = embs[owner_arr == j].mean(axis=0)
+            mean = np.stack(per_song[j]).mean(axis=0) if per_song[j] else np.full(512, np.nan, dtype=np.float32)
             norm = float(np.linalg.norm(mean))
             if not np.isfinite(mean).all() or norm < 1e-4:
                 self.drop(s, "D", "CLAP embedding empty")
@@ -387,38 +432,53 @@ class Harvester:
             out.append(emb)
             kept.append(s)
         self.songs = kept
-        self.clap_log.info("CLAP done: %d songs, %d windows, %.1f s", len(kept), len(windows), time.time() - t0)
+        self.clap_log.info("CLAP done: %d songs, %d windows, %.1f s", len(kept), state["windows"], time.time() - t0)
         return np.array(out, dtype=np.float32).reshape(len(out), 512)
 
     # ---- E ---------------------------------------------------------------------------------------
     def text(self) -> None:
         LYRICS.mkdir(parents=True, exist_ok=True)
+        app = flr.registered_app()
+        if "Lrclib-Api-Key" not in app:  # WP1: 24 fetchers only as the owner's registered application
+            raise RuntimeError("LRCLIB application headers absent (backend/.env); not running 24 anonymous fetchers")
         todo = [s for s in self.songs if not rc.lyric_path(s).exists()]
-        headers = {"User-Agent": flr.USER_AGENT, **flr.registered_app()}
+        headers = {"User-Agent": flr.USER_AGENT, **app}
         counts = Counter()
         lock = threading.Lock()
 
-        def worker(rows: list[dict]) -> None:
+        def worker(rows: list[dict], failed: list[dict]) -> None:
             with httpx.Client(headers=headers) as client:
                 for r in rows:
                     try:
                         got = flr.fetch_lyrics(r, client, LYRICS, LYRIC_SPACING_S)
-                    except httpx.HTTPError:
+                    except Exception as e:  # any row's failure is that row's, never the thread's (reviewer ce741ca)
                         got, kind = None, "error"
+                        with lock:
+                            failed.append(r)
+                            counts[f"error {type(e).__name__}"] += 1
                     else:
                         kind = "fetched" if got else "none"
                     with lock:
                         counts[kind] += 1
 
-        n = max(1, min(LYRIC_WORKERS, len(todo)))
-        parts = [todo[i::n] for i in range(n)] if todo else []
-        threads = [threading.Thread(target=worker, args=(p,), daemon=True) for p in parts]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-        self.lyric_counts = dict(counts)
-        self.log.info("E: lyrics for %d songs without a file: %s", len(todo), dict(counts))
+        def run_pool(rows: list[dict]) -> list[dict]:
+            failed: list[dict] = []
+            n = max(1, min(LYRIC_WORKERS, len(rows)))
+            threads = [threading.Thread(target=worker, args=(rows[i::n], failed), daemon=True) for i in range(n)] if rows else []
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            return failed
+
+        failed = run_pool(todo)
+        first = dict(counts)
+        # a second pass over the rows that errored, as fetch_lyrics_remote's main does
+        counts.clear()
+        still = run_pool(failed)
+        self.lyric_counts = {"first_pass": first, "second_pass": dict(counts), "error_after_retry": len(still)}
+        self.log.info("E: lyrics for %d songs without a file: first pass %s; second pass over %d errors %s; %d still in error",
+                      len(todo), first, len(failed), dict(counts), len(still))
 
         from sentence_transformers import SentenceTransformer
         minilm = SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
@@ -470,7 +530,9 @@ class Harvester:
             "sha256": {"features": sha256(feats), "clap": sha256(clapf), "dropped": sha256(dropf)},
             "clap_shape": list(clap.shape), "describe_commit": describe_commit(),
             "date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "seconds_per_stage": dict(self.seconds), "keys": [s["key"] for s in self.songs],
+            "seconds_per_stage": dict(self.seconds),
+            "free_gb_at_start": round(getattr(self, "free_bytes_at_start", 0) / 1024 ** 3, 1),
+            "keys": [s["key"] for s in self.songs],
             "itunes_ids": [s["itunes_id"] for s in self.songs],
         }
         manf.write_text(json.dumps(manifest, indent=1, ensure_ascii=False), encoding="utf-8")
@@ -488,7 +550,14 @@ class Harvester:
         return manifest
 
     def run(self) -> dict:
-        self.log.info("shard %s: %d artists, runner %s", self.shard, len(self.artists), self.runner)
+        # rule 23: under 8 GB free on the drive that holds the previews, stop before the shard starts
+        PREVIEWS.mkdir(parents=True, exist_ok=True)
+        free = shutil.disk_usage(PREVIEWS).free
+        self.free_bytes_at_start = free
+        if free < rc.MIN_FREE_BYTES:
+            self.log.info("shard %s not started: %.1f GB free on the previews drive, under 8 GB", self.shard, free / 1024 ** 3)
+            raise SystemExit(f"{free / 1024 ** 3:.1f} GB free < 8 GB (rule 23)")
+        self.log.info("shard %s: %d artists, runner %s, %.1f GB free", self.shard, len(self.artists), self.runner, free / 1024 ** 3)
         t_all = time.time()
         self._timed("A", self.resolve)
         self._timed("B", self.fetch)
