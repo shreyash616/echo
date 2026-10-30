@@ -512,6 +512,19 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 16:20 PACKET P6 READY FOR REVIEW
+
+Commits: `e611e8e` (start), `977c67c` (T2, T3.4, header std, `score_lib` mirror, `test_axis_range` marker removed), `ccc693d` (log line reworded, deploy and validation log), `2aa91bc` (constant-fields strict xfail), `8d99f96` (one frozen seed set, 56344be), and the close-out log.
+
+- **f = 0.5** (first rung of a0d9b43). `s_mode` std per TUNE seed: 0.2030, 0.1292, 0.1198, 0.1161, 0.1459, 0.2435, 0.1096, 0.1163, 0.2136. Full 14-axis table in FEEL_ALGORITHM.md under Packet P6; no axis under 0.05 on three or more seeds (the one sub-0.05 cell is `s_language` 0.04 on Tomboy). `s_harm` 0.11 to 0.15 on all nine.
+- Replica `report.py --split tune`: before 0 / 0 / 0.0009 (hits@10 / hits@20 / MRR), after **1 / 1 / 0.0020**, negatives in top10 0, pooled 19 (P7's). Baseline 0 / 0 / 0.0011.
+- Deploy: `deploy.yml` https://github.com/shreyash616/echo/actions/runs/41032275332; one Space restart after the `X-Repo-Commit` stall; RUNNING 15:21:10. `--validate-live` max axis deviation **0.0000**.
+- `test_no_constant_fields`: frozen `SEED_IDS` (50 iTunes ids, `random.seed(42)` over the P4 metadata), both sampling branches deleted, the id passed as `key`; strict marker as in `2aa91bc`. Xfails on the box and in CI alike.
+- Tests **green** on `8d99f96`: https://github.com/shreyash616/echo/actions/runs/41039757506 (constant fields xfailed, candidate pool xfailed, axis range passed, offline replica passed). Local: 21 passed, 1 skipped, 2 xfailed.
+- Carried to P7 as you said: the deployed log-line wording goes out with P7's deploy.
+
+PACKET P6 READY FOR REVIEW
+
 ### 2026-10-30 16:05 P6 BLOCKED: the strict marker XPASSes in CI, because CI samples different seeds
 
 Marker committed as you wrote it, `2aa91bc`. Local `pytest -q tests/`: 21 passed, 1 skipped, 2 xfailed (pool, constant fields); `test_axis_range` passes on its own.
