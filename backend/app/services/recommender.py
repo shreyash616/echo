@@ -92,6 +92,12 @@ FEATURE_DISPLAY_NAMES: dict[str, str] = {
     "s_mode":      "Tonal mode",
 }
 
+# The axes in _compute_pair_score's features order; _score_pool's axis columns follow it
+POOL_AXES: list[str] = [
+    "s_clap", "s_anchor", "s_tempo", "s_pulse", "s_groove", "s_dark", "s_grit", "s_vocal",
+    "s_intimacy", "s_restraint", "s_meaning", "s_language", "s_harm", "s_mode",
+]
+
 _CAMELOT_KEY_MAP: dict[str, str] = {
     "C Major": "8B", "A Minor": "8A",
     "G Major": "9B", "E Minor": "9A",
@@ -781,6 +787,184 @@ class MusicRecommender:
             return total_score, reasons, features, w_eff
         return total_score, reasons
 
+    def _score_pool(self, seed: dict, cands: list[dict]) -> dict:
+        """_compute_pair_score over a whole pool as arrays (P7): the same formulas term by term,
+        so every axis and score agrees with the single-pair path to float rounding. Returns
+        scores (n,), axes (n, 14) in POOL_AXES order, has_both (n,), w_eff for both cases, the
+        reasons per candidate, language affinity (n,) and the candidates' CLAP rows (n, dim)."""
+        w = self._weights
+        n = len(cands)
+        fs = self._feature_std
+
+        def col(key: str, default: float) -> np.ndarray:
+            return np.array([float(c.get(key, default)) for c in cands], dtype=np.float64)
+
+        def z(key: str, default: float) -> np.ndarray:
+            std = fs.get(key, 1.0)
+            return np.exp(-np.abs(float(seed.get(key, default)) - col(key, default)) / (TAU * max(std, 1e-6)))
+
+        def cosine_01(vec_a, key: str) -> tuple[np.ndarray, np.ndarray]:
+            # 0.5 * (cosine + 1) clipped, 0.5 where either vector is missing, empty or zero
+            out = np.full(n, 0.5)
+            ok = np.zeros(n, dtype=bool)
+            if not vec_a:
+                return out, ok
+            pa = np.array(vec_a, dtype=np.float32)
+            rows = [i for i, c in enumerate(cands) if c.get(key) and len(c[key]) == len(vec_a)]
+            ok[rows] = True
+            if rows:
+                pb = np.array([cands[i][key] for i in rows], dtype=np.float32)
+                na = np.linalg.norm(pa)
+                nb = np.linalg.norm(pb, axis=1)
+                good = (nb > 0) & (na > 0)
+                raw = (pb @ pa) / (na * np.where(good, nb, 1.0))
+                vals = np.clip(0.5 * (raw.astype(np.float64) + 1.0), 0.0, 1.0)
+                out[np.array(rows)[good]] = vals[good]
+            return out, ok
+
+        # 1. s_clap
+        clap_a = self.get_clap_vector(seed)
+        clap_b = np.stack([self.get_clap_vector(c) for c in cands]) if n else np.zeros((0, len(clap_a)), dtype=np.float32)
+        if len(clap_a) > 0 and np.linalg.norm(clap_a) > 0:
+            s_clap = np.where(np.linalg.norm(clap_b, axis=1) > 0,
+                              np.clip((clap_b @ clap_a).astype(np.float64), 0.0, 1.0), 0.5)
+        else:
+            s_clap = np.full(n, 0.5)
+
+        # 2. s_anchor
+        s_anchor, _ = cosine_01(seed.get("anchor_profile"), "anchor_profile")
+
+        # 3. s_tempo: the double loop over both felt-BPM distributions, flattened; bincount adds
+        # each candidate's terms in the loop's order
+        def fold(x: np.ndarray) -> np.ndarray:
+            return np.where(np.abs(x - 1.0) <= 0.25, np.minimum(x, 0.4),
+                            np.where(np.abs(x - 0.5849625) <= 0.15, 0.7, np.minimum(1.0, x)))
+
+        def parse_dist(dist: dict) -> list[tuple[float, float]]:
+            out = []
+            for k_s, p in dist.items():
+                try:
+                    out.append((float(k_s), float(p)))
+                except ValueError:
+                    continue
+            return out
+
+        dist_a = seed.get("felt_bpm_dist") or {}
+        has_dist = np.array([bool(dist_a and c.get("felt_bpm_dist")) for c in cands], dtype=bool)
+        s_tempo = np.full(n, 0.5)
+        if has_dist.any():
+            seed_pairs = parse_dist(dist_a)
+            flat_i, flat_bpm, flat_p = [], [], []
+            for i in np.flatnonzero(has_dist):
+                for bpm_b, p_b in parse_dist(cands[i]["felt_bpm_dist"]):
+                    flat_i.append(i); flat_bpm.append(bpm_b); flat_p.append(p_b)
+            flat_i = np.array(flat_i, dtype=np.int64)
+            flat_bpm = np.array(flat_bpm, dtype=np.float64)
+            flat_p = np.array(flat_p, dtype=np.float64)
+            idx_all, terms_all = [], []
+            for bpm_a, p_a in seed_pairs:
+                valid = (flat_bpm > 0) & (bpm_a > 0)
+                x = np.abs(np.log2(bpm_a / flat_bpm[valid]))
+                idx_all.append(flat_i[valid])
+                terms_all.append(p_a * flat_p[valid] * fold(x))
+            d = np.bincount(np.concatenate(idx_all), weights=np.concatenate(terms_all), minlength=n) if idx_all else np.zeros(n)
+            s_tempo[has_dist] = np.clip(1.0 - d[has_dist], 0.0, 1.0)
+        if (~has_dist).any():
+            bpm_a = float(seed.get("felt_bpm") or seed.get("bpm", 120))
+            rest = np.flatnonzero(~has_dist)
+            bpm_b = np.array([float(cands[i].get("felt_bpm") or cands[i].get("bpm", 120)) for i in rest], dtype=np.float64)
+            ok = (bpm_b > 0) & (bpm_a > 0)
+            x = np.abs(np.log2(bpm_a / np.where(ok, bpm_b, 1.0)))
+            s_tempo[rest] = np.where(ok, np.clip(1.0 - fold(x), 0.0, 1.0), 0.5)
+
+        # 4. s_pulse
+        s_pulse = z("pulse_rate", 0.5)
+
+        # 5. s_groove (T3.5, no swing)
+        kc_eq = np.array([1.0 if seed.get("kick_class") == c.get("kick_class") else 0.0 for c in cands])
+        s_groove = np.clip((0.4 * kc_eq + 0.2 * z("backbeat", 0.5) + 0.2 * z("hits_per_bar", 4.0)
+                            + 0.1 * z("lag_ms", 0.0)) / 0.9, 0.0, 1.0)
+
+        # 6. s_dark, 7. s_grit
+        s_dark = z("darkness", 0.5)
+        s_grit = z("grit", 0.5)
+
+        # 8. s_vocal: mean of five terms, six where both sides have words per minute
+        tune_sim = 1.0 - np.abs(float(seed.get("tuning_depth", 0.5)) - col("tuning_depth", 0.5))
+        vocal_sum = z("syllable_rate", 2.0) + z("sustain_ratio", 0.5) + z("pitch_range", 12.0) + tune_sim + z("vibrato", 20.0)
+        wpm_a = float(seed.get("lyric_words_per_minute") or 0.0)
+        wpm_b = np.array([float(c.get("lyric_words_per_minute") or 0.0) for c in cands], dtype=np.float64)
+        has_wpm = (wpm_b > 0) & (wpm_a > 0)
+        wpm_sim = np.maximum(0.0, 1.0 - np.abs(wpm_a - wpm_b) / 100.0)
+        s_vocal = np.clip(np.where(has_wpm, (vocal_sum + wpm_sim) / 6.0, vocal_sum / 5.0), 0.0, 1.0)
+
+        # 9. s_intimacy
+        s_intimacy = z("intimacy", 0.5)
+
+        # 10. s_restraint
+        dz_lr = np.abs(float(seed.get("loudness_range", 0.0)) - col("loudness_range", 0.0)) / max(fs.get("loudness_range", 1.0), 1e-6)
+        dz_cf = np.abs(float(seed.get("crest_factor", 0.0)) - col("crest_factor", 0.0)) / max(fs.get("crest_factor", 1.0), 1e-6)
+        s_restraint = np.exp(-(dz_lr + dz_cf) / 2.0)
+
+        # 11. s_meaning
+        s_meaning, theme_ok = cosine_01(seed.get("theme_vec") if seed.get("has_lyrics") else None, "theme_vec")
+        has_both = theme_ok & np.array([bool(c.get("has_lyrics")) for c in cands], dtype=bool)
+        s_meaning = np.where(has_both, s_meaning, 0.5)
+
+        # 12. s_language
+        seed_lang = seed.get("language")
+        aff_cache: dict[Any, float] = {}
+        for c in cands:
+            lang = c.get("language")
+            if lang not in aff_cache:
+                aff_cache[lang] = language_affinity(seed_lang, lang)
+        s_language = np.array([aff_cache[c.get("language")] for c in cands], dtype=np.float64)
+
+        # 13. s_harm
+        lb_eq = np.array([1.0 if seed.get("loop_bars") == c.get("loop_bars") else 0.0 for c in cands])
+        riff_eq = np.array([1.0 if bool(seed.get("riff_flag")) == bool(c.get("riff_flag")) else 0.0 for c in cands])
+        s_harm = np.clip(0.4 * z("changes_per_bar", 1.0) + 0.4 * lb_eq + 0.2 * riff_eq, 0.0, 1.0)
+
+        # 14. s_mode
+        sim_pol = z("mode_polarity", 0.0)
+        undefined = np.array([bool(seed.get("mode_undefined") or c.get("mode_undefined")) for c in cands], dtype=bool)
+        s_mode = np.where(undefined, 0.7 + MODE_SHRINK * (sim_pol - 0.7), sim_pol)
+
+        axes = np.stack([s_clap, s_anchor, s_tempo, s_pulse, s_groove, s_dark, s_grit, s_vocal,
+                         s_intimacy, s_restraint, s_meaning, s_language, s_harm, s_mode], axis=1) if n else np.zeros((0, len(POOL_AXES)))
+
+        # Weight redistribution if either track has no lyrics (Section 12.3), as the single-pair path
+        w_lyr = dict(w)
+        w_nolyr = dict(w)
+        if w_nolyr.get("s_meaning", 0.0) > 0.0:
+            m_weight = w_nolyr.pop("s_meaning")
+            audio_keys = ["s_clap", "s_anchor", "s_tempo", "s_pulse", "s_groove", "s_dark", "s_grit", "s_vocal", "s_intimacy", "s_restraint"]
+            sum_audio = sum(w_nolyr.get(k, 0.0) for k in audio_keys)
+            if sum_audio > 0:
+                for k in audio_keys:
+                    w_nolyr[k] += m_weight * (w_nolyr.get(k, 0.0) / sum_audio)
+        wv_lyr = np.array([w_lyr.get(k, 0.0) for k in POOL_AXES], dtype=np.float64)
+        wv_nolyr = np.array([w_nolyr.get(k, 0.0) for k in POOL_AXES], dtype=np.float64)
+        W = np.where(has_both[:, None], wv_lyr[None, :], wv_nolyr[None, :])
+
+        # The loop's sum(w * s) runs over the axes in order; the same order here
+        terms = W * axes
+        total = np.zeros(n)
+        for j in range(len(POOL_AXES)):
+            total = total + terms[:, j]
+        scores = np.clip(total, 0.05, 0.99)
+
+        # matchReasons: the three axes with the highest w * s among positive weights; a stable
+        # sort keeps axis order on ties, as the loop's list.sort does
+        ranked = np.argsort(-np.where(W > 0.0, terms, -np.inf), axis=1, kind="stable")[:, :3]
+        names = [FEATURE_DISPLAY_NAMES.get(k, k) for k in POOL_AXES]
+        reasons = [[names[j] for j in ranked[i] if W[i, j] > 0.0] for i in range(n)]
+
+        return {
+            "scores": scores, "axes": axes, "has_both": has_both, "w_lyr": w_lyr, "w_nolyr": w_nolyr,
+            "reasons": reasons, "language": s_language, "clap": clap_b,
+        }
+
     def recommend(
         self,
         seed: dict,
@@ -905,24 +1089,25 @@ class MusicRecommender:
                 continue
             filtered_candidates.append(cand)
 
-        # 3. Rerank
+        # 3. Rerank (the whole pool as arrays; _compute_pair_score stays the single-pair reference)
+        pool = self._score_pool(seed_record, filtered_candidates)
         scored_candidates: list[tuple[dict, float, list[str]]] = []
-        for cand in filtered_candidates:
-            if debug:
-                score, reasons, axes_dict, w_eff_dict = self._compute_pair_score(seed_record, cand, return_debug=True)
-            else:
-                score, reasons = self._compute_pair_score(seed_record, cand, return_debug=False)
+        for i, cand in enumerate(filtered_candidates):
+            score = float(pool["scores"][i])
+            reasons = pool["reasons"][i]
             cand_res = dict(cand)
             cand_res["matchScore"] = score
             cand_res["matchReasons"] = reasons
-            cand_res["languageAffinity"] = language_affinity(seed_record.get("language"), cand.get("language"))
+            cand_res["languageAffinity"] = float(pool["language"][i])
             if debug:
-                cand_res["axes"] = axes_dict
-                cand_res["weights"] = w_eff_dict
+                cand_res["axes"] = {a: float(pool["axes"][i, j]) for j, a in enumerate(POOL_AXES)}
+                cand_res["weights"] = dict(pool["w_lyr"] if pool["has_both"][i] else pool["w_nolyr"])
             scored_candidates.append((cand_res, score, reasons))
 
-        # Sort by rerank score descending
-        scored_candidates.sort(key=lambda x: x[1], reverse=True)
+        # Sort by rerank score descending; the CLAP rows follow the same stable order
+        order = sorted(range(len(scored_candidates)), key=lambda i: scored_candidates[i][1], reverse=True)
+        scored_candidates = [scored_candidates[i] for i in order]
+        pool_claps = pool["clap"][order] if order else pool["clap"]
 
         # 4. MMR with supply-scaled language budget (Section 11.7.4)
         top_60 = scored_candidates[:60]
@@ -930,53 +1115,42 @@ class MusicRecommender:
         budget = cross_language_max if same_count >= 14 else k
 
         selected: list[dict] = []
-        artist_counts: dict[str, int] = {}
         cross_lang_used = 0
 
-        # MMR greedy selection with cached vectors and hoisted outer invariants
-        selected_claps: list[np.ndarray] = []
-        remaining_records = [
-            (cand, score, _norm_artist(cand.get("artist", "")), bool((cand.get("languageAffinity") or 0.0) < 0.99), self.get_clap_vector(cand))
-            for cand, score, _ in scored_candidates
-        ]
+        # MMR greedy selection as arrays over the pool (P7). max_sim holds each candidate's highest
+        # CLAP cosine to the picks so far and is updated by one matrix-vector product per pick;
+        # np.argmax takes the first of equal values, as the loop's strict > did
+        n_pool = len(scored_candidates)
+        pool_scores = np.array([score for _, score, _ in scored_candidates], dtype=np.float64)
+        is_cross_arr = np.array([bool((cand.get("languageAffinity") or 0.0) < 0.99) for cand, _, _ in scored_candidates], dtype=bool)
+        art_names = [_norm_artist(cand.get("artist", "")) for cand, _, _ in scored_candidates]
+        art_ids: dict[str, int] = {}
+        art_codes = np.array([art_ids.setdefault(a, len(art_ids)) for a in art_names], dtype=np.int64)
+        art_picks = np.zeros(len(art_ids), dtype=np.int64)
+        remaining = np.ones(n_pool, dtype=bool)
+        max_sim = np.zeros(n_pool, dtype=np.float64)
 
-        while len(selected) < k and remaining_records:
-            best_idx = -1
-            best_mmr_score = -1e9
+        while len(selected) < k and remaining.any():
+            rem = np.flatnonzero(remaining)
+            rem_scores = pool_scores[rem]
+            rem_cross = is_cross_arr[rem]
+            best_same = float(rem_scores[~rem_cross].max()) if (~rem_cross).any() else 0.0
 
-            best_same = max(
-                (rec[1] for rec in remaining_records if not rec[3]),
-                default=0.0,
-            )
+            is_capped = art_picks[art_codes[rem]] >= 2
+            budget_exceeded = rem_cross & (cross_lang_used >= budget) & (rem_scores < (best_same + 0.05))
 
-            for idx, (cand, score, art, is_cross, cand_clap) in enumerate(remaining_records):
-                is_capped = bool(artist_counts.get(art, 0) >= 2)
-                budget_exceeded = bool(is_cross and cross_lang_used >= budget and score < (best_same + 0.05))
+            mmr_val = diversity * rem_scores - (1.0 - diversity) * (max_sim[rem] if selected else 0.0)
+            mmr_val = np.where(is_capped, mmr_val - 100.0, mmr_val)
+            mmr_val = np.where(budget_exceeded, mmr_val - 50.0, mmr_val)
 
-                if selected_claps:
-                    max_sim = max(float(np.dot(cand_clap, s_clap)) for s_clap in selected_claps)
-                else:
-                    max_sim = 0.0
-
-                mmr_val = diversity * score - (1.0 - diversity) * max_sim
-                if is_capped:
-                    mmr_val -= 100.0
-                if budget_exceeded:
-                    mmr_val -= 50.0
-
-                if mmr_val > best_mmr_score:
-                    best_mmr_score = mmr_val
-                    best_idx = idx
-
-            if best_idx < 0:
-                best_idx = 0
-
-            cand, score, art, is_cross, cand_clap = remaining_records.pop(best_idx)
-            artist_counts[art] = artist_counts.get(art, 0) + 1
-            if is_cross:
+            best = int(rem[int(np.argmax(mmr_val))])
+            sims = (pool_claps @ pool_claps[best]).astype(np.float64)
+            max_sim = sims if not selected else np.maximum(max_sim, sims)
+            remaining[best] = False
+            art_picks[art_codes[best]] += 1
+            if is_cross_arr[best]:
                 cross_lang_used += 1
-            selected.append(cand)
-            selected_claps.append(cand_clap)
+            selected.append(scored_candidates[best][0])
 
         if return_pool:
             return selected, filtered_candidates

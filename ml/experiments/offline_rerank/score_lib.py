@@ -154,6 +154,103 @@ def features(seed, cand, clap_a, clap_b, fs=None):
     return f, both
 
 
+def _fold_v(x):
+    return np.where(np.abs(x - 1.0) <= 0.25, np.minimum(x, 0.4),
+                    np.where(np.abs(x - 0.5849625) <= 0.15, 0.7, np.minimum(1.0, x)))
+
+
+def _cos01_v(va, cands, key):
+    """0.5 * (cosine + 1) clipped per candidate, 0.5 where a vector is missing or zero; and the ok mask."""
+    n = len(cands)
+    out, ok = np.full(n, 0.5), np.zeros(n, dtype=bool)
+    if not va:
+        return out, ok
+    pa = np.array(va, dtype=np.float32)
+    rows = [i for i, c in enumerate(cands) if c.get(key) and len(c[key]) == len(va)]
+    ok[rows] = True
+    if rows:
+        pb = np.array([cands[i][key] for i in rows], dtype=np.float32)
+        na, nb = np.linalg.norm(pa), np.linalg.norm(pb, axis=1)
+        good = (nb > 0) & (na > 0)
+        raw = (pb @ pa) / (na * np.where(good, nb, 1.0))
+        out[np.array(rows)[good]] = np.clip(0.5 * (raw.astype(np.float64)[good] + 1.0), 0, 1)
+    return out, ok
+
+
+def score_pool(seed, cands, clap_a, clap_b, fs=None):
+    """features() over a whole pool as arrays (P7), as recommender._score_pool.
+    clap_b: (n, dim) CLAP rows of cands. Returns F (n, 14) in AXES order and the has-both-lyrics flags."""
+    fs = fs or {}
+    n = len(cands)
+    col = lambda k, dft: np.array([float(c.get(k, dft)) for c in cands], dtype=np.float64)
+    z = lambda k, dft: np.exp(-np.abs(float(seed.get(k, dft)) - col(k, dft)) / (TAU * max(fs.get(k, 1.0), 1e-6)))
+    f = {}
+    if len(clap_a) and np.linalg.norm(clap_a) > 0:
+        f["s_clap"] = np.where(np.linalg.norm(clap_b, axis=1) > 0, np.clip((clap_b @ clap_a).astype(np.float64), 0, 1), 0.5)
+    else:
+        f["s_clap"] = np.full(n, 0.5)
+    f["s_anchor"], _ = _cos01_v(seed.get("anchor_profile"), cands, "anchor_profile")
+
+    def pairs(dist):
+        out = []
+        for k, p in dist.items():
+            try: out.append((float(k), float(p)))
+            except ValueError: continue
+        return out
+    da = seed.get("felt_bpm_dist") or {}
+    hd = np.array([bool(da and c.get("felt_bpm_dist")) for c in cands], dtype=bool)
+    tempo = np.full(n, 0.5)
+    if hd.any():
+        fi, fb, fp = [], [], []
+        for i in np.flatnonzero(hd):
+            for b, p in pairs(cands[i]["felt_bpm_dist"]):
+                fi.append(i); fb.append(b); fp.append(p)
+        fi, fb, fp = np.array(fi, dtype=np.int64), np.array(fb, dtype=np.float64), np.array(fp, dtype=np.float64)
+        ii, tt = [], []
+        for ba, p_a in pairs(da):  # bincount adds each candidate's terms in the loop's order
+            v = (fb > 0) & (ba > 0)
+            ii.append(fi[v]); tt.append(p_a * fp[v] * _fold_v(np.abs(np.log2(ba / fb[v]))))
+        d = np.bincount(np.concatenate(ii), weights=np.concatenate(tt), minlength=n) if ii else np.zeros(n)
+        tempo[hd] = np.clip(1.0 - d[hd], 0, 1)
+    if (~hd).any():
+        ba = float(seed.get("felt_bpm") or seed.get("bpm", 120))
+        rest = np.flatnonzero(~hd)
+        bb = np.array([float(cands[i].get("felt_bpm") or cands[i].get("bpm", 120)) for i in rest], dtype=np.float64)
+        ok = (bb > 0) & (ba > 0)
+        tempo[rest] = np.where(ok, np.clip(1.0 - _fold_v(np.abs(np.log2(ba / np.where(ok, bb, 1.0)))), 0, 1), 0.5)
+    f["s_tempo"] = tempo
+    f["s_pulse"] = z("pulse_rate", .5)
+    kc = np.array([1.0 if seed.get("kick_class") == c.get("kick_class") else 0.0 for c in cands])
+    f["s_groove"] = np.clip((0.4 * kc + 0.2 * z("backbeat", .5) + 0.2 * z("hits_per_bar", 4.0) + 0.1 * z("lag_ms", 0.0)) / 0.9, 0, 1)
+    f["s_dark"] = z("darkness", .5)
+    f["s_grit"] = z("grit", .5)
+    tun = 1.0 - np.abs(float(seed.get("tuning_depth", .5)) - col("tuning_depth", .5))
+    vs = z("syllable_rate", 2.0) + z("sustain_ratio", .5) + z("pitch_range", 12.0) + tun + z("vibrato", 20.0)
+    wa = float(seed.get("lyric_words_per_minute") or 0.0)
+    wb = np.array([float(c.get("lyric_words_per_minute") or 0.0) for c in cands], dtype=np.float64)
+    hw = (wb > 0) & (wa > 0)
+    f["s_vocal"] = np.clip(np.where(hw, (vs + np.maximum(0.0, 1.0 - np.abs(wa - wb) / 100.0)) / 6.0, vs / 5.0), 0, 1)
+    f["s_intimacy"] = z("intimacy", .5)
+    dz_lr = np.abs(float(seed.get("loudness_range", 0.0)) - col("loudness_range", 0.0)) / max(fs.get("loudness_range", 1.0), 1e-6)
+    dz_cf = np.abs(float(seed.get("crest_factor", 0.0)) - col("crest_factor", 0.0)) / max(fs.get("crest_factor", 1.0), 1e-6)
+    f["s_restraint"] = np.exp(-(dz_lr + dz_cf) / 2.0)
+    mean, tok = _cos01_v(seed.get("theme_vec") if seed.get("has_lyrics") else None, cands, "theme_vec")
+    both = tok & np.array([bool(c.get("has_lyrics")) for c in cands], dtype=bool)
+    f["s_meaning"] = np.where(both, mean, 0.5)
+    aff = {}
+    for c in cands:
+        aff.setdefault(c.get("language"), language_affinity(seed.get("language"), c.get("language")))
+    f["s_language"] = np.array([aff[c.get("language")] for c in cands], dtype=np.float64)
+    lb = np.array([1.0 if seed.get("loop_bars") == c.get("loop_bars") else 0.0 for c in cands])
+    riff = np.array([1.0 if bool(seed.get("riff_flag")) == bool(c.get("riff_flag")) else 0.0 for c in cands])
+    f["s_harm"] = np.clip(0.4 * z("changes_per_bar", 1.0) + 0.4 * lb + 0.2 * riff, 0, 1)
+    sim_pol = z("mode_polarity", 0.0)
+    und = np.array([bool(seed.get("mode_undefined") or c.get("mode_undefined")) for c in cands], dtype=bool)
+    f["s_mode"] = np.where(und, 0.7 + MODE_SHRINK * (sim_pol - 0.7), sim_pol)
+    F = np.stack([f[k] for k in AXES], axis=1) if n else np.zeros((0, len(AXES)))
+    return F, both
+
+
 def effective_weights(w, both):
     w_eff = dict(w)
     if not both and w_eff.get("s_meaning", 0.0) > 0.0:
@@ -218,9 +315,7 @@ class Catalogue:
 
     def feature_table(self, seed_key):
         si, pool = self.pool(seed_key)
-        seed = self.meta[si]
-        rows, flags, idxs, srcs = [], [], [], []
-        for idx, src in pool:
-            f, both = features(seed, self.meta[idx], self.clap[si], self.clap[idx], self.feature_std)
-            rows.append([f[k] for k in AXES]); flags.append(both); idxs.append(idx); srcs.append(src)
-        return si, np.array(idxs), np.array(srcs), np.array(rows, dtype=np.float64), np.array(flags, dtype=bool)
+        idxs = np.array([idx for idx, _ in pool], dtype=np.int64)
+        srcs = np.array([src for _, src in pool])
+        F, flags = score_pool(self.meta[si], [self.meta[i] for i in idxs], self.clap[si], self.clap[idxs], self.feature_std)
+        return si, idxs, srcs, F, flags
