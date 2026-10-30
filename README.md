@@ -407,6 +407,26 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 12:40 P4 done except Tests: red on `fetch_lyrics_remote.py` naming a benchmark title
+
+Done under 37c3137 and committed as `9655f41` (`HARVEST_MANIFEST.json`, `DROPPED.jsonl`, the two row-floor edits, the rebuilt tracked index outputs `anchors.json`, `theme_prompts.json`, `track_id_map.json`, and the log in FEEL_ALGORITHM.md).
+
+- Manifest `lyrics_pass` now records the whole pass with each stage: rows_to_fetch 13,866, fetched 12,029, none 1,836, error_after_retry 1; stages shards / second_attempt / resume, each with its own status counts; total status get 200 12,143, get 404 5,098, get 503 23,931, search 200 3,260, search 503 5,161 (503 share 0.5866).
+- en share by `language_source`: lyrics 77.6% (13,069 of 16,840), genre 82.7% (2,028 of 2,452), artist_vote 6.7% (40 of 601).
+- Index: `build_index_v2.py` built CLAP and feel FAISS on 19,999 rows; anchor max cosine 0.803, first-50 mean cosine 0.654; kick and restraint shares match the manifest.
+- `pytest -q tests/test_describe_parity.py` on the new index, 6,475 previews present: **kick_class 20/20, restraint_bucket 20/20, felt_bpm 20/20**.
+- `ECHO_ARTIFACT_DIR=ml/inference python ml/experiments/offline_rerank/report.py --split tune`: positives 81, pooled 19, not pooled 62, hits@10 0, hits@20 0, MRR 0.0009, negatives in top10 0.
+- `--delete-remaining-previews`: deleted 6,475; `ls ml/data/previews | wc -l` -> 0. `df -h`: C: 400G, used 254G, avail 146G (64%).
+- Gates: every gate in the 12:20 table passes, with the language cap reported only and parity now 20/20 x3.
+
+Tests: red, and not from P4. Local `pytest -q tests/` -> 2 failed, 20 passed, 1 skipped (parity, previews deleted), 1 xfailed.
+1. `test_no_benchmark_leakage`: "Leak found in ml/data/fetch_lyrics_remote.py: benchmark entity 'Free Bird'", the `clean_title` docstring example from c1d145b. CI has been red on exactly this since c1d145b (last green 4b29807; latest https://github.com/shreyash616/echo/actions/runs/41016880756). The file is yours and not on my list. GO for me to replace the example with a non-benchmark title (for instance `'Harvest Moon (Live) [Remastered]' -> 'Harvest Moon'`, if that is not a benchmark entity; the test will tell), or will you change it?
+2. `test_offline_replica`: max axis deviation 0.935 between the local rebuilt artifacts and the live Space, which still serves the 10-28 index. Expected until the P5 deploy; CI skips it (no artifacts).
+
+When Tests are green I post `PACKET P4 READY FOR REVIEW` with the URL. No deploy. The work dir `ml/data/redescribe_work/` and `redescribe_work.log` (untracked) are still on disk; I delete them after your review unless you want them gone now.
+
+BLOCKED
+
 ### 2026-10-30 12:20 P4 BLOCKED: language gate (en 75.7%) and build_index_v2's 20,000 guard (19,999 rows)
 
 Shards done 00:41 (13,866 rows, 2 h 15 min, not 7 to 8): fetched 11,948, none 1,754, error_after_retry 164. Merge into `ml/data/lyrics` with no clashes; the second full attempt on the 164 gave fetched 81, none 82, error_after_retry **1**. Status counts summed over the eight shards: get 200 12,068, get 404 4,889, get 503 23,696, search 200 3,089, search 503 4,969 (503 is 58.8% of 48,711 requests; the 5 short retries absorbed it). None list rebuilt by key (2,591 keys); the old one is `lyrics_none.box.txt`.
