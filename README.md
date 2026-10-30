@@ -36,6 +36,31 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 12:52 IST P4 passed; GO P5: deploy and validate
+
+Review, from the files at `9655f41` and the tree at `e7ec9f8`, not from the entries:
+- `HARVEST_MANIFEST.json`: rows 19,999 = previews_decoded = rows_described_from_audio; `rows_with_lyric_file` 17,408 (0.8704); `lyrics_pass` fetched 12,029, none 1,836, `error_after_retry` 1, with the stages and status counts; `describe_commit` 05def45; `feature_std` present. `DROPPED.jsonl` has one row. Every gate passes from the manifest's own numbers.
+- Guards: `build_index_v2.py` 133 and `test_no_benchmark_leakage.py` 65 both read 19,000. `05def45` is the two-line `splitlines()` change and nothing else.
+- Tests green on ad247db (run 41017891238, checked). The replica red is expected and stays.
+- The HF dataset was last modified 2026-10-28 02:05 UTC, so nothing from P4 is live yet; correct, P4 was no-deploy. Delete `ml/data/redescribe_work/` and `redescribe_work.log` now; keep `lyrics_have_ids.txt` tracked as it is.
+
+**GO P5, deploy and validate.** What deploys what, from the code:
+- The Space fetches its artifacts from the dataset at boot (`backend/startup.sh` lines 4 to 41 download `music_index.faiss`, `feel_matrix.npy`, `feel_index.faiss` and the rest from `shreyash616/echo-ml-artifacts`). So the deploy is: dataset upload, backend upload, restart.
+- `tests/deploy_hf.py` uploads the local `ml/inference/*.faiss`, `feel_matrix.npy`, `track_metadata.json`, `HARVEST_MANIFEST.json`, `clap.npy`, `catalog_features.jsonl` to the dataset, the backend files to the Space, then restarts it. Those large files exist only on your disk; git does not track them. Run it first, with the HF token in the environment, never printed.
+- `.github/workflows/deploy.yml` is `workflow_dispatch` only (rule 20a). Dispatch it after `deploy_hf.py` and name the run URL in your entry: `gh workflow run deploy.yml -R shreyash616/echo --ref main`. Its `upload-artifacts` job runs `ml/upload_artifacts.py` from the checkout, where `music_index.faiss` and `track_metadata.json` do not exist; if that job fails on a missing file, report the failure as is. Do not commit the large files to make it pass.
+
+Then validate, every number pasted:
+1. Space health, and `HARVEST_MANIFEST.json` as the Space serves or downloads it shows `describe_commit` 05def45.
+2. Dataset `ml/data/catalog_features.jsonl` LFS sha256 equals the manifest's `ba16a104...377e` (`HfApi().dataset_info(..., files_metadata=True)`).
+3. `ECHO_ARTIFACT_DIR=ml/inference python ml/experiments/offline_rerank/report.py --split tune --validate-live https://shreyash616-echo-backend.hf.space`: max deviation under 0.001.
+4. `python tests/test_live_overlap.py --base-url https://shreyash616-echo-backend.hf.space`: passes.
+5. `python tests/feel_benchmark.py --split tune --base-url https://shreyash616-echo-backend.hf.space`: numbers pasted beside the offline `report.py` numbers from your 12:40 entry.
+6. `pytest -q tests/` fully green, `test_offline_replica` included, and the Tests workflow green on the P5 commit.
+
+Gate: items 1 to 6 as stated; deviation under 0.001 is the hard one. If the Space does not come up or the deviation is above 0.001, post BLOCKED with the Space log lines and the per-axis deviations; do not retune anything.
+
+After the numbers are posted, in the same packet, second commit: `redescribe_catalog.fetch_lyrics` gets the remote fetcher's flow (cleaned title, `/api/get` without album, `/api/search` by fields, then `q=`; Retry-After honoured; five 503 retries at 1 s), and `harvest_v2.py` gets the anchors-bundle key fixed and its bare excepts narrowed to what each block can raise. Nothing else in those files. Post `PACKET P5 READY FOR REVIEW` once.
+
 ### 2026-10-30 12:36 IST P4: leak fixed on my side; post READY with the replica test named as expected red
 
 1. `fetch_lyrics_remote.py` docstring: fixed by me, this commit; the example is now `'Moon River (Demo Version) [Original]' -> 'Moon River'`, checked against every title and artist in `tests/feel_benchmark_v2.json`. Pull it, rerun `pytest -q tests/test_no_benchmark_leakage.py`, and CI should go green on this push. My fault for not running Tests on a reviewer-owned file; it goes on my own checklist.
