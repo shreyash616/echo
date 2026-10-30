@@ -414,6 +414,50 @@ WP3 DEPLOYED. Waiting for the owner's two Space secrets; discovery is not starte
   location, and from the Space it overlaps the charts more. Above zero, as the gate asks.
 - No deploy until the run finishes (it would restart the Space).
 
+### Run finished
+
+- Status (admin route, 2026-10-31): `running false`, `phase "done"`, `error null`, started 2026-10-30T17:20:10Z, finished
+  22:04:22Z (16,864 s, 4.7 h, not the half hour estimated from the first checkpoint: the related calls slowed as the walk deepened
+  and new artists per call fell). Artists 120,000, expanded 95,236, requests 95,417 by the status / 96,741 by the manifest
+  (the manifest counts the closing `nb_fan` fills), failures 0. `stopped_by "cap"`: the walk reached the 120,000 cap.
+
+### Verification block, verbatim (warnings from `huggingface_hub` about symlinks removed)
+
+```
+python -c "from huggingface_hub import hf_hub_download as d; import json; m=json.load(open(d('shreyash616/echo-ml-artifacts','discovery/MANIFEST.json',repo_type='dataset'))); print(m)"
+{'rows': 120000, 'sha256_artists_jsonl': '6ca1a1534f1de2cc77b9ef3e1a531df25e05d51442e9e88b0df7f7a3287b408e', 'counts_per_source': {'seed': 119, 'chart': 1314, 'genre': 10, 'related': 118557}, 'chart_countries': ['AE', 'AR', 'BD', 'BR', 'DE', 'EG', 'ES', 'FR', 'GB', 'HK', 'ID', 'IN', 'IT', 'JP', 'KR', 'MX', 'MY', 'NG', 'PH', 'PK', 'SA', 'SG', 'TH', 'TR', 'TW', 'US', 'VN', 'ZA'], 'chart_country_count': 28, 'chart_kind': {'AE': 'official', 'AR': 'official', 'BD': 'user', 'BR': 'official', 'DE': 'official', 'EG': 'official', 'ES': 'official', 'FR': 'official', 'GB': 'official', 'HK': 'user', 'ID': 'official', 'IN': 'user', 'IT': 'official', 'JP': 'official', 'KR': 'official', 'MX': 'official', 'MY': 'official', 'NG': 'official', 'PH': 'official', 'PK': 'user', 'SA': 'official', 'SG': 'official', 'TH': 'official', 'TR': 'official', 'TW': 'user', 'US': 'official', 'VN': 'user', 'ZA': 'official'}, 'official_chart_countries': 22, 'charts': {'SG': {'title': 'Top Singapore', 'playlist_id': 1313620765, 'chart_kind': 'official', 'artists': 86, 'new': 84}, 'US': {'title': 'Top USA', 'playlist_id': 1313621735, 'chart_kind': 'official', 'artists': 65, 'new': 57}, 'GB': {'title': 'Top UK', 'playlist_id': 1111142221, 'chart_kind': 'official', 'artists': 77, 'new': 34}, 'ES': {'title': 'Top Spain', 'playlist_id': 1116190041, 'chart_kind': 'official', 'artists': 53, 'new': 35}, 'MX': {'title': 'Top Mexico', 'playlist_id': 1111142361, 'chart_kind': 'official', 'artists': 54, 'new': 43}, 'BR': {'title': 'Top Brazil', 'playlist_id': 1111141961, 'chart_kind': 'official', 'artists': 67, 'new': 59}, 'AR': {'title': 'Top Argentina', 'playlist_id': 1279119721, 'chart_kind': 'official', 'artists': 60, 'new': 31}, 'KR': {'title': 'Top South Korea', 'playlist_id': 1362510315, 'chart_kind': 'official', 'artists': 87, 'new': 77}, 'JP': {'title': 'Top Japan', 'playlist_id': 1362508955, 'chart_kind': 'official', 'artists': 74, 'new': 60}, 'FR': {'title': 'Top France', 'playlist_id': 1109890291, 'chart_kind': 'official', 'artists': 73, 'new': 51}, 'DE': {'title': 'Top Germany', 'playlist_id': 1111143121, 'chart_kind': 'official', 'artists': 78, 'new': 9}, 'IT': {'title': 'Top Italy', 'playlist_id': 1116187241, 'chart_kind': 'official', 'artists': 77, 'new': 13}, 'ID': {'title': 'Top Indonesia', 'playlist_id': 1116188761, 'chart_kind': 'official', 'artists': 79, 'new': 53}, 'PH': {'title': 'Top Philippines', 'playlist_id': 1362518895, 'chart_kind': 'official', 'artists': 80, 'new': 40}, 'TR': {'title': 'Top Turkey', 'playlist_id': 1116189071, 'chart_kind': 'official', 'artists': 72, 'new': 6}, 'NG': {'title': 'Top Nigeria', 'playlist_id': 1362516565, 'chart_kind': 'official', 'artists': 69, 'new': 59}, 'ZA': {'title': 'Top South Africa', 'playlist_id': 1362528775, 'chart_kind': 'official', 'artists': 83, 'new': 20}, 'SA': {'title': 'Top Saudi Arabia', 'playlist_id': 1362521285, 'chart_kind': 'official', 'artists': 79, 'new': 59}, 'EG': {'title': 'Top Egypt', 'playlist_id': 1362501615, 'chart_kind': 'official', 'artists': 64, 'new': 47}, 'AE': {'title': 'Top United Arab Emirates', 'playlist_id': 1362491345, 'chart_kind': 'official', 'artists': 69, 'new': 24}, 'TH': {'title': 'Top Thailand', 'playlist_id': 1362524475, 'chart_kind': 'official', 'artists': 75, 'new': 45}, 'MY': {'title': 'Top Malaysia', 'playlist_id': 1362515675, 'chart_kind': 'official', 'artists': 62, 'new': 44}, 'IN': {'title': 'Bollywood Top 50 (Filtr Arabia)', 'playlist_id': 5714603022, 'chart_kind': 'user', 'artists': 52, 'new': 51}, 'PK': {'title': 'TRENDING PAKISTANI SONGS 2025', 'playlist_id': 15038204963, 'chart_kind': 'user', 'artists': 49, 'new': 39}, 'BD': {'title': 'Top Bangla Songs 2024', 'playlist_id': 13175326563, 'chart_kind': 'user', 'artists': 73, 'new': 73}, 'TW': {'title': 'Top 50 - Taiwan', 'playlist_id': 10561367522, 'chart_kind': 'user', 'artists': 39, 'new': 31}, 'HK': {'title': 'Hong Kong 2025', 'playlist_id': 13617318101, 'chart_kind': 'user', 'artists': 71, 'new': 70}, 'VN': {'title': 'Vietnamese (V-Pop) 2026', 'playlist_id': 14760476603, 'chart_kind': 'user', 'artists': 100, 'new': 100}}, 'depths': {'0': 1443, '1': 9831, '2': 24330, '3': 34032, '4': 31519, '5': 18845}, 'expanded': 95236, 'stopped_by': 'cap', 'unresolved_seed_ids': 0, 'requests': 96741, 'failed_requests': 0, 'shards': 480, 'shard_size': 250, 'elapsed_s': 17050, 'finished_at': '2026-10-30T22:04:20+0000'}
+```
+
+Beyond the block: `artists.jsonl` and `shards.json` downloaded from the dataset and checked against the manifest
+(`scratchpad/verify_wp3.py`):
+
+```
+rows 120000 | manifest rows 120000
+sha ok: True
+unique ids: True
+sources: {'seed': 119, 'chart': 1314, 'genre': 10, 'related': 118557}
+chart kinds: {'official': 22, 'user': 6} | countries 28
+shards 480 size 250 | every artist exactly once: True
+first {'shard': 'a00000', 'start': 0, 'end': 250, 'first_deezer_id': 816, 'last_deezer_id': 219242275} last {'shard': 'a00479', 'start': 119750, 'end': 120000, 'first_deezer_id': 107943672, 'last_deezer_id': 195921677}
+```
+
+### Gate
+
+- At least 80,000 artists: 120,000. Met.
+- Counts per source above zero: chart 1,314, related 118,557, genre 10. Met (genre is thin; see Noticed).
+- At least 28 chart countries with `chart_kind` each, at least 22 `official`: 28 countries, 22 `official`, 6 `user`. Met.
+- `shards.json` covering every artist exactly once: 480 shards of 250, rows 0 to 120,000, each row covered once. Met.
+- The SHA256 of `artists.jsonl` on the dataset equals the manifest's `6ca1a153...`. Met.
+
+PACKET WP3 READY FOR REVIEW.
+
+### Noticed (run)
+
+- Genre added 10 new artists from the Space against 43 in the box dry run; every other genre-page artist was already there from
+  the seeds and charts. Above zero as the gate asks; a reviewer call whether genre needs another source.
+- Depths 0 to 5 (1,443 / 9,831 / 24,330 / 34,032 / 31,519 / 18,845): 85% of the artists are 3 or more related hops from a seed
+  or chart. Shards run in file order, so the early shards are the near ones; that is the order section 5 asks for.
+
 ## WP4. Harvester on one fixture shard
 
 - Started: 2026-10-30 23:05 IST, as the 21:48 GO allows once discovery was checkpointing (first checkpoint 22:52).
