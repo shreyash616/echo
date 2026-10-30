@@ -115,9 +115,8 @@ def features(seed, cand, clap_a, clap_b, fs=None):
     kc = 1.0 if seed.get("kick_class") == cand.get("kick_class") else 0.0
     bb_sim = z("backbeat", .5)
     hpb = z("hits_per_bar", 4.0)
-    sw = z("swing", .5)
     lag = z("lag_ms", 0.0)
-    f["s_groove"] = float(np.clip(0.4 * kc + 0.2 * bb_sim + 0.2 * hpb + 0.1 * sw + 0.1 * lag, 0, 1))
+    f["s_groove"] = float(np.clip((0.4 * kc + 0.2 * bb_sim + 0.2 * hpb + 0.1 * lag) / 0.9, 0, 1))  # T3.5, no swing
     f["s_dark"] = z("darkness", .5)
     f["s_grit"] = z("grit", .5)
     syl = z("syllable_rate", 2.0)
@@ -196,8 +195,8 @@ class Catalogue:
                 self.id_map[f"it_{r['itunes_id']}"] = i
         self.weights_live = json.load(open(f"{HF}/rerank_weights.json"))
         self.feature_std = self.header.get("feature_std") or {}
-        self.k_clap = 500
-        self.k_feel = 600
+        self.k_clap = 300  # as config.candidates_clap
+        self.k_feel = 1500  # as config.candidates_feel
 
     def pool(self, seed_key, k_clap=None, k_feel=None):
         k_clap = k_clap or self.k_clap

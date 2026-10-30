@@ -2,8 +2,8 @@
 tests/test_candidate_pool.py: Measures candidate pool coverage on TUNE seeds (S1).
 Asserts:
 - Reports, for each of the 4 TUNE seeds, which benchmark positives are in the union pool.
-- At least 6 of the 11 owner positives are in the union pool across the four seeds.
-- Server-side p95 of /api/recommendations for an in-catalogue seed stays under 300 ms (via X-Process-Time).
+- At least 8 of the 11 owner positives are in the union pool across the four seeds.
+- Server-side p95 of /api/recommendations over 20 in-catalogue calls stays under 0.300 s (X-Process-Time, seconds).
 """
 from __future__ import annotations
 
@@ -75,9 +75,13 @@ def run_candidate_pool_test(base_url: str | None = None):
         rec_res = client.get(f"/api/recommendations/{track_id}?key={track_key}&debug=1")
         assert rec_res.status_code == 200, f"Rec failed for {track_id}: {rec_res.text}"
 
-        pt = rec_res.headers.get("X-Process-Time")
-        if pt:
-            process_times.append(float(pt.replace("ms", "").strip()))
+        # 20 timed plain calls, 5 per seed (backend/main.py writes X-Process-Time in seconds)
+        for _ in range(5):
+            t_res = client.get(f"/api/recommendations/{track_id}", params={"key": track_key})
+            assert t_res.status_code == 200, f"Rec failed for {track_id}: {t_res.text}"
+            pt = t_res.headers.get("X-Process-Time")
+            if pt:
+                process_times.append(float(pt))
 
         rec_data = rec_res.json()
         pool_tracks = (
@@ -116,22 +120,20 @@ def run_candidate_pool_test(base_url: str | None = None):
 
     print("\n" + "=" * 95)
     print("Summary:")
-    print(f"  Owner Positives in Union Pool: {positives_in_pool} / {total_owner_positives} (Required >= 6 of 11)")
+    print(f"  Owner Positives in Union Pool: {positives_in_pool} / {total_owner_positives} (Required >= 8 of 11)")
     print(f"  All Positives in Union Pool:   {all_in_pool} / {all_benchmark_positives}")
-    if process_times:
-        p95 = np.percentile(process_times, 95)
-        print(f"  Server-side p95 Process Time:  {p95:.2f} ms (Required < 300 ms)")
-        assert p95 < 300.0, f"Server p95 {p95:.2f} ms exceeds 300 ms limit"
+    print(f"  X-Process-Time per call (s):   {', '.join(f'{t:.3f}' for t in process_times)}")
+    assert len(process_times) == 20, f"Expected 20 timed calls, got {len(process_times)}"
+    p95 = np.percentile(process_times, 95)
+    print(f"  Server-side p95 Process Time:  {p95:.3f} s (Required < 0.300 s)")
+    assert p95 < 0.300, f"Server p95 {p95:.3f} s exceeds 0.300 s"
     print("=" * 95)
 
-    assert positives_in_pool >= 6, (
-        f"Candidate pool test failed: only {positives_in_pool}/{total_owner_positives} positives in pool (required >= 6)"
+    assert positives_in_pool >= 8, (
+        f"Candidate pool test failed: only {positives_in_pool}/{total_owner_positives} positives in pool (required >= 8)"
     )
 
 
-# Reviewer decision 2026-10-30 (f864957): 4 of 11 on the P4 index is a known state fixed by T6 (P7).
-# strict=True turns an unexpected pass into a failure, so P7 must delete this marker.
-@pytest.mark.xfail(strict=True, reason="4 of 11 owner positives on the P4 index; T6 pools (FIX_PLAN_2.md P7) must delete this marker")
 def test_candidate_pool():
     # Pytest entry point (runs against local or default if available)
     base_url = os.environ.get("ECHO_BASE_URL") or os.environ.get("TEST_BASE_URL", "https://shreyash616-echo-backend.hf.space")

@@ -671,13 +671,13 @@ class MusicRecommender:
         # 4. s_pulse
         s_pulse = z("pulse_rate", 0.5)
 
-        # 5. s_groove
+        # 5. s_groove (T3.5: swing is constant in the catalogue and left out; the other four
+        # inner weights 0.4, 0.2, 0.2, 0.1 renormalised to sum to 1)
         kc_eq = 1.0 if seed.get("kick_class") == cand.get("kick_class") else 0.0
         bb_sim = z("backbeat", 0.5)
         hpb_sim = z("hits_per_bar", 4.0)
-        swing_sim = z("swing", 0.5)
         lag_sim = z("lag_ms", 0.0)
-        s_groove = float(np.clip(0.4 * kc_eq + 0.2 * bb_sim + 0.2 * hpb_sim + 0.1 * swing_sim + 0.1 * lag_sim, 0.0, 1.0))
+        s_groove = float(np.clip((0.4 * kc_eq + 0.2 * bb_sim + 0.2 * hpb_sim + 0.1 * lag_sim) / 0.9, 0.0, 1.0))
 
         # 6. s_dark
         s_dark = z("darkness", 0.5)

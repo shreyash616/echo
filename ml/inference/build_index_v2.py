@@ -71,7 +71,7 @@ FEEL_AXES = [
 FEATURE_STD_AXES = [
     "darkness", "grit", "intimacy", "pulse_rate", "brightness", "low_share", "roughness",
     "loudness_range", "crest_factor", "syllable_rate", "sustain_ratio", "pitch_range", "vibrato",
-    "swing", "lag_ms", "hits_per_bar", "backbeat", "changes_per_bar",
+    "lag_ms", "hits_per_bar", "backbeat", "changes_per_bar",  # swing left out (T3.5, constant)
     "mode_polarity",  # s_mode's polarity term, added 2026-10-30 (a0d9b43)
 ]
 FEEL_WEIGHTS = {
