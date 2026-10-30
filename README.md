@@ -36,6 +36,18 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 18:08 IST P7: vectorise MMR and pair scoring, same arithmetic; then the pool size follows the measured p95
+
+The profile answers it: FAISS is 0%, the two hot blocks are Python loops whose cost is per candidate, and neither needs to be. Pool size is not what moves first.
+
+1. MMR, `recommender.py` 936 to 975. Build once per call `C = np.stack(cand_claps)` (pool x 512, the records' order) and `max_sim = np.zeros(len(C))`. Per pick: the scores, caps and budget penalties computed as arrays over the remaining candidates, `mmr = diversity * score - (1 - diversity) * max_sim - 100 * capped - 50 * budget_exceeded`, `best = int(np.argmax(mmr))`; after the pick, `max_sim = np.maximum(max_sim, C @ C[best])` and drop the picked row (a boolean mask over the pool is simpler than popping). Same ordering rule for ties as today: the first index wins (`np.argmax` does that; the loop's `>` does too). Same `best_same` computation. Result must be the identical 20 tracks in the identical order on every TUNE seed.
+2. Pair scoring, `_compute_pair_score` for the pool. Add a `_score_pool(seed, cands)` that computes every axis over the pool as arrays with the same formulas (the `z()` exponentials, `s_restraint`, `s_harm`, `s_mode` with `MODE_SHRINK`, the inner weights of `s_vocal` and `s_groove`, the clips) and returns scores, axes and reasons per candidate; the `/api/recommendations` path calls it in place of the loop at 912 to 914. Keep `_compute_pair_score` for single pairs (`debug=1`, `/api/track`) and as the reference. Mirror in `score_lib.py` so the replica scores the pool the same way.
+3. Exactness gate, before either loop is removed from the hot path: a one-off script under `ml/experiments/offline_rerank/` that, for all nine TUNE seeds at 300 / 1500, scores the pool both ways and asserts max abs difference <= 1e-6 on every axis and on the score, and that the vectorised MMR returns the same 20 ids in the same order as the loop. Paste the nine max differences. Then `--validate-live` 0.0000 after deploy as usual.
+4. Measure at 300 / 1500 first: the 20 timings and p95. Then set `candidates_feel` by the number, no judgement call: if p95 at 300 / 3000 is under 0.300 s, 3,000 ships (your table says both pool gates are met exactly there); otherwise 1,500 ships and the pool gate is restated to the measured 30 of 81 and 7 of 11 with the reason in the log. Post both p95 values. FIX_PLAN_2 records this rule.
+5. Then the usual: deploy named, validate, live pool test with the assert at whatever the shipped size meets, `pytest -q tests/`, Tests green, `PACKET P7 READY FOR REVIEW`.
+
+Expectation, from the shares: on the box 0.345 s goes to roughly 0.02 s; on the Space, about twice that. 3,000 should fit. If it does not, item 4 decides without another round trip.
+
 ### 2026-10-30 16:29 IST P7: boot backoff now (b), one restart meanwhile (a); pools stay 300 / 1500 until p95 is measured
 
 Good diagnostic; it settles the pool question and names the real ceiling.
