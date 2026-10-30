@@ -557,6 +557,48 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 18:40 IST P7 BLOCKED on one test: 300 / 3000 meets every gate, and the P8 canary now passes under its strict marker
+
+Everything in 601081a is done and holds; Tests are red on one test, `test_no_constant_fields`, XPASS(strict). Its marker is P8's to delete and the file is not in P7's list, so I have not touched it.
+
+**Exactness gate** (`ml/experiments/offline_rerank/exactness_p7.py`, `9765c5e`), all nine TUNE seeds, run at both sizes, identical maxima:
+
+| seed | pool 1500 / 3000 | max axis diff | max score diff | reasons | MMR 0.70 | MMR 1.0 |
+|---|---|---|---|---|---|---|
+| Simple Man | 1743 / 3214 | 1.79e-07 | 2.18e-08 | same | same 20 | same 20 |
+| Waiting Around to Die | 1722 / 3171 | 1.79e-07 | 2.18e-08 | same | same 20 | same 20 |
+| Bang Data | 1700 / 3138 | 1.79e-07 | 2.84e-08 | same | same 20 | same 20 |
+| Boyfriend | 1687 / 3130 | 1.19e-07 | 2.18e-08 | same | same 20 | same 20 |
+| Hurt | 1725 / 3190 | 1.79e-07 / 1.19e-07 | 2.98e-08 | same | same 20 | same 20 |
+| Tum Hi Ho | 1730 / 3201 | 1.19e-07 | 2.04e-08 | same | same 20 | same 20 |
+| Mask Off | 1757 / 3218 | 1.79e-07 | 2.04e-08 | same | same 20 | same 20 |
+| Get Lucky | 1757 / 3222 | 1.79e-07 | 1.89e-08 / 2.04e-08 | same | same 20 | same 20 |
+| Tomboy | 1720 / 3176 | 1.79e-07 | 2.44e-08 | same | same 20 | same 20 |
+
+The replica's `score_pool` against `features` gives the same maxima. The 1e-7 is float32 BLAS rounding on the cosines. One departure from your sketch: `max_sim` is set by the first pick's `C @ C[best]` and only then maxed. A zero start would differ from the loop whenever every cosine to the picks is negative.
+
+**p95, live, 20 in-catalogue calls each:**
+- **300 / 1500** (run 41058249270, Space `278891a0`): deviation 0.0000, owner 7 / 11. Timings in seconds: 0.056, 0.094, 0.058, 0.058, 0.094, 0.060, 0.081, 0.057, 0.091, 0.088, 0.067, 0.070, 0.069, 0.070, 0.069, 0.054, 0.064, 0.066, 0.065, 0.065. **p95 0.094 s** (was 1.030).
+- **300 / 3000** (`599e64f`, run 41058666295): owner **8 / 11** (Stairway in), all positives in the debug pools 35 / 67. Timings in seconds: 0.106, 0.119, 0.105, 0.098, 0.109, 0.102, 0.113, 0.109, 0.104, 0.105, 0.107, 0.099, 0.106, 0.106, 0.103, 0.114, 0.106, 0.101, 0.429, 0.096. **p95 0.135 s**.
+- By the rule, **3000 ships** and is what is deployed now. `test_candidate_pool` passes with no marker and asserts `>= 8`.
+- Replica at 3000: pooled **36 of 81**, hits@10 1, hits@20 1, MRR 0.0020 (P6: 1 / 1 / 0.0020).
+
+**Replica defect, fixed in `cfe10ac`** (`score_lib.py` only). At 3000, `--validate-live` first read **0.1250** on `s_language`: Get Lucky to Shakira "Ciega, Sordomuda", live 0.825, replica 0.70.
+- The Space reads `ml/inference/language_affinity.json` before the rule table, as FEEL_ALGORITHM 11.8.3 specifies. The replica said "no learned file".
+- Six pairs differ: en / es 0.825, en / ru 0.525, en / zh-cn 0.6. Feel 3000 is the first pool to put such a pair in a validated top 20.
+- `score_lib.language_affinity` now reads the learned table first. `--validate-live` **0.0000**; the replica headline is unchanged at both sizes.
+
+**The blocker.** `pytest -q tests/`: 22 passed, 1 skipped, 1 failed. CI Tests run 41059342137 shows the same single failure.
+- At 300 / 3000, frozen seed `it_1284592099` (JINBO the SuperFreak, ko) gets a cross-language first result: Mariya Takeuchi "A Door of the Life" (ja, affinity 0.85, score 0.807).
+- So `languageAffinity` on `results[0]` takes two values over the 50 seeds, and the canary passes under `strict=True`.
+- The other 49 first results are still same-language, so `s_language` at 0.21 still dominates. The pool growth let one east-Asian near-group neighbour through. T7's cap has not been applied.
+
+Your call:
+- **(a)** P7 deletes the marker and its two-line comment in `tests/test_no_constant_fields.py`, and P8's gate keeps the cross-language condition as an assert, not a marker.
+- **(b)** Something else you name.
+
+On your word I commit it, confirm Tests green, and post `PACKET P7 READY FOR REVIEW`. BLOCKED
+
 ### 2026-10-30 16:50 P7 BLOCKED on latency: live p95 1.030 s at 300 / 1500; profile below
 
 The backoff worked: redeployed with `0dbcf85` (`deploy.yml` https://github.com/shreyash616/echo/actions/runs/41045004233), RUNNING at 16:32:39, health ok twice; runtime sha = Space repo sha `d4a3d6dc`; the Space's `startup.sh` has `range(12)` and its `config.py` 300 / 1500. (The one restart on the old code at 16:31 was overtaken by the redeploy.)
