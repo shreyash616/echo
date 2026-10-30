@@ -36,6 +36,21 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 20:05 IST P8 passed; GO P9: section 6 acceptance, measured live, failures stated as failures
+
+Review from the tree at `61813e6`: `f35b878` is `WEIGHTS_REPORT.md` only and it says what 79c1435 required, both befores, the unshipped chosen row with the reason, the shipped row, HOLDOUT read once with the note; `rerank_weights.json` is evaluation 1748; `build_index_v2.py` carries the P7 feel weights; Deploy 41071072564 and Tests 41070946227 green, checked. The gate table holds. Good packet; the alignment work is why 3 / 5 live equals 3 / 5 replica without a second search.
+
+**GO P9.** Deliverable: one log entry in `FEEL_ALGORITHM.md` under Packet P9, every row of FIX_PLAN_2 section 6 measured against the live Space as served now (`6b768fbf`), each with the exact command and the number it printed, pass or fail stated per row. No code changes, no tuning, no redeploy; if a measurement needs a script that does not exist, write it under `ml/experiments/offline_rerank/` and name it in the row.
+
+Rows, in the table's order: pooled TUNE positives (`report.py` pooled); owner positives in the pool (`test_candidate_pool.py --base-url`); TUNE recall@20 and recall@10 (`feel_benchmark.py --split tune --base-url`); negatives in top 10; `test_live_overlap.py`; the Simple Man, Waiting Around to Die, Boyfriend and Bang Data per-seed rows from the live top 20 / top 10, tracks named; feel axes with pool std under 0.05 on three or more TUNE seeds (`report.py` std table); rows described from decoded audio (the manifest); `language_source = lyrics` share (the manifest); the 14 benchmark seeds on their declared language (`/api/track` live, the 14 rows); replica vs live deviation; server-side p95; CI on main with the T9 list; HOLDOUT recall@20, read once here and nowhere else (`feel_benchmark.py --split holdout --base-url`).
+
+Three additions to the table, measured and reported, not gated:
+1. p95 over 100 in-catalogue calls, not 20, with every call's seed and time, so the 0.42 s outlier that has appeared once per 20 in two packets is characterised: which seed, first call after a seed switch or not, and whether it is the Space's cold path (a per-seed cache) or something else. Say what you find, change nothing.
+2. `unpooled_ranks.py` rerun at the served state: how many TUNE positives are absent, inside feel 3,000, 3,000 to 5,000, deeper.
+3. Rooster, Tidal Wave and Black: whether any of them reached the live top 20 on its seed, as section 6's last paragraph asks; no tuning toward them.
+
+Where a row fails, write the number and "fail"; section 6's requirement column stays as written. Then `PACKET P9 READY FOR REVIEW`. After my review, round 2 closes and SCALE_PLAN WP0 opens; the owner's terminal-window request (15:16, corrected 15:40) applies from the first WP that describes audio.
+
 ### 2026-10-30 19:47 IST P8: (a), ship evaluation 1748; HOLDOUT stays as read; then READY
 
 Checked from the tree: `9935a22` touches the five P8 files and `build_index_v2.py` for the write-back; the log has 2,301 lines and one holdout line, the last; `rerank_weights.json` sums to 1.0 with `s_clap + s_anchor` 0.249, `s_language` 0.0016, `s_mode` 0.012, no axis above 0.25; Tests 41066582547 and Deploy 41068583212 green. Live agreeing hit for hit with the replica, 3 / 5, is what the alignment work was for.
