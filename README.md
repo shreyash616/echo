@@ -702,6 +702,40 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 21:45 IST PACKET WP2 READY FOR REVIEW
+
+Seven files as amended at 3b44f87. Commits: `15db12e` (the five), `2c67304` (no JSON fallback, `startup.sh`, the pin) and `c5f7a42` (the `SCALE_PROGRESS.md` entry, with the block verbatim).
+- **Build:** `build_index_v3.py` runs `build_index_v2.main()` unchanged into a scratch directory. It checks those rows and the header equal the served `track_metadata.json` (`True`), then writes the section 6 files.
+- **Loader:** `recommender.py` loads the columnar set only, through `ColumnarRows` (the JSON row's fields, field order and Python types) and `KeyLookup`. A missing or unreadable file is logged by name and leaves `recommender_loaded` false; `test_columnar_loader` covers both cases.
+- **Replica:** `score_lib` reads the same files through the same two classes.
+
+Block results:
+- **Build:** 19,999 rows, 66 fields; the six files written.
+- **Tests:** the four test files 21 passed.
+- **Deploy:** `deploy_hf.py` uploaded the new set; `deploy.yml` run 41086058209; health `recommender_loaded: true` on the rebuilt Space `1095b439`.
+- **Replica:** `report.py` pooled 36, hits@10 3, hits@20 5, MRR 0.0170, negatives 0; deviation **0.0000**.
+- **Overlap:** passes.
+
+Beyond the block:
+- **Alignment:** `align_p8.py` with the side record recreated, **20 of 20 in the same order on all nine**.
+- **Pool test:** owner 8 of 11.
+- **Full suite:** 29 passed, 1 skipped; Tests run 41085686410 green (attempt 2, rerun after the deploy).
+
+**Float16.** The max abs difference between the float16-rounded-back CLAP rows and `clap.npy`'s unit rows is **6.104e-05**.
+- No served rank moved, and no seed's top 20 changed order.
+- Before the deploy, the columnar replica read 0.0001 against the JSON-served Space; after it, 0.0000. That shows the live Space reads the new files.
+- Below the served lists, the pools are identical and pre-MMR positions 1 to 60 are identical on all nine.
+- Near-tied candidates deeper down swap: the first at rank 97 to 290, mostly from float16 (float32 CLAP alone gives 0 to 8 swaps, at rank 268 or deeper).
+
+**p95** is reported: **0.225 s** (P9: 0.105 s). Each call now assembles about 3,200 candidate dicts from columns, about 35 ms on the box. `_score_pool` reading columns by index would remove it; that is a WP7 serving change.
+
+Departures from section 6, all in the entry:
+- **Types:** ints stay int64 and flags stay bool.
+- **Fields:** every JSON field is carried, adding `deezer_id`, `genre`, `decade`, `language_conf` and `anchor_cosines`.
+- **Keys:** `keys.npy` is sorted blake2b-64 hashes with exact confirmation, because fixed-width strings were 86 MB at 20,000 rows against 480 KB.
+
+PACKET WP2 READY FOR REVIEW
+
 ### 2026-10-30 21:15 IST WP2 question before the deploy: two files outside the list
 
 WP2 has started; I am building and testing locally. Two files the deploy needs are not among the five:
