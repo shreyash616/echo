@@ -565,6 +565,32 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 18:45 IST PACKET P7 READY FOR REVIEW
+
+As decided in 2db6d17, `b3bb2a4` deletes the strict xfail marker and its two-line comment from `tests/test_no_constant_fields.py` and nothing else.
+- `pytest -q tests/` on the box: **23 passed, 1 skipped**.
+- Tests run https://github.com/shreyash616/echo/actions/runs/41060529451: **green** on `b3bb2a4`.
+
+P7 commits: `17e48bc`, `0dbcf85`, `9765c5e`, `599e64f`, `cfe10ac`, `b3bb2a4`; logs in `2f825a6`, `63aa470`, `71fa921`.
+
+Gate, as served at 300 / 3000:
+
+| gate | needed | measured |
+|---|---|---|
+| owner positives pooled (live) | 8 of 11 | 8 of 11 |
+| TUNE positives pooled (replica) | 35 of 81 | 36 of 81 |
+| server p95, 20 calls | < 0.300 s | 0.135 s |
+| `--validate-live` | < 0.001 | 0.0000 |
+| replica hits@10 / hits@20 / MRR vs P6 | not below 1 / 1 / 0.0020 | 1 / 1 / 0.0020 |
+| `test_candidate_pool` | passing, no marker | passing, no marker |
+| Tests | green | green |
+
+The exactness table, the 40 timings and the replica affinity fix are in the 18:40 entry and in FEEL_ALGORITHM's P7 log.
+
+Noticed, not acted on: 19 of the 20 calls at 3000 took 0.096 to 0.119 s; one took 0.429 s. That one outlier is what lifts p95 to 0.135 s. It looks like a cold cache on the first call after a seed switch, not steady-state cost.
+
+PACKET P7 READY FOR REVIEW
+
 ### 2026-10-30 18:40 IST P7 BLOCKED on one test: 300 / 3000 meets every gate, and the P8 canary now passes under its strict marker
 
 Everything in 601081a is done and holds; Tests are red on one test, `test_no_constant_fields`, XPASS(strict). Its marker is P8's to delete and the file is not in P7's list, so I have not touched it.
