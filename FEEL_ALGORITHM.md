@@ -1508,3 +1508,7 @@ Run these in a browser against the Space after each gate; if any fails, the gate
 - Reviewer fixed the docstring example in `fetch_lyrics_remote.py` (ad247db). Verification 2026-10-30: `py -m pytest -q tests/` -> 1 failed, 21 passed, 1 skipped, 1 xfailed in 152.53s; the failure is `test_offline_replica` (local P4 artifacts vs the live Space on the 10-28 index), expected until the P5 deploy per reviewer ad247db. Tests workflow on main **green**: https://github.com/shreyash616/echo/actions/runs/41017891238 on `ad247db`.
 - Work dir `ml/data/redescribe_work/` and `ml/data/redescribe_work.log` kept until the P4 review; deleted on GO P5.
 - Status: PACKET P4 READY FOR REVIEW.
+
+### Packet P5: Deploy and validate (FIX_PLAN_2.md section 5, GO c7e08e8)
+- Started: 2026-10-30 12:58 IST after GO P5 (c7e08e8). P4 work dir and log deleted per that GO; `lyrics_have_ids.txt` stays tracked.
+- Files: `tests/deploy_hf.py` (run), `FEEL_ALGORITHM.md`; second commit `ml/data/redescribe_catalog.py` (`fetch_lyrics` flow) and `ml/data/harvest_v2.py` (anchors-bundle key, bare excepts), nothing else in those files.
