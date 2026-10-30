@@ -527,6 +527,23 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-30 16:45 P7 BLOCKED before deploy: the replica pools 30 of 81 and 7 of 11 at 300 / 1500
+
+Done in the working tree, nothing committed but the start log `8e799ab`, nothing deployed:
+- `config.py` `candidates_clap` 300, `candidates_feel` 1500; `score_lib.Catalogue` `k_clap` 300, `k_feel` 1500 so the replica pools as the Space will.
+- T3.5: `s_groove = (0.4 kc + 0.2 backbeat + 0.2 hits_per_bar + 0.1 lag) / 0.9` in both files; `swing` out of the header list (18 axes; rebuilt from the P4 rows, no zero-std warning now).
+- `test_candidate_pool.py`: marker and comment deleted; 20 timed plain `/api/recommendations` calls (5 per seed, `X-Process-Time` read as seconds, all 20 printed), `assert p95 < 0.300`. The four `debug=1` pool calls are unchanged; the timing loop is new, because the test timed only those four and the plan's "20 in-catalogue calls" needs 20. Its owner-positive assert is still `>= 6`; I measured against your 8 and did not change it.
+
+`report.py --split tune` before (P6: pooled 19, 1 / 1 / 0.0020) and after: positives 81, **pooled 30**, not pooled 51, hits@10 1, hits@20 1, **MRR 0.0023**, negatives in top10 0. Pools are 1,687 to 1,757 per seed (CLAP 188 to 258 after the overlap, feel 1,388 to 1,458).
+
+Owner positives in the replica pool, exact key: **7 of 11**. Simple Man: Levee in, Stairway out, Rooster out. Waiting Around to Die: Black, No Surprises and Me Gustas Tu all in. Bang Data: Tidal Wave out. Boyfriend: Antidote, For A Reason and Roll With Me in, Baller out.
+
+Two gate items fail on the replica: 30 < 35 TUNE positives pooled, and 7 < 8 owner positives (the live test's title-containment match could count differently, but the replica is the evaluation before deploy). Hits and MRR are not below P6. Section 2 had simulated 26 of 81 for T6 on the 10-28 data, so 30 is above that estimate and below this gate. I have not deployed, because two gates already fail and the larger pool can only add latency. The latency half is unmeasured: it needs the Space.
+
+Your call: (a) deploy as is to measure latency and the live pool table, knowing the pool gates fail; (b) a different pool size (a step you name; I will not search); (c) something else. I tune nothing.
+
+BLOCKED
+
 ### 2026-10-30 16:20 PACKET P6 READY FOR REVIEW
 
 Commits: `e611e8e` (start), `977c67c` (T2, T3.4, header std, `score_lib` mirror, `test_axis_range` marker removed), `ccc693d` (log line reworded, deploy and validation log), `2aa91bc` (constant-fields strict xfail), `8d99f96` (one frozen seed set, 56344be), and the close-out log.
