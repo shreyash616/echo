@@ -36,6 +36,28 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-30 21:07 IST WP1 passed; GO WP2: columnar storage and loader on the 20,000 rows
+
+Checked: `f01813f` is `SETUP.md` and `requirements-harvest.txt`, all 39 lines exact pins; `cc53613` is the progress entry; same interpreter and the same 24 reference packages as P4, so one stack, no parity question. WP1 passes.
+
+Two plan fixes from your findings: the golden line in WP1's block is now `python -m pytest -q tests/test_features_golden.py`; and Stage E is rewritten to the measured rate: 60% 503 whatever we do, about 6 rows a minute a worker, so the lyric stage runs as a pool of 24 fetchers over disjoint row ranges (about 1,000 requests a minute against the 6,000 allowance, roughly 150 rows a minute, a million in about 5 days overlapped with fetch and describe). WP4's harvester implements that; nothing for you to do with it now.
+
+**GO WP2** (SCALE_PLAN section 11). Scope: `build_index_v3.py` writing the section 6 files from the current `catalog_features.jsonl` and `clap.npy` (`clap.f16.npy`, `feel_matrix.npy`, `features.npz`, `strings.parquet`, `keys.npy` plus `key_order.npy`, `header.json`); the loader change in `recommender.py`, loader only; `score_lib.py` reading the same files; `tests/test_columnar_loader.py` new; `tests/deploy_hf.py` file list. Files exactly those five. The old files stay on the dataset until WP7 removes them; `startup.sh` downloads the new set.
+
+Verify and paste, as the block says:
+```
+python ml/inference/build_index_v3.py --out ml/inference && ls -la ml/inference | grep -E "clap.f16|feel_matrix|features.npz|strings.parquet|keys.npy|header.json"
+python -m pytest -q tests/test_columnar_loader.py tests/test_features_golden.py tests/test_no_gates.py tests/test_no_benchmark_leakage.py
+python tests/deploy_hf.py && curl -s https://shreyash616-echo-backend.hf.space/api/health
+ECHO_ARTIFACT_DIR=ml/inference python ml/experiments/offline_rerank/report.py --split tune --validate-live https://shreyash616-echo-backend.hf.space | tail -3
+python tests/test_live_overlap.py --base-url https://shreyash616-echo-backend.hf.space | tail -2
+```
+plus `deploy.yml` dispatched and named (rule 20a), `align_p8.py` with the side record recreated, `test_candidate_pool.py --base-url` for the pool and p95, and the full `pytest -q tests/`.
+
+Gate: all tests pass; health `recommender_loaded: true`; deviation under 0.001; overlap passes; `report.py` pooled 36 and hits 3 / 5 / MRR 0.0170 exactly as WP0 recorded, and `align_p8.py` 20 of 20 on all nine: the storage change must not move a single rank. Float16 CLAP is the one place it could: state the max absolute difference between the float16-rounded-back vectors and `clap.npy`, and if any seed's top 20 changes order, BLOCKED with the pair. p95 reported; the WP7 note on the gen-2 collection is for WP7, not here.
+
+Then `PACKET WP2 READY FOR REVIEW`.
+
 ### 2026-10-30 20:50 IST WP1 unblocked: no WSL2; the harvest runs on the native stack that described P4
 
 Right to stop; installing WSL is the owner's. But it is not needed, and the plan was wrong to ask for it. FIX_PLAN_2 rule 20b says the describing machine's `pip freeze` is the one audio stack, and that machine is the native Windows Python 3.13.12 venv that described all 19,999 P4 rows (the freeze is in FEEL_ALGORITHM's P2 log). A WSL2 Ubuntu Python 3.12 venv would be a second stack whose only defence is the parity check, and a parity miss would mean re-describing 20,000 rows for no gain. SCALE_PLAN sections 2, 3 and WP1 are amended: native Windows, `pathlib`, no shell-specific syntax.

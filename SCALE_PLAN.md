@@ -136,10 +136,14 @@ shard.
 then `/api/search` by track and artist; `Retry-After` honoured. The dump is not an option: it is
 one 47.8 GB gzipped SQLite file (`lrclib-db-dump-20261012T090639Z.sqlite3.gz`, listed by
 `lrclib-db-dumps.bu3nnyut4y9jfkdg.workers.dev` on 2026-10-29), over the box's whole budget before
-decompression. Rate: with the owner's registered server-side application key (`Lrclib-Api-Key`,
-about 6,000 requests a minute app-wide, `lrclib.net/developers`) a million rows is a few hours;
-without it the per-IP allowance is about 90 a minute and a million rows is 8 days, so WP1 stops
-and reports BLOCKED if the key is absent. Then
+decompression. The flow is `fetch_lyrics_remote.py`'s: cleaned title, `/api/get` without the album, `/api/search`
+by fields, then `q=`; five 503 retries at 1 s. Rate, measured (amended 2026-10-30): LRCLIB answers 503 to
+about 60% of requests from the registered application as from anyone, independent of our pace, so a worker
+does about 6 rows a minute whatever its spacing (P4: 13,866 rows in 2 h 15 min on 8 workers; WP1: 300 rows
+in 18 min on one). Stage E therefore runs as a pool of 24 fetchers over disjoint row ranges, about 1,000
+requests a minute app-wide against the 6,000 allowance, roughly 150 rows a minute, a million rows in about
+5 days overlapped with the fetch and describe stages. Do not go wider than 24; LRCLIB is already shedding.
+The application headers come from `backend/.env`; WP1 stops BLOCKED if they are absent. Then
 language (round 2 T4 resolution order), theme chunks (round 2 T8), `has_lyrics` true only when a
 lyric file exists.
 
@@ -283,7 +287,7 @@ Verify and paste:
 ```
 uname -a && nvidia-smi --query-gpu=name,memory.total --format=csv && df -h ~ | tail -1
 python -c "import torch, laion_clap, librosa, lingua, pyarrow; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
-python tests/test_features_golden.py
+python -m pytest -q tests/test_features_golden.py
 ```
 Gate: CUDA true on the RTX 3080; golden tests pass on this machine; at least 30 GB free; 300
 sequential `/api/get` calls with the application headers at 10 a second return no 401 and no 429 (paste
