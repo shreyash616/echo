@@ -36,6 +36,38 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-31 17:40 IST WP5: a00004 accepted; a 20-call probe from the box at every boundary settles the spacing at the WP5 report; the run continues
+
+**a00004 accepted** from `shard_a00004.manifest.json`: 4,410 songs, 2 dropped, A 1,501.1 not overlapped, B 1,058.5, C 850.0,
+D 368.7, E 135.7, F 46.9, wall 3,857.1, `stopped_by lrclib_503`, pass 1 `get 503` 274 of 336 gets, 2,396 never tried,
+2,433 keys in `shard_a00004.lyrics_error.txt` (a843b41b, listed). `MANIFEST.json` 23,495 songs over five shards, claims
+a00005 and a00006. The breaker did what it was for: E cost the shard 136 s instead of an hour. The pre-start record is what a
+reboot should give (11.5 GB in use, commit 13.0 of 49.1, pagefile 18.4 GB).
+
+**The spacing question is open, and the data you have cannot close it.** From this Mac at 17:30, twelve distinct `/api/get`
+lookups one a second returned twelve 200s. At 13:40 the same probe gave twelve 502s. So LRCLIB was down for everyone in the
+afternoon and is up for this address now; whether it answers the box at four a second is a different question, and a00004's
+pass 1 ran forty minutes before my probe, so the two do not compare. You were right not to probe beside the harvester
+without being asked. I am asking, in the cheapest form:
+
+1. **At every `finish()`, the boundary check runs the probe**: `fetch_lyrics_remote.py` standalone, one thread,
+   `--spacing 1.0`, 20 songs from the shard that just finished that have no lyric file, `--out` to scratch. Twenty calls,
+   about 30 s, and the next shard's E pass 1 starts within seconds of it, so the two are concurrent for practical purposes.
+   Put the probe's status line in the boundary line next to that pass 1's `get 503` share once the manifest has it.
+2. **No spacing change inside WP5.** Each change is a process restart and an overlapped A lost. a00005 to a00009 give five
+   probe-and-pass pairs; the WP5 report carries them in one table (shard, probe `get 503` of 20, pass 1 `get 503` share, pass 1
+   calls) and I set the WP6 spacing from it: probe clean and pass shedding on two or more shards means our rate and 0.5 s;
+   both shedding means LRCLIB and 0.25 s stays; both clean means 0.25 s is confirmed.
+3. **The error lists are the plan, not a problem.** About 12,000 keys over WP5 is the expected size while LRCLIB sheds. The
+   refetch tool (the error lists in, `LYRICS` out, at the WP6 spacing, run when LRCLIB is up) is specified at the WP5 report
+   and runs beside WP6, not before it. Nothing to decide now.
+
+**One addition to the boundary line:** the harvester's private bytes, not only its working set. a00004 ended at 5.57 GB
+private against 2.01 GB working set; if private bytes rise by more than 2 GB from one shard to the next with the song count
+level, say so in that line. That, not total commit, is the signal for one shard per process.
+
+The run continues to a00009. Next entry: the WP5 report, or a BLOCKED.
+
 ### 2026-10-31 14:10 IST WP5: 08a1083 accepted; the breaker counts 502 and 504 with 503; one more fixture run, then the reboot is the only gate
 
 **08a1083 accepted** from the diff and the dataset: `LYRIC_SPACING_S` 0.25 under `_LAST_LOCK`, the event checked before
