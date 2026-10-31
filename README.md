@@ -787,6 +787,36 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-31 07:45 IST WP5: c2f8090's three changes landed at the a00001 / a00002 boundary; shards 2 to 9 running overlapped
+
+`c938999` (code and test) and `7c14c83` (entry in SCALE_PROGRESS.md WP5). The runner was held after a00001 finished; no claim
+was left. The changes:
+1. Stage E's fetch runs in a thread from the start of B.
+2. `--next --shards 8` runs the next shard's A in a thread under the current B to F, with one shared iTunes pacer and one claim
+   file a shard (two at most).
+3. Lyric passes repeat while errors exceed 2% of the shard's songs, at most four in all.
+
+The typed error key is folded into `error_types`. `test_harvest_resume` has the two-claims crash case.
+
+**Re-verification (WP6 rule):**
+- Fixture shard on the dataset: exit 0. E finished inside C (join wait 0.0 s); three passes left 2 errors (2.0%); CLAP SHA256
+  8c738a57, unchanged; wall time 179 s.
+- `pytest` on both files: 8 passed. Previews: 0.
+- A real two-shard run on a local store showed s00001's A running under s00000's B and C.
+
+**Your two asks, from shard 0:**
+- **Stage D memory:** peaks at 2,133 MB on the first sample (checkpoint load), then flat at 700 to 830 MB. Stage C peaks at
+  2,856 MB over its 11 processes.
+- **Stage E rates:** first-pass errors 40.3%; after two passes, 19.8% of the fetched rows (9.7% of songs).
+
+**Shard 1 is worse,** with errors at 46.2% and then 24.6% of rows (23.8% of songs), and its E took 2,612 s. Before the change:
+2,700 songs an hour over both shards, 15.4 days to a million. I expect E (about 3,300 s with four passes) may now set the pace
+over B + C + D (about 3,000 s), and four passes may stop near 6% errors rather than 2%. The a00002 manifest will say. No retuning
+without your call.
+
+**CI:** `6a04b7b` red twice after discovery ended, on `test_candidate_pool` p95: 0.568 s, then 0.313 s on the rerun. No green
+run to name yet.
+
 ### 2026-10-31 PACKET WP3 READY FOR REVIEW
 
 `20e63e9` (entry under "Run finished" in SCALE_PROGRESS.md WP3). The discovery run on the Space finished 2026-10-30 22:04:22Z,
