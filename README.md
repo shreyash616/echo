@@ -842,6 +842,61 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-31 10:50 IST WP5: probe says /api/search refuses 79% whatever the load; pacer locked at c441bea; a00003 4,246 songs an hour; disk −15 GB from the pagefile
+
+Entry `4d25225` (SCALE_PROGRESS.md WP5), code `c441bea`.
+
+**The probe** (one thread, `--spacing 0.75`, the first 100 of a00002's 977 songs with no lyric file). It ran twice: the first
+run overlapped a00003's E on the same key, so I ran it again while the runner was held.
+
+```
+under a00003's E:  done {'fetched': 5, 'none': 76, 'error': 68, 'error_after_retry': 19}; status {'get 200': 5, 'get 404': 288, 'get 503': 22, 'search 200': 178, 'search 503': 632}
+key quiet:         done {'fetched': 5, 'none': 81, 'error': 62, 'error_after_retry': 14}; status {'get 200': 5, 'get 404': 288, 'search 200': 184, 'search 503': 708}
+```
+
+- With the key quiet, the first pass failed 48 of 100 rows, against 49 under load.
+- All 62 errors are 503 on `/api/search`: 708 of 892 search calls (79%), at one call every 0.75 s, after `_get`'s five 1 s
+  retries.
+- `/api/get` gave no 503.
+
+So the failures do not depend on our load. Search refuses about four calls in five from this key or IP, and point 1 alone
+won't move the curve. Point 1 is still landed, since `get 503` 22 → 0 was our own burst.
+
+**`c441bea`, at the a00003 / a00004 boundary** (held 5 s into a00004's B, after `finish(a00003)`; claims a00004 and a00005):
+- `_LAST` is paced under `_LAST_LOCK`, and `LRCLIB_STATUS` is incremented under `_STATUS_LOCK`.
+- Each pass's status delta goes into the E log line and into `lyrics.passes[].status`.
+- Cap, share, workers and spacing are unchanged.
+- Stand-in check, 24 threads × 5 rows: the old code ran 360 requests in 0.98 s, 367 a second with a min gap of 0.0 ms. The new
+  code ran them in 21.65 s, min gap 60.0 ms.
+
+**Re-verification.**
+- Fixture: exit 0, CLAP `8c738a57` unchanged, `status` present:
+  `{'get 200': 20, 'get 404': 5, 'get 503': 4, 'search 200': 4, 'search 503': 1}`.
+- `pytest` on both files: 8 passed.
+- Previews 0, after removing 11 files that were a00004's stage B, cut by the hold.
+- Shards 4 to 9 restarted 10:33 IST (`--shards 6`, `PYTHONIOENCODING=utf-8`), with both windows up.
+
+**a00003 measured:**
+- Wall time 3,911 s for 4,613 songs, with its own A overlapped. That is 4,246 songs an hour, 9.8 days to a million.
+- E set the pace: 3,749 s, with `E_wait_after_D` 369 s.
+- After four passes 311 rows were still in error, 6.7%. The curve was 50.7 / 53.8 / 53.9 / 47.9% a pass.
+
+**Noticed, for your call: free disk 133.8 → 118.7 GB at 10:31.**
+- The cause is `C:\pagefile.sys`, which Windows grew to 43.7 GB (base 29,860 MB) under commit pressure. Commit is 51.9 of
+  60.3 GB.
+- About 29 GB of that commit is in no process and no pool I can see, and the box was already about 31 of its 31.8 GB RAM used
+  before WP5 started.
+- The harvester's own disk is about 200 MB.
+- The WP5 line "within 3 GB of 135.2" now fails on the pagefile, not on harvest data. A reboot resets it but ends the run. I
+  have not touched system settings or other processes.
+
+**Options for the E pace, your call.** Probe 2 points away from workers and spacing:
+- (a) skip `/api/search` when `/api/get` 404s with the duration given, leaving more rows `none`;
+- (b) longer 503 back-off on search only;
+- (c) accept about 6% as `error_after_retry` and refetch later from another IP, as P4's `fetch_lyrics_remote` was built for.
+
+I hold all three until you choose.
+
 ### 2026-10-31 08:55 IST WP5: Space restarted, p95 0.24 / 0.21 s warm, Tests green; a00002 shows stage E hidden (wait 0.0 s) but stopping at 5.2% errors
 
 **Restart (README 70690e9).**
