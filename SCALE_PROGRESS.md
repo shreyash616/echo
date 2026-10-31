@@ -1097,3 +1097,32 @@ Pagefile C:\pagefile.sys: alloc 18432 MB, current 0 MB, peak 0 MB
 - The pagefile is 18.4 GB, down from 43.7 GB, and free disk is 144.7 GB.
 - Next: `--next --shards 6` from a00004 on `47c41d9`'s code, windows on `current.describe.log` and `current.clap.log`, log
   `wp5_runs4.out`, boundary check at every `finish()`.
+
+### a00004 after the reboot: the breaker fires, 55.1% of the songs in lyric error
+
+Started 16:20 on `ccc1e35`, `--next --shards 6`. a00004 finished its upload at 17:25; a00005 is in stage B and a00006 in A.
+
+```
+shard a00004: songs 4410, dropped 2 ({"C": 2}), artists 250, unresolved 8, a_overlapped false, free_gb_at_start 144.6
+seconds_per_stage A 1501.1, E 135.7, B 1058.5, C 850.0, D 368.7, F 46.9
+seconds_other E_wait_after_D 0.0, E_theme_language 32.0, wall 3857.1
+lyrics songs 4412, had_file 1965, without_file 2447, error_after_retry 2433, stopped_by "lrclib_503"
+pass 1: rows 2447, none 7, fetched 7, error 37, untried 2396, status {'get 200': 4, 'get 404': 58, 'get 503': 274, 'search 200': 20, 'search 503': 103}
+sha256 features 0851c960, clap 55cdbf6d, dropped ec09ada1, lyrics_error a843b41b
+
+2026-10-31 16:48:17,242 | INFO | a00004 | E: pass 1 over 2447 rows: 7 fetched, 7 none, 37 error {'HTTPStatusError': 37}, 2396 not tried; status {...}; 502/503/504 377 of 459 calls
+2026-10-31 16:48:17,242 | INFO | a00004 | E: breaker: LRCLIB answered 502/503/504 to 377 of 459 calls; passes stopped, 2396 rows never tried, 2433 rows to the error list
+2026-10-31 16:48:17,243 | INFO | a00004 | E: lyrics for 2447 of 4412 songs without a file, 1 passes, 2433 still in error (55.1% of the songs)
+
+2026-10-31T17:26:09 after a00004: RAM in use 14 GB, available 17 GB; commit 19.4 of 49.1 GB, available 29.7 GB; free disk 144.4 GB; harvester WS 2.01 GB; top5 python 2.0, claude 0.6, MsMpEng 0.5, PhoneExperienceHost 0.4, Spotify 0.3
+```
+
+- **Breaker.** It fired 135.7 s into stage E, at 377 of 459 calls (82.1%). Without it, four passes on this outage would have held
+  the shard well past D.
+- **Lyrics.** 2,433 of 4,412 songs (55.1%) are in lyric error, in `shard_a00004.lyrics_error.txt`.
+- **Rate.** 4,410 songs in 3,857 s is 4,116 songs an hour. Stage A ran alone (`a_overlapped` false) because of the restart, so
+  this is not the after rate. a00005 is the first shard here with its A overlapped.
+- **Spacing rule.** Pass 1 `get 503` is 274 of 336 get calls (81.5%). No probe ran beside the shard, so the rule's clean-probe
+  condition is unmet and spacing stays at 0.25 s.
+- **Memory.** No hold and no flag. Commit is up 6.4 GB from the pre-start 13.0 GB; the harvester's private bytes were 5.57 GB at
+  17:26. CUDA held at 778 MB and all 414 CLAP batches finished.
