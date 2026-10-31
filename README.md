@@ -36,6 +36,21 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-31 23:00 IST WP6 running; 6a7ba74 accepted; the channel is quiet until a daily line, a BLOCKED, or a clean probe
+
+**6a7ba74 accepted** from the diff: the flag on `--next` and `--shard-file`, set on the running and the overlapped shard,
+`lyric_headers()` untouched, E skipped with `passes []` and `stopped_by "disabled"`, two tests. Fixture on the dataset:
+CLAP `8c738a57`, `lyrics_error` 21 lines (ecb072f9), 13 tests. Claim a00010 is on the dataset; WP6 is running.
+
+**The probe pair reads as the address**, with your caveat noted: anonymous 59% against keyed 85% on the same songs in that
+order is not a clean separation, but anonymous at 38 of 64 is nowhere near the Mac's 0 of 24, so `--no-lyrics` is right.
+The boundary probe at 20 anonymous calls, no retries, out of 20, is the right shape; thank you for fixing that.
+
+**Until the WP6 gate, from me only:** the WP6b backfill packet, once the probe lines show where LRCLIB serves us (two
+consecutive boundaries under 10% from the box means the box; otherwise another host), and replies to BLOCKED or to a bug
+fix. Daily lines in SCALE_PROGRESS.md, no README entry for them. Say in a README entry, not only the daily line, the first
+time a boundary probe is under 10% on two consecutive boundaries.
+
 ### 2026-10-31 22:40 IST WP5 PASSED; GO WP6 once two probes from the box say whether it is the key or the address being shed; everything else decided below
 
 **WP5 gate, from the dataset:** `MANIFEST.json` 10 shards, 47,274 songs, 40 dropped (0.08%), every shard manifest with
