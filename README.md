@@ -800,6 +800,45 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-31 08:55 IST WP5: Space restarted, p95 0.24 / 0.21 s warm, Tests green; a00002 shows stage E hidden (wait 0.0 s) but stopping at 5.2% errors
+
+**Restart (README 70690e9).**
+- `restart_space` at 02:22:04Z, sha `12e51b50` unchanged. `RUNNING` at 02:23:24Z.
+- Admin status afterwards: `started_at null`, a fresh process.
+- p95 over 20 calls, three runs each:
+  - before: 0.293, 0.272, 0.303 s;
+  - after: 0.337 s (cold), 0.238 s, 0.212 s.
+- Tests re-run on `ce1980e`: 41158112863 attempt 2, success, 02:30:35Z. Entry `e2b71d4`.
+
+**a00002**, the first shard on `c938999`, from `catalog/v3/shard_a00002.manifest.json`:
+- 250 artists, 1 unresolved; 4,650 songs, 11 dropped (C). Free 132.8 GB.
+- `seconds_per_stage`: A 1,525.9, B 1,174.1, C 1,220.7, D 756.5, E 3,058.5, F 78.2.
+- `seconds_other`: `E_wait_after_D` 0.0, `E_theme_language` 91.2, wall 4,846.6. Its own A was not overlapped: it was the first
+  shard of the process.
+- Stage E ran 3,058 s against B + C + D at 3,151 s, so it stayed hidden, by 93 s. By your rule there is no retune to propose.
+- a00003's A ran under a00002 (07:53:41 to 08:18:41, 1,500 s). So from a00003 on, a shard costs about B + C + D +
+  theme + F ≈ 3,320 s, near 5,000 songs an hour. a00003's manifest will give the measured rate.
+
+**The error curve you asked for.** `lyrics` passes as rows → fetched / none / error:
+
+| Pass | Rows | Fetched | None | Error | Error share of the pass |
+|---|---|---|---|---|---|
+| 1 | 4,379 | 2,164 | 219 | 1,996 | 45.6% |
+| 2 | 1,996 | 771 | 247 | 978 | 49.0% |
+| 3 | 978 | 342 | 154 | 482 | 49.3% |
+| 4 | 482 | 119 | 122 | 241 | 50.0% |
+
+- Each retry fails at almost exactly half, whatever the row. That reads as LRCLIB shedding a fixed share of requests, not
+  particular rows failing.
+- After four passes, 241 rows are still in error: 5.2% of the 4,661 songs, above the 2% target.
+- On this curve, six passes would reach about 1.3%. Passes 5 and 6 would be over about 240 and 120 rows, roughly 3 and 2 minutes
+  at pass 4's pace, still inside the B to D window.
+
+Your call whether the cap moves; I keep it at four until you say.
+
+**D memory:** peak 1,099 MB on a00002 (a00003's A thread was running alongside). The run continues: a00003 B to F, and
+a00004's A.
+
 ### 2026-10-31 07:45 IST WP5: c2f8090's three changes landed at the a00001 / a00002 boundary; shards 2 to 9 running overlapped
 
 `c938999` (code and test) and `7c14c83` (entry in SCALE_PROGRESS.md WP5). The runner was held after a00001 finished; no claim
