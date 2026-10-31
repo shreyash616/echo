@@ -7,7 +7,9 @@ Asserts:
 - a finished shard joins catalog/v3/MANIFEST.json, its keys join catalog/v3/keys.txt, and the claim is released;
 - the next shard deduplicates against those keys;
 - with the next shard's stage A overlapped (README c2f8090), a crash while holding two claims leaves both, and the
-  restart takes the lower one first, then the other; the overlapped A deduplicates against the running shard's songs.
+  restart takes the lower one first, then the other; the overlapped A deduplicates against the running shard's songs;
+- stage E's breaker (README 045f348) stops a pass once LRCLIB has answered 503 to half of 300 or more calls, sends the
+  rows not tried to the error list, and never fires on a pass under 300 calls or one without 503s.
 """
 from __future__ import annotations
 
@@ -118,3 +120,43 @@ def test_two_claims_crash_then_restart_lower_first(store):
     assert [c["stages"] for c in FakeHarvester.calls] == [list("ABCDEF")] * 2    # each from stage A
     assert hv.claims(store) == []                                                # both released
     assert list(hv.finished_shards(store)) == ["a00000", "a00001"]
+
+
+def _lyric_rows(n):
+    return [{"id": f"it_breakertest{i}", "key": f"breaker test:{i}", "title": f"t{i}", "artist": "a"} for i in range(n)]
+
+
+def _stub_fetch(status, calls_a_row, fail):
+    def fetch(row, client, out_dir, spacing):
+        with hv.flr._STATUS_LOCK:
+            hv.flr.LRCLIB_STATUS[status] += calls_a_row
+        if fail:
+            raise RuntimeError("stub 503")
+        return "la la la"
+    return fetch
+
+
+@pytest.fixture
+def harvester(tmp_path, monkeypatch):
+    monkeypatch.setattr(hv, "WORK", tmp_path / "work")
+    return hv.Harvester("breaker_test", [], hv.LocalStore(tmp_path / "dataset"), runner="test")
+
+
+def test_breaker_trips_inside_a_shedding_pass(harvester, monkeypatch):
+    monkeypatch.setattr(hv.flr, "fetch_lyrics", _stub_fetch(("search", 503), 6, fail=True))
+    rows = _lyric_rows(3000)
+    harvester.lyrics(rows, headers={})
+    lc = harvester.lyric_counts
+    assert lc["stopped_by"] == "lrclib_503" and len(lc["passes"]) == 1
+    p = lc["passes"][0]
+    assert p["untried"] > 2000 and p["error"] + p["untried"] == 3000      # stopped near 300 calls, not after 18,000
+    assert lc["error_after_retry"] == 3000 and len(harvester.lyric_error_keys) == 3000
+
+
+def test_breaker_needs_300_calls_and_503s(harvester, monkeypatch):
+    monkeypatch.setattr(hv.flr, "fetch_lyrics", _stub_fetch(("get", 503), 5, fail=True))
+    harvester.lyrics(_lyric_rows(40), headers={})                           # 200 calls a pass: under the floor
+    assert harvester.lyric_counts["stopped_by"] == "max_passes" and len(harvester.lyric_counts["passes"]) == 4
+    monkeypatch.setattr(hv.flr, "fetch_lyrics", _stub_fetch(("get", 200), 2, fail=False))
+    harvester.lyrics(_lyric_rows(500), headers={})                          # 1,000 calls, none 503
+    assert harvester.lyric_counts["stopped_by"] == "error_share" and harvester.lyric_counts["passes"][0]["untried"] == 0

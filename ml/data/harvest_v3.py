@@ -21,9 +21,13 @@ Stages A to F a shard (README c2f8090: E overlapped with B to D, the next shard'
   E text      LRCLIB lyrics through fetch_lyrics_remote (the registered application's headers from
               backend/.env), 24 fetchers over disjoint row ranges, in a thread started with B over stage A's
               songs; passes over the rows in error repeat while they exceed 2% of those songs, at most four
-              passes; E's seconds are the fetchers' wall time. After D the thread is joined, then the P4 theme
-              (apply_lyric_theme), words per minute and language (artist-majority vote, then language_from_meta).
-  F write     shard_<id>.features.jsonl.gz, shard_<id>.clap.f16.npy, shard_<id>.dropped.jsonl and
+              passes; a breaker inside each pass stops every fetcher once, past 300 calls, LRCLIB has answered
+              503 to half of them (lyrics.stopped_by "lrclib_503"; rows not tried join the error list); each
+              pass records LRCLIB's status counts. E's seconds are the fetchers' wall time. After D the thread is
+              joined, then the P4 theme (apply_lyric_theme), words per minute and language (artist-majority
+              vote, then language_from_meta).
+  F write     shard_<id>.features.jsonl.gz, shard_<id>.clap.f16.npy, shard_<id>.dropped.jsonl,
+              shard_<id>.lyrics_error.txt (keys still in lyric error, one a line) and
               shard_<id>.manifest.json (artists, songs, dropped, SHA256s, describe commit, seconds per
               stage) to catalog/v3/; the uploaded files are downloaded back and their SHA256s checked;
               then, except for the fixture, the shard joins catalog/v3/MANIFEST.json and its keys
@@ -87,9 +91,11 @@ FETCH_WORKERS = 8
 DESCRIBE_WORKERS = 10
 CLAP_BATCH = 32                 # 64 stalls 3 to 5 minutes on its first call (WP4; reviewer ce741ca)
 LYRIC_WORKERS = 24
-LYRIC_SPACING_S = 0.06          # shared across the fetchers: about 1,000 requests a minute app-wide
+LYRIC_SPACING_S = 0.25          # shared across the fetchers under _LAST_LOCK: 4 requests a second app-wide (README 045f348)
 LYRIC_MAX_PASSES = 4            # passes in all, the first included (README c2f8090)
 LYRIC_ERROR_SHARE = 0.02        # another pass while the rows in error exceed this share of the shard's songs
+LYRIC_503_BREAKER = 0.5         # the passes stop once LRCLIB answers 503 to this share of a pass's calls
+LYRIC_BREAKER_MIN_CALLS = 300   # ... counted from this many calls into the pass (README 045f348)
 STALE_CLAIM_S = 6 * 3600
 MAX_CLAIMS = 2                  # the running shard and the next shard's stage A
 USER_AGENT = "echo-harvest-v3/1.0 (feel-based music discovery)"
@@ -475,53 +481,79 @@ class Harvester:
         todo = [s for s in songs if not rc.lyric_path(s).exists()]
         lock = threading.Lock()
 
-        def worker(rows: list[dict], failed: list[dict], counts: Counter, types: Counter) -> None:
-            with httpx.Client(headers=headers) as client:
-                for r in rows:
-                    try:
-                        got = flr.fetch_lyrics(r, client, LYRICS, LYRIC_SPACING_S)
-                    except Exception as e:  # any row's failure is that row's, never the thread's (reviewer ce741ca)
-                        got, kind = None, "error"
-                        with lock:
-                            failed.append(r)
-                            types[type(e).__name__] += 1
-                    else:
-                        kind = "fetched" if got else "none"
-                    with lock:
-                        counts[kind] += 1
-
         def status_now() -> Counter:
             with flr._STATUS_LOCK:
                 return Counter({f"{e} {s}": c for (e, s), c in flr.LRCLIB_STATUS.items()})
 
         def run_pool(rows: list[dict]) -> dict:
             failed: list[dict] = []
+            untried: list[dict] = []
             counts, types = Counter(), Counter()
             before = status_now()
+            tripped = threading.Event()
+
+            def check_breaker() -> None:
+                # README 045f348: past LYRIC_BREAKER_MIN_CALLS calls in this pass, a 503 share at or above
+                # LYRIC_503_BREAKER stops every worker before its next row
+                d = status_now() - before
+                calls = sum(d.values())
+                if calls >= LYRIC_BREAKER_MIN_CALLS and d["get 503"] + d["search 503"] >= LYRIC_503_BREAKER * calls:
+                    tripped.set()
+
+            def worker(mine: list[dict]) -> None:
+                with httpx.Client(headers=headers) as client:
+                    for i, r in enumerate(mine):
+                        if tripped.is_set():
+                            with lock:
+                                untried.extend(mine[i:])
+                            return
+                        try:
+                            got = flr.fetch_lyrics(r, client, LYRICS, LYRIC_SPACING_S)
+                        except Exception as e:  # any row's failure is that row's, never the thread's (reviewer ce741ca)
+                            got, kind = None, "error"
+                            with lock:
+                                failed.append(r)
+                                types[type(e).__name__] += 1
+                        else:
+                            kind = "fetched" if got else "none"
+                        with lock:
+                            counts[kind] += 1
+                        check_breaker()
+
             n = max(1, min(LYRIC_WORKERS, len(rows)))
-            threads = [threading.Thread(target=worker, args=(rows[i::n], failed, counts, types), daemon=True)
-                       for i in range(n)] if rows else []
+            threads = [threading.Thread(target=worker, args=(rows[i::n],), daemon=True) for i in range(n)] if rows else []
             for t in threads:
                 t.start()
             for t in threads:
                 t.join()
             # LRCLIB's answers in this pass, every request including _get's own 429 / 503 retries (README 0b03ff7)
             status = dict(sorted((status_now() - before).items()))
-            # a pass is none + fetched + error; the exception types are a breakdown of error, not added to it
+            # a pass is none + fetched + error (+ untried when the breaker fired); error_types is a breakdown of error
             return {"rows": len(rows), "none": counts["none"], "fetched": counts["fetched"], "error": counts["error"],
-                    "error_types": dict(types), "status": status, "_failed": failed}
+                    "untried": len(untried), "error_types": dict(types), "status": status,
+                    "_failed": failed + untried, "_tripped": tripped.is_set()}
 
-        passes, rows = [], todo
+        passes, rows, stopped_by = [], todo, "no_rows" if not todo else "max_passes"
         while rows and len(passes) < LYRIC_MAX_PASSES:
             p = run_pool(rows)
-            rows = p.pop("_failed")
+            rows, tripped = p.pop("_failed"), p.pop("_tripped")
             passes.append(p)
-            self.log.info("E: pass %d over %d rows: %d fetched, %d none, %d error %s; status %s", len(passes), p["rows"],
-                          p["fetched"], p["none"], p["error"], p["error_types"], p["status"])
-            if len(rows) <= LYRIC_ERROR_SHARE * len(songs):
+            calls = sum(p["status"].values())
+            shed = p["status"].get("get 503", 0) + p["status"].get("search 503", 0)
+            self.log.info("E: pass %d over %d rows: %d fetched, %d none, %d error %s, %d not tried; status %s; 503 %d of %d calls",
+                          len(passes), p["rows"], p["fetched"], p["none"], p["error"], p["error_types"], p["untried"],
+                          p["status"], shed, calls)
+            if tripped:
+                stopped_by = "lrclib_503"
+                self.log.info("E: breaker: LRCLIB answered 503 to %d of %d calls; passes stopped, %d rows never tried, "
+                              "%d rows to the error list", shed, calls, p["untried"], len(rows))
                 break
+            if len(rows) <= LYRIC_ERROR_SHARE * len(songs):
+                stopped_by = "error_share"
+                break
+        self.lyric_error_keys = [r["key"] for r in rows]
         self.lyric_counts = {"songs": len(songs), "had_file": len(songs) - len(todo), "without_file": len(todo),
-                             "passes": passes, "error_after_retry": len(rows)}
+                             "passes": passes, "error_after_retry": len(rows), "stopped_by": stopped_by}
         self.log.info("E: lyrics for %d of %d songs without a file, %d passes, %d still in error (%.1f%% of the songs)",
                       len(todo), len(songs), len(passes), len(rows), 100.0 * len(rows) / max(len(songs), 1))
 
@@ -559,6 +591,10 @@ class Harvester:
         stem = f"shard_{self.shard}"
         feats, clapf, dropf, manf = (self.out / f"{stem}.features.jsonl.gz", self.out / f"{stem}.clap.f16.npy",
                                      self.out / f"{stem}.dropped.jsonl", self.out / f"{stem}.manifest.json")
+        lyrerr = self.out / f"{stem}.lyrics_error.txt"
+        # the shard's songs whose lyric fetch still failed, one key a line, for a refetch once LRCLIB recovers
+        kept = {s["key"] for s in self.songs}
+        lyrerr.write_text("".join(f"{k}\n" for k in getattr(self, "lyric_error_keys", []) if k in kept), encoding="utf-8")
         with gzip.open(feats, "wt", encoding="utf-8") as f:
             for s in self.songs:
                 f.write(json.dumps({k: v for k, v in s.items() if not k.startswith("_")}, ensure_ascii=False) + "\n")
@@ -573,8 +609,9 @@ class Harvester:
             "artists_unresolved": len(self.unresolved), "songs": len(self.songs), "dropped": len(self.dropped),
             "dropped_by_stage": dict(Counter(d["stage"] for d in self.dropped)),
             "lyrics": getattr(self, "lyric_counts", {}),
-            "files": {"features": f"{PREFIX}/{feats.name}", "clap": f"{PREFIX}/{clapf.name}", "dropped": f"{PREFIX}/{dropf.name}"},
-            "sha256": {"features": sha256(feats), "clap": sha256(clapf), "dropped": sha256(dropf)},
+            "files": {"features": f"{PREFIX}/{feats.name}", "clap": f"{PREFIX}/{clapf.name}", "dropped": f"{PREFIX}/{dropf.name}",
+                      "lyrics_error": f"{PREFIX}/{lyrerr.name}"},
+            "sha256": {"features": sha256(feats), "clap": sha256(clapf), "dropped": sha256(dropf), "lyrics_error": sha256(lyrerr)},
             "clap_shape": list(clap.shape), "describe_commit": describe_commit(),
             "date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "seconds_per_stage": dict(self.seconds),
@@ -585,7 +622,7 @@ class Harvester:
             "itunes_ids": [s["itunes_id"] for s in self.songs],
         }
         manf.write_text(json.dumps(manifest, indent=1, ensure_ascii=False), encoding="utf-8")
-        for p in (feats, clapf, dropf, manf):
+        for p in (feats, clapf, dropf, lyrerr, manf):
             self.store.put(p, f"{PREFIX}/{p.name}")
         # read back: the manifest, then each file it names, hashed against the manifest
         check = WORK / "_readback" / self.shard
