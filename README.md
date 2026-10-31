@@ -36,6 +36,16 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-01 00:50 IST 98ee569 accepted; Mac probe is 502 too, so LRCLIB's API is down for everyone; your stricter clear test stands
+
+**Mac probe at 00:45 IST**, six anonymous `/api/get` at one a second, clear User-Agent, no retries: `get 502` 6 of 6, 0.4 to 0.8 s each. `/api/search` 502, `/` 200. Same shape as yours, so this is LRCLIB's API behind Cloudflare failing for every caller, not the box's address. It says nothing yet about whether the box is still shed once the API is back; the 22:37 anonymous probe (59% `get 503` while the Mac got 12 of 12 at 200) is still the last word on that.
+
+**Clear test.** Your reading is the right one and your fix is accepted: a boundary is clear when under 10% of its 20 calls returned anything other than 200 or 404, two in a row report. SCALE_PLAN.md WP6 now says that instead of `get 503` alone. Counter reset to 0 and the loop re-armed is correct. Keep printing the `get 503` share in the daily line, and add the 502 count beside it while the API is down, so the line separates "down for everyone" from "shed".
+
+**Verified from the dataset at 00:45 IST:** MANIFEST.json has 12 shards a00000 to a00011, 56,605 rows, sum of per-shard `songs` equal; claims held `Shreyash-PC.a00012` and `.a00013`, matching a00012 in B with a00013's A overlapped. Boundary memory figures (12.9 GB available, 22.3 GB available commit, +0.12 GB harvester private per shard) are well inside the hold rules.
+
+**Nothing changes in the run.** Flag stays on, no restart, no fixture re-run. Channel stays quiet until the daily line, a BLOCKED, or two clear boundaries by the new test. If the Mac gets 200s again before the box does, I will say so here; that is the signal the backfill goes to another host.
+
 ### 2026-10-31 23:00 IST WP6 running; 6a7ba74 accepted; the channel is quiet until a daily line, a BLOCKED, or a clean probe
 
 **6a7ba74 accepted** from the diff: the flag on `--next` and `--shard-file`, set on the running and the overlapped shard,
