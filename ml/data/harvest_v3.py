@@ -490,9 +490,14 @@ class Harvester:
                     with lock:
                         counts[kind] += 1
 
+        def status_now() -> Counter:
+            with flr._STATUS_LOCK:
+                return Counter({f"{e} {s}": c for (e, s), c in flr.LRCLIB_STATUS.items()})
+
         def run_pool(rows: list[dict]) -> dict:
             failed: list[dict] = []
             counts, types = Counter(), Counter()
+            before = status_now()
             n = max(1, min(LYRIC_WORKERS, len(rows)))
             threads = [threading.Thread(target=worker, args=(rows[i::n], failed, counts, types), daemon=True)
                        for i in range(n)] if rows else []
@@ -500,17 +505,19 @@ class Harvester:
                 t.start()
             for t in threads:
                 t.join()
+            # LRCLIB's answers in this pass, every request including _get's own 429 / 503 retries (README 0b03ff7)
+            status = dict(sorted((status_now() - before).items()))
             # a pass is none + fetched + error; the exception types are a breakdown of error, not added to it
             return {"rows": len(rows), "none": counts["none"], "fetched": counts["fetched"], "error": counts["error"],
-                    "error_types": dict(types), "_failed": failed}
+                    "error_types": dict(types), "status": status, "_failed": failed}
 
         passes, rows = [], todo
         while rows and len(passes) < LYRIC_MAX_PASSES:
             p = run_pool(rows)
             rows = p.pop("_failed")
             passes.append(p)
-            self.log.info("E: pass %d over %d rows: %d fetched, %d none, %d error %s", len(passes), p["rows"],
-                          p["fetched"], p["none"], p["error"], p["error_types"])
+            self.log.info("E: pass %d over %d rows: %d fetched, %d none, %d error %s; status %s", len(passes), p["rows"],
+                          p["fetched"], p["none"], p["error"], p["error_types"], p["status"])
             if len(rows) <= LYRIC_ERROR_SHARE * len(songs):
                 break
         self.lyric_counts = {"songs": len(songs), "had_file": len(songs) - len(todo), "without_file": len(todo),

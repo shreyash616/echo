@@ -17,6 +17,7 @@ import json
 import logging
 import random
 import re
+import threading
 import time
 from collections import Counter
 from pathlib import Path
@@ -62,7 +63,9 @@ def registered_app() -> dict:
 
 
 LRCLIB_STATUS: Counter = Counter()
+_STATUS_LOCK = threading.Lock()  # += on a Counter is not atomic across the harvester's fetcher threads
 _LAST = [0.0]
+_LAST_LOCK = threading.Lock()    # the spacing holds across threads, not only within one (README 0b03ff7)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger("lyrics")
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -85,12 +88,14 @@ def fetch_lyrics(row: dict, client: httpx.Client, out_dir: Path, spacing: float)
     def _get(endpoint: str, params: dict):
         tries_503 = 0
         while True:
-            wait = spacing - (time.time() - _LAST[0])
-            if wait > 0:
-                time.sleep(wait)
-            _LAST[0] = time.time()
+            with _LAST_LOCK:
+                wait = spacing - (time.time() - _LAST[0])
+                if wait > 0:
+                    time.sleep(wait)
+                _LAST[0] = time.time()
             resp = client.get(f"https://lrclib.net/api/{endpoint}", params=params, timeout=10.0)
-            LRCLIB_STATUS[(endpoint, resp.status_code)] += 1
+            with _STATUS_LOCK:
+                LRCLIB_STATUS[(endpoint, resp.status_code)] += 1
             if resp.status_code == 429:
                 try:
                     after = float(resp.headers.get("Retry-After", "10"))
