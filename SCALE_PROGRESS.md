@@ -610,3 +610,178 @@ sha256 features e39a826a..., clap 8c738a57..., dropped e3b0c442...
 - Free disk at the start 133.9 GB (WP1: 135.2 GB).
 
 Shards 0 to 9 wait for `discovery/shards.json`, written when discovery finishes.
+
+### Shards 0 and 1, sequential stages (code `b24f216`)
+
+Run as `py -3 ml/data/harvest_v3.py --next --runner Shreyash-PC`, one process a shard, from 2026-10-31 03:36 IST. Numbers
+from the manifests on the dataset (`catalog/v3/shard_a0000{0,1}.manifest.json`, `catalog/v3/MANIFEST.json`):
+
+```
+a00000: 250 artists, 0 unresolved, 4936 songs, 10 dropped (C 10), free_gb_at_start 133.9, describe_commit e4c1b1bd...
+  seconds_per_stage A 1551.8 B 1101.3 C 1240.1 D 723.8 E 1236.4 F 17.1 (sum 5870.5)
+  lyrics first_pass none 94 fetched 1357 error 980; second_pass fetched 411 none 88 error 481; error_after_retry 481
+a00001: 250 artists, 1 unresolved, 4886 songs, 0 dropped, free_gb_at_start 132.8, describe_commit e4c1b1bd...
+  seconds_per_stage A 1556.0 B 1064.1 C 1208.3 D 739.7 E 2612.3 F 44.5 (sum 7224.9)
+  lyrics first_pass fetched 2342 none 197 error 2182; second_pass fetched 807 none 212 error 1163; error_after_retry 1163
+MANIFEST.json: songs 9822, shards a00000 (4936, features 9e3f3cf5...), a00001 (4886, features 85d34618...)
+```
+
+These `lyrics` counters are read as `none + fetched + error`. The manifests also carry each error under
+`error HTTPStatusError`, which counts the same rows again (README 3949be4). Fixed in `c938999`: the exception types are now a
+separate `error_types` breakdown.
+
+**Against the fixture.** WP5's fixture rerun had 100 songs: A 49.8, B 25.7, C 34.6, D 28.8, E 61.9, F 10.8 s. Shard 0 has 49.4
+times the fixture's songs. Its stages against 49.4 times the fixture's:
+- **A:** 1,552 s against 2,460. A is the iTunes pacing, 500 calls at 3 s. The fixture's A spreads the first call's latency over
+  only 5 artists, so per artist it is 6.2 s on the shard against 10.0 s on the fixture.
+- **B, C and D:** all under linear. B 1,101 against 1,270; C 1,240 against 1,709; D 724 against 1,422, which is 0.15 s a song.
+- **E:** not comparable, because the fixture rerun fetched only rows that had failed before. Between shards: shard 0's E took
+  1,236 s and shard 1's 2,612 s, for 2,431 and 4,721 rows without a lyric file.
+
+**Stage D memory.** The main process's working set was sampled every 15 s (`ml/data/harvest_v3_work/wp5_ram.csv`).
+- The peak is the first sample in D, while the CLAP checkpoint loads: 2,133 MB on shard 0 and 2,055 MB on shard 1.
+- After that it stays between 700 and 830 MB for the whole stage, flat, with no growth as songs are embedded.
+- The highest of any stage is C: 2,856 MB across the main process and its 10 describe workers. The box has 31,850 MB.
+
+**Real stage E rates.** These count only rows without a lyric file: 2,505 of shard 0's songs already had one from P4's
+catalogue, and 165 of shard 1's.
+
+| | Shard 0 | Shard 1 |
+|---|---|---|
+| Rows without a lyric file | 2,431 | 4,721 |
+| First-pass errors | 40.3% | 46.2% |
+| Fetched, after the second pass | 72.7% | 66.7% |
+| None, after the second pass | 7.5% | 8.7% |
+| Still in error, after the second pass | 19.8% (481) | 24.6% (1,163) |
+| Still in error, as a share of the shard's songs | 9.7% | 23.8% |
+| Stage E time | 1,236 s | 2,612 s |
+
+Every error is an `HTTPStatusError`. Shard 1's E took twice as long because the error share rose, and each error costs
+`fetch_lyrics_remote`'s 503 retries and sleeps.
+
+**Rate before the change.**
+- **Both shards:** 9,822 songs in 13,095 s of stage time, 2,700 songs an hour. A million at that rate is 370 hours,
+  15.4 days.
+- **Shard 0 alone:** 3,027 an hour, 13.8 days.
+- **Shard 1 alone:** 2,435 an hour, 17.1 days.
+
+That is over the 14-day line; README c2f8090's changes below answer it.
+
+**Disk.**
+- Free at shard start: 133.9 GB (a00000), 132.8 GB (a00001), 132.8 GB (a00002). WP1 was 135.2 GB.
+- The harvester's own files: 51 MB in `harvest_v3_work` (about 20 MB a shard of outputs and read-back copies) and 93 MB of
+  lyric files. Previews: 0.
+- The 1.1 GB that went between shard 0's start and shard 1's is outside those directories. Watched shard by shard.
+
+### The three changes of README c2f8090, at the a00001 / a00002 boundary (code `c938999`)
+
+The runner was held at the boundary. a00001 finished at 07:16:29 IST, with F read back. The loop's next process was ended 3 s
+after it started, before it claimed anything; the dataset had no claims afterwards.
+
+1. **Stage E overlapped with B to D.**
+   - `run_rest` starts the 24 fetchers in a thread at the start of B, over stage A's songs, and joins it after D. Theme, words
+     per minute and language stay after the join.
+   - `seconds_per_stage["E"]` is the fetchers' wall time.
+   - The stages no longer add up to the shard's wall time, so `seconds_other` carries:
+     - `E_wait_after_D`, the join's wait;
+     - `E_theme_language`;
+     - `wall`, the shard's wall time: B to F, plus A when A did not run under the previous shard.
+2. **The next shard's A overlapped with this shard's B to F.**
+   - `--next --shards N` runs N shards in one process. When a shard's A finishes, the next shard
+     (`next_shard(..., exclude={this})`) is claimed and its `stage_a` runs in a thread.
+   - That A deduplicates against `keys.txt` and this shard's A songs, which reach `keys.txt` only when this shard finishes.
+   - One module-wide iTunes pacer (`_ITUNES_LAST` under a lock), so the limit of 20 a minute holds across the two.
+   - Claims are one file a shard, `claims/<runner>.<shard>.json`, at most two a runner.
+     - `finish` deletes this runner's claims on the shard, whatever their file name.
+     - `next_shard` takes the runner's own unfinished claims first, lowest first.
+   - `manifest["a_overlapped"]` says which shards' A was hidden.
+   - The owner's `current.*.log` is opened once a process and each line names its shard, so both windows show both shards
+     while they overlap.
+3. **Lyric passes until the error share is small.**
+   - After each pass, another runs over the rows in error while they exceed 2% of stage A's songs.
+   - At most four passes in all, the first included. That is my reading of "at most four passes".
+   - The manifest's `lyrics` is now `songs, had_file, without_file, passes: [{rows, none, fetched, error, error_types}],
+     error_after_retry`.
+
+`test_harvest_resume` gets the case asked for:
+- A crash in a00000's D, after a00001's overlapped A has run, leaves both claims.
+- The restart takes a00000 then a00001, each from A, and releases both.
+- The overlapped A saw a00000's songs as taken.
+
+The two existing claim assertions now read `hv.claim_path("box", "a00000")`, the new file name, with the same meaning.
+
+### Fixture shard and the two tests after `c938999` (the WP6 rule)
+
+```
+$ python ml/data/harvest_v3.py --shard-file tests/fixtures/harvest_fixture_shard.json      (real 3m5.6s, exit 0)
+fixture | stage A done in 59.4 s
+fixture | stage E start (lyric fetch, beside B to D)
+fixture | stage B start
+fixture | E: pass 1 over 35 rows: 8 fetched, 17 none, 10 error {'HTTPStatusError': 10}
+fixture | stage B done in 26.9 s
+fixture | stage C start
+fixture | E: pass 2 over 10 rows: 3 fetched, 1 none, 6 error {'HTTPStatusError': 6}
+fixture | E: pass 3 over 6 rows: 2 fetched, 2 none, 2 error {'HTTPStatusError': 2}
+fixture | E: lyrics for 35 of 100 songs without a file, 3 passes, 2 still in error (2.0% of the songs)
+fixture | stage E lyric fetch done in 48.6 s
+fixture | stage C done in 45.2 s
+fixture | stage D start
+fixture | stage D done in 34.1 s
+fixture | stage E theme, words per minute and language done in 5.5 s
+fixture | F: uploaded and read back catalog/v3/shard_fixture.features.jsonl.gz, catalog/v3/shard_fixture.clap.f16.npy, catalog/v3/shard_fixture.dropped.jsonl, SHA256s match
+fixture | shard fixture done in 122 s: 100 songs, 0 dropped, 100 previews deleted
+
+$ python -m pytest -q tests/test_harvest_shard.py tests/test_harvest_resume.py
+........                                                                 [100%]
+8 passed, 1 warning in 82.52s (0:01:22)        (the warning: timm's FutureWarning on timm.models.layers)
+
+$ ls ml/data/previews | wc -l
+0
+
+catalog/v3/shard_fixture.manifest.json (downloaded): songs 100, dropped 0, describe_commit e4c1b1bd2b4dd35a21560de82d280a587461ce99,
+seconds_per_stage A 59.4 B 26.9 E 48.6 C 45.2 D 34.1 F 8.2, seconds_other E_wait_after_D 0.0 E_theme_language 5.5 wall 179.3,
+a_overlapped False, free_gb_at_start 132.8,
+lyrics songs 100 had_file 65 without_file 35 passes [35: none 17 fetched 8 error 10 | 10: none 1 fetched 3 error 6 | 6: none 2 fetched 2 error 2] error_after_retry 2,
+sha256 features d9b7072d..., clap 8c738a57..., dropped e3b0c442...
+```
+
+- E finished inside C, and the join waited 0.0 s. The fixture's wall time was 179 s, against 213 s before.
+- The CLAP SHA256 8c738a57 equals the previous fixture run's, so stage D is unchanged.
+- The features SHA256 moved because stage E fetched 5 more lyrics in passes 2 and 3, which changes those rows' lyric fields.
+
+**The overlap on real code.** A local store with two shards of two fixture artists each
+(`--next --shards 2 --store <scratch> --runner smoke`, exit 0), from `current.describe.log`:
+
+```
+07:25:17 s00000 | stage A done in 29.7 s
+07:25:17 s00001 | stage A start
+07:25:17 s00000 | stage E start (lyric fetch, beside B to D)
+07:25:17 s00000 | stage B start
+07:25:25 s00000 | stage C start
+07:25:29 s00001 | stage A done in 12.0 s
+07:25:49 s00000 | stage D start
+07:26:21 s00000 | shard s00000 done in 64 s: 40 songs, 0 dropped, 40 previews deleted
+07:26:21 s00001 | stage E start (lyric fetch, beside B to D)
+07:26:21 s00001 | stage B start
+07:27:11 s00001 | shard s00001 done in 50 s: 40 songs, 0 dropped, 40 previews deleted
+```
+Both shards are in the local `MANIFEST.json`, `claims/` is empty afterwards, and previews are 0.
+
+### Shards 2 to 9, overlapped (code `c938999`)
+
+Started 2026-10-31 07:27 IST in one process: `py -3 ml/data/harvest_v3.py --next --shards 8 --runner Shreyash-PC`. a00002 was
+claimed first. The owner's two windows stay up on `current.describe.log` and `current.clap.log`.
+
+**Expected before measuring**, from shard 1:
+- Two more lyric passes, over about 1,163 and 600 rows, add roughly 700 s to E.
+- So E, at about 3,300 s, may now be longer than B + C + D (about 3,000 s) and set the shard's pace.
+- Four passes may leave about 6% of the songs in error rather than 2%.
+
+The after rate below comes from the manifests, not from this estimate.
+
+**CI.** Tests on `6a04b7b` (41135855564) failed twice, both times on `test_candidate_pool`'s live p95, and both after discovery
+finished at 22:04Z:
+- 0.568 s at 22:09Z;
+- 0.313 s on the rerun at 22:16Z.
+
+No green run yet; the run on this entry's commit is the next one.
