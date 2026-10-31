@@ -36,6 +36,48 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-31 09:00 IST WP5: restart and a00002 accepted; the pass cap stays at four, fix the lyric pacer and record the status code instead
+
+**Restart accepted.** `41158112863` attempt 2 is success on `ce1980e` (checked with `gh run view`); warm p95 0.238 / 0.212 s
+is back at P9's line. CI flap closed. WP7 keeps its gc item regardless.
+
+**a00002 accepted.** Every number in your entry matches `catalog/v3/shard_a00002.manifest.json` (4,650 songs, 11 dropped,
+stages A 1,525.9 / B 1,174.1 / C 1,220.7 / D 756.5 / E 3,058.5 / F 78.2, `E_wait_after_D` 0.0, four passes 1,996 / 978 / 482 /
+241, all `HTTPStatusError`). `MANIFEST.json` is at 14,472 songs over three shards, claims `a00003` and `a00004`. No retune of
+E's timing, by the rule.
+
+**The cap does not move to six.** A flat 50% a pass, whatever the rows, is LRCLIB refusing a share of our traffic, not rows
+failing. Six passes would send the failing traffic twice more to buy four points. Two things in the code decide what to do
+instead:
+
+1. **The lyric pacer is not a pacer.** `fetch_lyrics_remote.py:88-91` reads `_LAST[0]`, sleeps, then writes it, with no
+   lock. Twenty-four threads share that list, so each computes its wait from a stale value and they all pass together; the
+   0.06 s spacing holds inside one thread, never across them. `harvest_v3.py:90`'s comment ("shared across the fetchers:
+   about 1,000 requests a minute app-wide") describes code that does not exist. The iTunes pacer at `harvest_v3.py:277-281`
+   holds `_ITUNES_LOCK` around the same three lines; the lyric one must do the same.
+2. **Nothing records which status fails.** `_get` retries 429 and 503 itself (`:94-104`), so every `HTTPStatusError` comes
+   from `raise_for_status()` at `:124` or `:133` with some other code, and `error_types` folds them all into the class name.
+   `LRCLIB_STATUS` at `:93` has the `(endpoint, status)` counts and the harvester never logs it.
+
+**Do now, no code change, no stop:** run `fetch_lyrics_remote.py` standalone on the box, one thread, `--spacing 0.75`, over
+100 of a00002's songs that E left without a lyric file, `--out` to a scratch directory (not `LYRICS`), and post the status line
+it prints at the end (`:214` / `:222`). That costs 75 s against the same key a00003's E is using; fine. If the 100 come back
+200 / 404 the failures are load-dependent and point 1 is the fix; if they still fail at half, post the code and we look at
+the rows or the key.
+
+**Land at the next shard boundary, the way c938999 went in** (hold the runner after a shard's `finish()`; the overlapped A of
+the following shard is lost since stage A's songs are not persisted, accepted once):
+- a module lock in `fetch_lyrics_remote.py` around `:88-91`, same shape as `_ITUNES_LOCK`;
+- per pass, the delta of `flr.LRCLIB_STATUS` in the E log line and in the manifest as `lyrics.passes[].status`
+  (`{"get 500": n, "search 502": m}` shape, as the script prints it);
+- `LYRIC_MAX_PASSES` 4, `LYRIC_ERROR_SHARE` 0.02, `LYRIC_WORKERS` 24, `LYRIC_SPACING_S` 0.06 all unchanged for this landing.
+  The first shard on the locked pacer gives the honest curve at 16 requests a second; the retune of workers or spacing, if
+  any, comes from that shard's `status` and from the probe, not from a00002.
+- fixture re-run on the dataset before the next real shard: exit 0, CLAP SHA256 `8c738a57` unchanged, `pytest` on both test
+  files, previews 0, the `status` field present in the fixture manifest. Name the commit in SCALE_PROGRESS.md WP5.
+
+Report a00003's measured rate when its manifest lands, and the probe's status line as soon as you have it, in one entry.
+
 ### 2026-10-31 07:55 IST WP5: c938999 accepted; restart the Space once so CI measures the serving code, not discovery's leftovers
 
 **c938999 is accepted**, read from the code. The E thread starts before B and is joined after D with its exception re-raised in the main thread (`harvest_v3.py:625-633`); the next shard's A runs on its own `Harvester` from a copy of the current shard's keys, so a song the current shard later drops stays blocked rather than harvested twice; the iTunes pacer sleeps and stamps inside `_ITUNES_LOCK` (`:277-281`), so two stage A threads cannot issue within 3 s; the pass loop stops at 2% of stage A's song count or four passes including the first (`:508-515`). Your reading of "at most four passes" is the one I meant, and the base is stage A's count; both now pinned in the plan. B, C and D have no hunk in the diff, which is why the fixture's CLAP SHA256 held at 8c738a57. The fixture re-run and shard a00001 hash-match on the dataset from my own download; the old single claim file is gone and `claims/Shreyash-PC.a00002.json` is the only claim.

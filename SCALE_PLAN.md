@@ -377,7 +377,7 @@ on the Windows box. No code changes except bug fixes inside `harvest_v3.py`, eac
 progress entry. Amended 2026-10-31 after shard a00000 (3,027 songs an hour, 13.8 days): three conformance
 changes land at a shard boundary with the fixture re-run: stage E overlapped with B to D (section 5), the next shard's
 stage A overlapped with the current shard's B to F (at most two claims a runner), and lyric passes repeated until errors are at most 2% of stage A's song count or four passes including the first
-(landed in c938999, accepted 2026-10-31). Files: `ml/data/harvest_v3.py`, `SCALE_PROGRESS.md`.
+(landed in c938999, accepted 2026-10-31). Amended again after a00002 (241 rows, 5.2%, still in error after four passes at a flat 50% a pass): the pass cap stays at four; the lyric pacer in `fetch_lyrics_remote.py` goes under a lock like the iTunes one, and each pass records LRCLIB's `(endpoint, status)` counts as `lyrics.passes[].status` in the manifest, landed at a shard boundary with the fixture re-run. Any retune of lyric workers or spacing comes from the first shard on the locked pacer. Files: `ml/data/harvest_v3.py`, `SCALE_PROGRESS.md`.
 Verify and paste:
 ```
 python -c "from huggingface_hub import hf_hub_download as d; import json; m=json.load(open(d('shreyash616/echo-ml-artifacts','catalog/v3/MANIFEST.json',repo_type='dataset'))); print(len(m['shards']), sum(x['rows'] for x in m['shards']), sum(x['dropped'] for x in m['shards']))"
