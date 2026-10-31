@@ -2,12 +2,15 @@
 ml/data/harvest_v3.py: the shard harvester (SCALE_PLAN section 5, WP4).
 
   python ml/data/harvest_v3.py --shard-file tests/fixtures/harvest_fixture_shard.json   # one named shard
-  python ml/data/harvest_v3.py --next [--runner box]                                     # claim and run the next shard
+  python ml/data/harvest_v3.py --next [--runner box] [--shards N]                        # claim and run the next N shards
 
-One process per shard, stages A to F:
+Stages A to F a shard (README c2f8090: E overlapped with B to D, the next shard's A with this one's B to F):
   A resolve   iTunes artist search, then lookup of up to 200 songs; songs with a previewUrl in iTunes'
               order, at most 20 an artist, deduplicated by artist:title key and iTunes id against the
-              global set and within the shard; 20 requests a minute, exponential backoff on 403 / 429.
+              global set and within the shard; 20 requests a minute through one module-wide pacer, so two
+              shards' A never run at once; exponential backoff on 403 / 429. With --shards N > 1, when a
+              shard's A finishes the next shard is claimed and its A runs in a thread under this shard's B
+              to F, deduplicated against the global set and this shard's A songs.
   B fetch     previews to ml/data/previews/<itunes_id>.m4a, 8 connections, one retry; failures to the
               shard's dropped list with the reason.
   C describe  describe_audio over a pool of 10 workers (redescribe_catalog._describe_one, the P4 path),
@@ -16,8 +19,10 @@ One process per shard, stages A to F:
               of recommender._window_audio_frames, 64 windows a batch through the LAION music checkpoint,
               the song's windows averaged and L2-normalised, stored float16. One INFO line per batch.
   E text      LRCLIB lyrics through fetch_lyrics_remote (the registered application's headers from
-              backend/.env), 24 fetchers over disjoint row ranges; then the P4 theme (apply_lyric_theme),
-              words per minute and language (artist-majority vote, then language_from_meta).
+              backend/.env), 24 fetchers over disjoint row ranges, in a thread started with B over stage A's
+              songs; passes over the rows in error repeat while they exceed 2% of those songs, at most four
+              passes; E's seconds are the fetchers' wall time. After D the thread is joined, then the P4 theme
+              (apply_lyric_theme), words per minute and language (artist-majority vote, then language_from_meta).
   F write     shard_<id>.features.jsonl.gz, shard_<id>.clap.f16.npy, shard_<id>.dropped.jsonl and
               shard_<id>.manifest.json (artists, songs, dropped, SHA256s, describe commit, seconds per
               stage) to catalog/v3/; the uploaded files are downloaded back and their SHA256s checked;
@@ -25,11 +30,13 @@ One process per shard, stages A to F:
               catalog/v3/keys.txt; the shard's previews are deleted.
 
 Resume: --next reads catalog/v3/MANIFEST.json and discovery/shards.json, takes the lowest shard that is
-neither finished nor claimed by another runner within 6 hours (catalog/v3/claims/<runner>.json), and
-runs it from stage A; a crash leaves the claim, so a restart re-runs that shard from stage A.
+neither finished nor claimed by another runner within 6 hours (catalog/v3/claims/<runner>.<shard>.json), and
+runs it from stage A. A runner holds at most two claims (the running shard and the one whose A runs under
+it); a crash leaves both, and a restart takes its own claims first, the lower one first, each from stage A.
 
 Logs: ml/data/harvest_v3_work/<shard>.describe.log (stages A to C, E, F) and <shard>.clap.log (stage D),
-for the owner's two terminal windows.
+and current.describe.log / current.clap.log for the owner's two terminal windows, opened once a process,
+each line tagged with its shard (two shards log at once while the next shard's A runs).
 """
 from __future__ import annotations
 
@@ -81,7 +88,10 @@ DESCRIBE_WORKERS = 10
 CLAP_BATCH = 32                 # 64 stalls 3 to 5 minutes on its first call (WP4; reviewer ce741ca)
 LYRIC_WORKERS = 24
 LYRIC_SPACING_S = 0.06          # shared across the fetchers: about 1,000 requests a minute app-wide
+LYRIC_MAX_PASSES = 4            # passes in all, the first included (README c2f8090)
+LYRIC_ERROR_SHARE = 0.02        # another pass while the rows in error exceed this share of the shard's songs
 STALE_CLAIM_S = 6 * 3600
+MAX_CLAIMS = 2                  # the running shard and the next shard's stage A
 USER_AGENT = "echo-harvest-v3/1.0 (feel-based music discovery)"
 
 
@@ -171,29 +181,39 @@ def describe_commit() -> str:
                           cwd=ROOT, capture_output=True, text=True).stdout.strip()
 
 
-_CURRENT: dict[str, tuple[logging.Logger, logging.Handler]] = {}
+_CURRENT: dict[tuple[str, str], logging.Handler] = {}
+_LOG_FMT = logging.Formatter("%(asctime)s | %(levelname)s | %(shard)s | %(message)s")
+
+
+class _ShardTag(logging.Filter):
+    def __init__(self, shard: str):
+        super().__init__()
+        self.shard = shard
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.shard = self.shard
+        return True
 
 
 def shard_logger(shard: str, kind: str) -> logging.Logger:
-    """The shard's own <shard>.<kind>.log, plus current.<kind>.log truncated at each shard start, so the
-    owner's two Get-Content -Wait windows are opened once for a whole multi-shard run."""
+    """The shard's own <shard>.<kind>.log, plus current.<kind>.log, truncated once a process and shared by
+    the shards it runs, so the owner's two Get-Content -Wait windows show both shards while they overlap."""
     WORK.mkdir(parents=True, exist_ok=True)
-    fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
     lg = logging.getLogger(f"harvest_v3.{shard}.{kind}")
     lg.setLevel(logging.INFO)
     if not lg.handlers:
+        lg.addFilter(_ShardTag(shard))
         fh = logging.FileHandler(WORK / f"{shard}.{kind}.log", encoding="utf-8")
-        fh.setFormatter(fmt)
-        lg.addHandler(fh)
-        lg.addHandler(logging.StreamHandler(sys.stdout))
-    if kind in _CURRENT:  # the previous shard's handle on the current file
-        old_lg, old_h = _CURRENT.pop(kind)
-        old_lg.removeHandler(old_h)
-        old_h.close()
-    ch = logging.FileHandler(WORK / f"current.{kind}.log", mode="w", encoding="utf-8")
-    ch.setFormatter(fmt)
-    lg.addHandler(ch)
-    _CURRENT[kind] = (lg, ch)
+        sh = logging.StreamHandler(sys.stdout)
+        cur = (str(WORK), kind)
+        if cur not in _CURRENT:
+            _CURRENT[cur] = logging.FileHandler(WORK / f"current.{kind}.log", mode="w", encoding="utf-8")
+            _CURRENT[cur].setFormatter(_LOG_FMT)
+        for h in (fh, sh):
+            h.setFormatter(_LOG_FMT)
+        for h in (fh, sh, _CURRENT[cur]):
+            lg.addHandler(h)
+        lg.propagate = False  # root's basicConfig handler would print each line twice
     return lg
 
 
@@ -204,6 +224,10 @@ def _describe_only(args):
     if y is not None:
         res["n22"] = int(len(y))
     return res
+
+
+_ITUNES_LAST = [0.0]            # one pacer for every stage A in the process: 20 requests a minute in all
+_ITUNES_LOCK = threading.Lock()
 
 
 def _window_count(n22: int) -> int:
@@ -226,6 +250,8 @@ class Harvester:
         self.log = shard_logger(shard, "describe")
         self.clap_log = shard_logger(shard, "clap")
         self.seconds: dict[str, float] = {}
+        self.seconds_other: dict[str, float] = {}
+        self.a_overlapped = False
         self.songs: list[dict] = []
         self.dropped: list[dict] = []
         self.unresolved: list[dict] = []
@@ -246,14 +272,13 @@ class Harvester:
 
     # ---- A ---------------------------------------------------------------------------------------
     def resolve(self) -> None:
-        last = [0.0]
-
         def get(url: str, params: dict) -> dict | None:
             for attempt in range(8):
-                wait = ITUNES_SPACING_S - (time.time() - last[0])
-                if wait > 0:
-                    time.sleep(wait)
-                last[0] = time.time()
+                with _ITUNES_LOCK:
+                    wait = ITUNES_SPACING_S - (time.time() - _ITUNES_LAST[0])
+                    if wait > 0:
+                        time.sleep(wait)
+                    _ITUNES_LAST[0] = time.time()
                 try:
                     r = http.get(url, params=params, timeout=20.0)
                 except httpx.HTTPError as e:
@@ -436,17 +461,21 @@ class Harvester:
         return np.array(out, dtype=np.float32).reshape(len(out), 512)
 
     # ---- E ---------------------------------------------------------------------------------------
-    def text(self) -> None:
-        LYRICS.mkdir(parents=True, exist_ok=True)
+    @staticmethod
+    def lyric_headers() -> dict:
         app = flr.registered_app()
         if "Lrclib-Api-Key" not in app:  # WP1: 24 fetchers only as the owner's registered application
             raise RuntimeError("LRCLIB application headers absent (backend/.env); not running 24 anonymous fetchers")
-        todo = [s for s in self.songs if not rc.lyric_path(s).exists()]
-        headers = {"User-Agent": flr.USER_AGENT, **app}
-        counts = Counter()
+        return {"User-Agent": flr.USER_AGENT, **app}
+
+    def lyrics(self, songs: list[dict], headers: dict) -> None:
+        """Stage E's fetch over stage A's songs, run in a thread beside B to D: passes over the rows in error
+        repeat while they exceed LYRIC_ERROR_SHARE of the songs, at most LYRIC_MAX_PASSES passes."""
+        LYRICS.mkdir(parents=True, exist_ok=True)
+        todo = [s for s in songs if not rc.lyric_path(s).exists()]
         lock = threading.Lock()
 
-        def worker(rows: list[dict], failed: list[dict]) -> None:
+        def worker(rows: list[dict], failed: list[dict], counts: Counter, types: Counter) -> None:
             with httpx.Client(headers=headers) as client:
                 for r in rows:
                     try:
@@ -455,31 +484,42 @@ class Harvester:
                         got, kind = None, "error"
                         with lock:
                             failed.append(r)
-                            counts[f"error {type(e).__name__}"] += 1
+                            types[type(e).__name__] += 1
                     else:
                         kind = "fetched" if got else "none"
                     with lock:
                         counts[kind] += 1
 
-        def run_pool(rows: list[dict]) -> list[dict]:
+        def run_pool(rows: list[dict]) -> dict:
             failed: list[dict] = []
+            counts, types = Counter(), Counter()
             n = max(1, min(LYRIC_WORKERS, len(rows)))
-            threads = [threading.Thread(target=worker, args=(rows[i::n], failed), daemon=True) for i in range(n)] if rows else []
+            threads = [threading.Thread(target=worker, args=(rows[i::n], failed, counts, types), daemon=True)
+                       for i in range(n)] if rows else []
             for t in threads:
                 t.start()
             for t in threads:
                 t.join()
-            return failed
+            # a pass is none + fetched + error; the exception types are a breakdown of error, not added to it
+            return {"rows": len(rows), "none": counts["none"], "fetched": counts["fetched"], "error": counts["error"],
+                    "error_types": dict(types), "_failed": failed}
 
-        failed = run_pool(todo)
-        first = dict(counts)
-        # a second pass over the rows that errored, as fetch_lyrics_remote's main does
-        counts.clear()
-        still = run_pool(failed)
-        self.lyric_counts = {"first_pass": first, "second_pass": dict(counts), "error_after_retry": len(still)}
-        self.log.info("E: lyrics for %d songs without a file: first pass %s; second pass over %d errors %s; %d still in error",
-                      len(todo), first, len(failed), dict(counts), len(still))
+        passes, rows = [], todo
+        while rows and len(passes) < LYRIC_MAX_PASSES:
+            p = run_pool(rows)
+            rows = p.pop("_failed")
+            passes.append(p)
+            self.log.info("E: pass %d over %d rows: %d fetched, %d none, %d error %s", len(passes), p["rows"],
+                          p["fetched"], p["none"], p["error"], p["error_types"])
+            if len(rows) <= LYRIC_ERROR_SHARE * len(songs):
+                break
+        self.lyric_counts = {"songs": len(songs), "had_file": len(songs) - len(todo), "without_file": len(todo),
+                             "passes": passes, "error_after_retry": len(rows)}
+        self.log.info("E: lyrics for %d of %d songs without a file, %d passes, %d still in error (%.1f%% of the songs)",
+                      len(todo), len(songs), len(passes), len(rows), 100.0 * len(rows) / max(len(songs), 1))
 
+    def text(self) -> None:
+        """Stage E after the fetch: theme, words per minute and language, over the songs D kept."""
         from sentence_transformers import SentenceTransformer
         minilm = SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
         tp = json.loads(THEME_PROMPTS.read_text(encoding="utf-8"))
@@ -531,6 +571,8 @@ class Harvester:
             "clap_shape": list(clap.shape), "describe_commit": describe_commit(),
             "date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "seconds_per_stage": dict(self.seconds),
+            # stages overlap (E under B to D, this shard's A under the previous shard): the wall time is not their sum
+            "seconds_other": dict(self.seconds_other), "a_overlapped": self.a_overlapped,
             "free_gb_at_start": round(getattr(self, "free_bytes_at_start", 0) / 1024 ** 3, 1),
             "keys": [s["key"] for s in self.songs],
             "itunes_ids": [s["itunes_id"] for s in self.songs],
@@ -550,6 +592,11 @@ class Harvester:
         return manifest
 
     def run(self) -> dict:
+        self.stage_a()
+        return self.run_rest()
+
+    def stage_a(self) -> None:
+        """The free-space check and stage A; run_shards runs it for the next shard in a thread."""
         # rule 23: under 8 GB free on the drive that holds the previews, stop before the shard starts
         PREVIEWS.mkdir(parents=True, exist_ok=True)
         free = shutil.disk_usage(PREVIEWS).free
@@ -558,16 +605,47 @@ class Harvester:
             self.log.info("shard %s not started: %.1f GB free on the previews drive, under 8 GB", self.shard, free / 1024 ** 3)
             raise SystemExit(f"{free / 1024 ** 3:.1f} GB free < 8 GB (rule 23)")
         self.log.info("shard %s: %d artists, runner %s, %.1f GB free", self.shard, len(self.artists), self.runner, free / 1024 ** 3)
-        t_all = time.time()
         self._timed("A", self.resolve)
+
+    def run_rest(self) -> dict:
+        """B to F, with E's fetch in a thread from the start of B (README c2f8090)."""
+        t_all = time.time()
+        headers = self.lyric_headers()  # raises before any stage starts
+        lyr: dict = {}
+
+        songs_a = list(self.songs)  # stage A's songs, before B to D drop any
+
+        def fetch_lyrics() -> None:
+            t0 = time.time()
+            self.log.info("stage E start (lyric fetch, beside B to D)")
+            try:
+                self.lyrics(songs_a, headers)
+            except BaseException as e:  # re-raised in the main thread at the join
+                lyr["error"] = e
+            self.seconds["E"] = round(time.time() - t0, 1)
+            self.log.info("stage E lyric fetch done in %.1f s", self.seconds["E"])
+
+        th = threading.Thread(target=fetch_lyrics, name=f"lyrics-{self.shard}", daemon=True)
+        th.start()
         self._timed("B", self.fetch)
         self._timed("C", self.describe)
         clap = self._timed("D", self.clap)
-        self._timed("E", self.text)
+        t0 = time.time()
+        th.join()
+        self.seconds_other["E_wait_after_D"] = round(time.time() - t0, 1)
+        if "error" in lyr:
+            raise lyr["error"]
+        t0 = time.time()
+        self.text()
+        self.seconds_other["E_theme_language"] = round(time.time() - t0, 1)
+        self.log.info("stage E theme, words per minute and language done in %.1f s", self.seconds_other["E_theme_language"])
         t0 = time.time()
         manifest = self.write(clap)
         self.seconds["F"] = round(time.time() - t0, 1)
+        # wall time of the shard: B to F, plus A when A was not hidden under the previous shard
+        self.seconds_other["wall"] = round(time.time() - t_all + (0.0 if self.a_overlapped else self.seconds.get("A", 0.0)), 1)
         manifest["seconds_per_stage"] = dict(self.seconds)
+        manifest["seconds_other"] = dict(self.seconds_other)
         # the timings now include F: rewrite and re-upload the manifest, then check it once more
         manf = self.out / f"shard_{self.shard}.manifest.json"
         manf.write_text(json.dumps(manifest, indent=1, ensure_ascii=False), encoding="utf-8")
@@ -591,32 +669,39 @@ def finished_shards(store) -> dict:
 
 
 def claims(store) -> list[dict]:
+    """Every claim on the store, each with the path it was read from."""
     out = []
     for path in store.list(f"{PREFIX}/claims"):
         c = store.read_json(path)
         if c:
-            out.append(c)
+            out.append({**c, "_path": path})
     return out
 
 
-def next_shard(store, shard_ids: list[str], runner: str, now: float | None = None) -> str | None:
+def claim_path(runner: str, shard: str) -> str:
+    return f"{PREFIX}/claims/{runner}.{shard}.json"
+
+
+def next_shard(store, shard_ids: list[str], runner: str, now: float | None = None,
+               exclude: set[str] | frozenset = frozenset()) -> str | None:
     """The lowest shard neither finished nor claimed by another runner within STALE_CLAIM_S; a runner's
-    own claim (a crash mid-shard) is resumed first."""
+    own claims (a crash mid-shard, up to two) are resumed first, the lower first. `exclude`: shards this
+    process already holds."""
     now = time.time() if now is None else now
     done = finished_shards(store)
     active = claims(store)
-    mine = [c["shard"] for c in active if c["runner"] == runner and c["shard"] not in done]
+    mine = sorted({c["shard"] for c in active if c["runner"] == runner and c["shard"] not in done} - set(exclude))
     if mine:
         return mine[0]
     taken = {c["shard"] for c in active if c["runner"] != runner and now - c["t"] < STALE_CLAIM_S}
-    return next((s for s in shard_ids if s not in done and s not in taken), None)
+    return next((s for s in shard_ids if s not in done and s not in taken and s not in exclude), None)
 
 
 def claim(store, shard: str, runner: str, now: float | None = None) -> None:
-    p = WORK / f"claim_{runner}.json"
+    p = WORK / f"claim_{runner}.{shard}.json"
     WORK.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps({"runner": runner, "shard": shard, "t": time.time() if now is None else now}), encoding="utf-8")
-    store.put(p, f"{PREFIX}/claims/{runner}.json")
+    store.put(p, claim_path(runner, shard))
 
 
 def finish(store, manifest: dict, runner: str) -> None:
@@ -632,7 +717,10 @@ def finish(store, manifest: dict, runner: str) -> None:
     kp = WORK / "keys.txt"
     kp.write_text(keys, encoding="utf-8")
     store.put(kp, f"{PREFIX}/keys.txt")
-    store.delete(f"{PREFIX}/claims/{runner}.json")
+    # this runner's claims on this shard, whatever their file name (claims/<runner>.json before the overlap)
+    for c in claims(store):
+        if c["runner"] == runner and c["shard"] == manifest["shard"]:
+            store.delete(c["_path"])
 
 
 def global_seen(store) -> tuple[set[str], set[str]]:
@@ -652,18 +740,57 @@ def discovery_shard_artists(store, shard: str) -> list[dict]:
     return rows[s["start"]:s["end"]]
 
 
-def run_next(store, runner: str, harvester_cls=Harvester) -> dict | None:
+def run_shards(store, runner: str, count: int = 1, harvester_cls=Harvester) -> list[dict]:
+    """Up to `count` shards in this process. When a shard's A finishes and more are wanted, the next shard is
+    claimed and its A runs in a thread under this shard's B to F (README c2f8090), deduplicated against the
+    global keys and this shard's A songs, which reach keys.txt only when this shard finishes."""
     spec = store.read_json("discovery/shards.json")
     if not spec:
         raise RuntimeError("discovery/shards.json not on the dataset yet")
-    shard = next_shard(store, [s["shard"] for s in spec["shards"]], runner)
-    if shard is None:
-        return None
-    claim(store, shard, runner)
-    keys, ids = global_seen(store)
-    manifest = harvester_cls(shard, discovery_shard_artists(store, shard), store, keys, ids, runner=runner).run()
-    finish(store, manifest, runner)
-    return manifest
+    ids = [s["shard"] for s in spec["shards"]]
+
+    def start(shard: str, extra_keys: set[str], extra_ids: set[str]):
+        claim(store, shard, runner)
+        keys, itunes = global_seen(store)
+        return harvester_cls(shard, discovery_shard_artists(store, shard), store, keys | extra_keys, itunes | extra_ids,
+                             runner=runner)
+
+    shard = next_shard(store, ids, runner)
+    if shard is None or count < 1:
+        return []
+    h = start(shard, set(), set())
+    h.stage_a()
+    done: list[dict] = []
+    while True:
+        pre, pre_err, th = None, {}, None
+        if len(done) + 1 < count:
+            nxt = next_shard(store, ids, runner, exclude={h.shard})
+            if nxt is not None:
+                pre = start(nxt, {s["key"] for s in h.songs}, {s["itunes_id"] for s in h.songs})
+                pre.a_overlapped = True
+
+                def run_a(p=pre) -> None:
+                    try:
+                        p.stage_a()
+                    except BaseException as e:  # re-raised in the main thread at the join
+                        pre_err["error"] = e
+
+                th = threading.Thread(target=run_a, name=f"stage-a-{nxt}", daemon=True)
+                th.start()
+        manifest = h.run_rest()
+        finish(store, manifest, runner)
+        done.append(manifest)
+        if pre is None:
+            return done
+        th.join()
+        if "error" in pre_err:
+            raise pre_err["error"]
+        h = pre
+
+
+def run_next(store, runner: str, harvester_cls=Harvester) -> dict | None:
+    done = run_shards(store, runner, 1, harvester_cls)
+    return done[0] if done else None
 
 
 def main() -> None:
@@ -672,6 +799,7 @@ def main() -> None:
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--shard-file", help="a shard file: {'shard': id, 'artists': [...]}, run as given (the fixture)")
     g.add_argument("--next", action="store_true", help="claim and run the next unfinished discovery shard")
+    ap.add_argument("--shards", type=int, default=1, help="with --next: shards to run, each next A under the current B to F")
     ap.add_argument("--runner", default=socket.gethostname())
     ap.add_argument("--store", default="dataset", help="'dataset', or a local directory")
     ap.add_argument("--max-artists", type=int, default=0, help="first N artists of the shard file only")
@@ -682,9 +810,10 @@ def main() -> None:
         artists = spec["artists"][:args.max_artists] if args.max_artists else spec["artists"]
         # a named shard is harvested and uploaded under its own name only: no global manifest, no keys
         manifest = Harvester(spec["shard"], artists, store, fixture=True, runner=args.runner).run()
-    else:
-        manifest = run_next(store, args.runner)
-    print(json.dumps({k: v for k, v in (manifest or {}).items() if k not in ("keys", "itunes_ids")}, indent=1, ensure_ascii=False))
+        print(json.dumps({k: v for k, v in manifest.items() if k not in ("keys", "itunes_ids")}, indent=1, ensure_ascii=False))
+        return
+    for manifest in run_shards(store, args.runner, args.shards):
+        print(json.dumps({k: v for k, v in manifest.items() if k not in ("keys", "itunes_ids")}, indent=1, ensure_ascii=False))
 
 
 if __name__ == "__main__":
