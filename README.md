@@ -1005,6 +1005,44 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-31 21:55 IST PACKET WP5 READY FOR REVIEW: ten shards, 47,274 songs, 5,581 songs an hour, 7.1 days to a million
+
+Full report in SCALE_PROGRESS.md WP5, with every table.
+
+**Gate:** 10 shards; 47,274 rows; 40 dropped (0.08%); free disk 143.6 GB against WP1's 135.2 GB; previews 0; no claims left; projection 7.1 days.
+
+**The plan's gate command fails as written:** `python` is not on the box's PATH, and under `py -3` it raises `TypeError`, because `shards` is a dict with `songs`, not a list with `rows`. I did not edit it. The figures above are read from the real shape; the error is pasted in the report. Yours to amend.
+
+**Rates:**
+- a00000 to a00001: 2,700 songs an hour.
+- a00002: 3,454.
+- a00003: 4,246.
+- a00004: 4,116, A alone after the restart.
+- a00005 to a00009: **5,581** on the clock, 5,687 on manifest walls.
+
+**Projection limit.** a00005 to a00009 carried no full lyric load: the breaker ended E after 103 to 136 s. With a00003's `E_wait_after_D` of 369 s added back, the rate is 4,982 and the run 8.0 days. 0.25 s is still unchecked on a healthy shard.
+
+**Spacing.** Four pairs, not five, since a00005's pass ran before the first probe and a00009's probe has no next shard.
+
+| Probe after | Probe `get 503` | Paired pass 1 | Pass `get 503` |
+|---|---|---|---|
+| a00005 | 82.6% | a00006 | 84.7% |
+| a00006 | 86.5% | a00007 | 88.6% |
+| a00007 | 81.0% | a00008 | 87.8% |
+| a00008 | 87.0% | a00009 | 88.4% |
+
+Both shed on all four, which under your rule reads as LRCLIB and 0.25 s stays. A probe was 131 to 236 calls over 4 to 6 minutes, not 20 calls in 30 s, because of `_get`'s retries and the fetcher's second pass.
+
+**Fail-fast.** One pass a shard, cut by the breaker: `error` over rows tried 58.5% (237 of 405), `search 503` 85.6% of 292 calls, `get 503` 86.0% of 2,173 calls. Most of the 503s are `get`, so this is not the search-only case your table was written for.
+
+**Refetch.** 25,650 keys in the error lists, about double your 12,000: a00005 to a00009 had almost no lyric files already (37 to 140 a shard, against a00004's 1,965). a00000 to a00003 hold 2,196 more with no list.
+
+**Commit.** Pagefile 18.4 GB. No hold, no flag; harvester private 5.57 to 6.46 GB. But commit is 18.8 GB with the harvester gone, 5.8 GB above the pre-start 13.0, about 1 GB a shard. Not investigated. At that rate the 6 GB hold arrives after about 24 more shards, so WP6 would need a reboot about daily.
+
+**CI.** 41158112863 is green, and so is 41194366398 on `ccc1e35`. 9 of the last 14 push runs are red. The latest five, all channel or progress commits, fail `test_candidate_pool` server p95 at 0.305 to 0.501 s; one of them, `4f5d116`, ran alone. Cause not established.
+
+**For you at this boundary:** WP6 spacing, `MAX_503_RETRIES` for search, the refetch tool's specification, the commit policy, and the gate command. The runner is down and I wait for GO.
+
 ### 2026-10-31 17:30 IST WP5: rebooted and restarted; a00004 done, the breaker fired, 55.1% of its songs in lyric error
 
 `8c56408` reposted my 14:25 entry here by mistake: a failed file write left the old text in place. This commit replaces that
