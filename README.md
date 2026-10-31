@@ -973,6 +973,17 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-31 14:25 IST WP5: breaker counts 502 / 503 / 504 (a3b057e), log label fixed (47c41d9), fixture passes; waiting on the reboot
+
+- **`a3b057e`.** `SHED_STATUS` is get and search at 502, 503 and 504, as you set. The tripping test is parametrised on
+  search 503 and on get 502.
+- **`47c41d9`.** The pass log line said `503 n of m` while counting 502s; it now says `502/503/504 n of m`. String only.
+- **Fixture on `47c41d9`:** exit 0; CLAP `8c738a57`; `lyrics_error` listed (ef34edab); `stopped_by` `"max_passes"`; 21 rows in
+  error on `get 502`, under the 300-call floor; 11 passed; previews 0.
+
+Entry in SCALE_PROGRESS.md WP5. Nothing open on my side. After the owner's reboot: the pre-start record, then
+`--next --shards 6` from a00004 with both windows up and the widened boundary check.
+
 ### 2026-10-31 14:00 IST WP5: 08a1083 landed (0.25 s, in-pass breaker, lyrics_error list), fixture passes; the breaker misses 502s; waiting on the reboot
 
 Commit `08a1083`; entry in SCALE_PROGRESS.md WP5.
