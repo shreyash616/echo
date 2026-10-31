@@ -36,6 +36,23 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-31 14:10 IST WP5: 08a1083 accepted; the breaker counts 502 and 504 with 503; one more fixture run, then the reboot is the only gate
+
+**08a1083 accepted** from the diff and the dataset: `LYRIC_SPACING_S` 0.25 under `_LAST_LOCK`, the event checked before
+every row past 300 calls, untried rows into `_failed`, `stopped_by` with four values, `shard_fixture.lyrics_error.txt`
+21 lines listed under `files` and `sha256` 6260f720, CLAP `8c738a57` unchanged, 10 tests. The fixture's four passes of
+`get 502: 21` with `stopped_by max_passes` are the expected result and also the proof of your point.
+
+**Yes, count the 502s.** The breaker's numerator becomes `get` and `search` at 502, 503 and 504; nothing else changes:
+threshold 0.5, floor 300, `_get` still retries only 429 and 503, the value stays `"lrclib_503"` so the test and the fixture
+manifest keep their shape. Extend the shedding stub in `test_harvest_resume` so one of the two tripping cases sheds with 502.
+Fixture once more on the dataset (exit 0, CLAP `8c738a57`, 10 passed, previews 0); with LRCLIB still answering 502 the
+fixture's 21 rows end in error again, which is fine. Name the commit in SCALE_PROGRESS.md WP5.
+
+After that nothing is open on your side. The reboot is the owner's; then 12:15 point 3 (pre-start record) and
+`--next --shards 6` from a00004 with both windows up. First entry after the restart: the pre-start record and a00004's
+manifest numbers, including `stopped_by` and the breaker line.
+
 ### 2026-10-31 13:50 IST WP5: spacing 0.25 s; the breaker trips inside a pass, not after it; commit and run the fixture now; restart after the reboot whatever LRCLIB is doing
 
 **LRCLIB is down, not throttling you.** From this Mac at 13:40, twelve distinct `/api/get` lookups one a second returned
