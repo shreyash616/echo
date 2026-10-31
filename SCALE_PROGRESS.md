@@ -1126,3 +1126,116 @@ sha256 features 0851c960, clap 55cdbf6d, dropped ec09ada1, lyrics_error a843b41b
   condition is unmet and spacing stays at 0.25 s.
 - **Memory.** No hold and no flag. Commit is up 6.4 GB from the pre-start 13.0 GB; the harvester's private bytes were 5.57 GB at
   17:26. CUDA held at 778 MB and all 414 CLAP batches finished.
+
+### WP5 report: ten shards complete (21:41 IST)
+
+The run started at 16:20 on `ccc1e35` and took a00004 to a00009 in one process: exit 0 after 19,229 s. No claims remain.
+
+**Gate, in the plan's order.**
+
+The plan's first command fails as written, on the box's PATH and on `MANIFEST.json`'s shape:
+
+```
+$ python -c "...print(len(m['shards']), sum(x['rows'] for x in m['shards']), sum(x['dropped'] for x in m['shards']))"
+Python was not found; run without arguments to install from the Microsoft Store, ...
+$ py -3 -c "...the same..."
+TypeError: string indices must be integers, not 'str'
+```
+
+`shards` is a dict keyed by shard id, each entry holding `songs` and `dropped`, not a list with `rows`. I left the command as it is; the plan's text is yours. The same read against the real shape, from a scratch script under `py -3`:
+
+```
+MANIFEST.json: shards 10, songs 47274; dropped 40 over the shard manifests (10 0 11 9 2 5 0 0 0 3)
+catalog/v3/claims: []
+$ df -h ~ | tail -1
+C:              400G  256G  144G  65% /c
+$ ls ml/data/previews | wc -l
+0
+```
+
+| Gate item | Required | Measured |
+|---|---|---|
+| Shards complete | 10 | 10 |
+| Rows | at least 40,000 | 47,274 |
+| Dropped | under 10% | 40 of 47,314 (0.08%) |
+| Free disk | within 3 GB of WP1's 135.2 GB | 143.6 GB at the last boundary; `df` 144 GB |
+| Previews | empty | 0 |
+| Projection for a million | stated; stop if over 14 days | 7.1 days of run time |
+
+**Rates, kept apart.**
+
+| Shards | Mode | Songs | Seconds | Songs an hour |
+|---|---|---|---|---|
+| a00000 to a00001 | sequential | 9,822 | 13,094 (stage sums) | 2,700 |
+| a00002 | E overlapped | 4,650 | 4,847 | 3,454 |
+| a00003 | A and E overlapped, E the pace (`E_wait_after_D` 369 s) | 4,613 | 3,911 | 4,246 |
+| a00004 | restart: A alone, breaker | 4,410 | 3,857 | 4,116 |
+| a00005 to a00009 | A and E overlapped, breaker | 23,779 | 15,053 (manifest walls) | 5,687 |
+| a00005 to a00009 | the same on the clock, a00004's finish to exit | 23,779 | 15,339 | **5,581** |
+
+Per shard, a00005 to a00009: 6,077, 5,801, 5,332, 5,722 and 5,607 songs an hour.
+
+**Projection, from the clock rate of 5,581 songs an hour.** The remaining 952,726 rows take 170.7 hours, or 7.1 days of run time, so a start at GO on 2026-11-01 ends about 2026-11-08. That counts no stops. Two limits on it:
+- Stage E took 103 to 136 s on these shards because LRCLIB refused it and the breaker stopped it. These shards carried no full lyric load, so the rate is not yet proven with LRCLIB healthy.
+- 0.25 s is unchecked on a healthy shard. If E again overran D by a00003's 369 s a shard, the rate is 4,982 songs an hour and the run 8.0 days. Under 14 days either way.
+
+B + C + D also got cheaper after the reboot: 0.73 s a song on a00003, 0.62 to 0.67 s on a00006 to a00009.
+
+**Per-pass status (README 10:55 point 3).** Only a00004 to a00009 carry `status`, and each ran one pass, cut by the breaker, so the table is six short samples from an outage. Per-row uses rows tried, not rows in the pass.
+
+| Shard | Rows tried | `error` over tried | `search 503` over search calls | `get 503` over get calls |
+|---|---|---|---|---|
+| a00004 | 51 | 37 (72.5%) | 103 of 123 (83.7%) | 274 of 336 (81.5%) |
+| a00005 | 65 | 33 (50.8%) | 62 of 75 (82.7%) | 271 of 323 (83.9%) |
+| a00006 | 84 | 36 (42.9%) | 6 of 6 | 322 of 380 (84.7%) |
+| a00007 | 67 | 43 (64.2%) | 24 of 28 (85.7%) | 325 of 367 (88.6%) |
+| a00008 | 60 | 43 (71.7%) | 43 of 48 (89.6%) | 325 of 370 (87.8%) |
+| a00009 | 78 | 45 (57.7%) | 12 of 12 | 351 of 397 (88.4%) |
+| All | 405 | 237 (58.5%) | 250 of 292 (85.6%) | 1,868 of 2,173 (86.0%) |
+
+Per-row is 27 points below per-call, but most of those 503s are `get`, not `search`, which is not the case point 3 was written for.
+
+**Probe and pass (README 17:40).** Four pairs, not five: a00005's pass ran before the first probe, and a00009's probe has no next shard.
+
+| Probe after | `get 503` of gets | All calls | Songs fetched of 20 | Paired pass 1 | `get 503` share | Pass calls |
+|---|---|---|---|---|---|---|
+| a00005 | 147 of 178 (82.6%) | 236 | 9 | a00006 | 84.7% | 386 |
+| a00006 | 147 of 170 (86.5%) | 174 | 16 | a00007 | 88.6% | 395 |
+| a00007 | 94 of 116 (81.0%) | 131 | 16 | a00008 | 87.8% | 418 |
+| a00008 | 174 of 200 (87.0%) | 212 | 12 | a00009 | 88.4% | 409 |
+| a00009 | 115 of 134 (85.8%) | 138 | 14 | none | | |
+
+- Every pair sheds at both rates, 1 a second and 4 a second, and the shares are close. Under your rule that reads as LRCLIB, not our rate.
+- A probe is not 20 calls while LRCLIB sheds: it was 131 to 236 calls over 4 to 6 minutes, from the retries in `_get` and the fetcher's second pass. The breaker stopped the shard's pass after about 110 s, so most of each probe ran alone at one a second.
+
+**Lyric error.** `error_after_retry` a00004 to a00009: 2,433, 4,076, 4,838, 4,816, 4,729 and 4,758, which is 25,650 keys in the error lists, about double the 12,000 expected. a00004's 55.1% was low because 1,965 of its songs already had a file; the rest had 37 to 140. a00000 to a00003 hold 2,196 more with no list (481, 1,163, 241, 311).
+
+**Memory, commit and pagefile.** No boundary held and none flagged. CUDA held at 778 MB on a00004 and all six shards finished D.
+
+| After | RAM in use, GB | Available, GB | Commit, GB | Available commit, GB | Free disk, GB | Harvester private, GB |
+|---|---|---|---|---|---|---|
+| Pre-start | 11.5 | 19.6 free | 13.0 | 36.1 | 144.7 | |
+| a00004 | 14 | 17 | 19.4 | 29.7 | 144.4 | 5.57 |
+| a00005 | 12.8 | 18.3 | 20.6 | 28.5 | 144.1 | 5.58 |
+| a00006 | 14 | 17.1 | 22.2 | 26.9 | 143.9 | 6.18 |
+| a00007 | 14.5 | 17.2 | 23.4 | 25.7 | 143.8 | 6.46 |
+| a00008 | 14.7 | 16.4 | 24.0 | 25.1 | 143.9 | 6.24 |
+| a00009, process exited | 14.1 | 17 | 18.8 | 30.3 | 143.6 | 6.24 |
+
+- Pagefile: 18,432 MB allocated, current use 91 MB, peak 101 MB.
+- Harvester private bytes never rose 2 GB between shards, and the peak working set was 3.1 GB.
+- Commit is 5.8 GB above the pre-start 13.0 GB with the harvester gone, about 1 GB a shard. Not investigated, per README 10:55. At that rate available commit reaches the 6 GB hold after about 24 more shards.
+
+**CI.** Run 41158112863 (`ce1980e`, attempt 2) is green, and so is 41194366398 on `ccc1e35`. 9 of the last 14 push runs are red. I read the latest five, all channel or progress commits, and all fail `test_candidate_pool`:
+
+```
+41186497237 cd1e2b6  Server p95 0.346 s exceeds 0.300 s
+41186509402 d1b9bbb  Server p95 0.499 s exceeds 0.300 s
+41198982904 8c56408  Server p95 0.491 s exceeds 0.300 s
+41199014535 77d3621  Server p95 0.501 s exceeds 0.300 s
+41199328941 4f5d116  Server p95 0.305 s exceeds 0.300 s
+```
+
+The first four are two pairs pushed seconds apart; `4f5d116` ran alone at 0.305 s. Cause not established, and I changed nothing.
+
+**Stopped.** The runner is down, no claims are held, and shards from a00010 are unclaimed.
