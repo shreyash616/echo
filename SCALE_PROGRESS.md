@@ -1039,3 +1039,38 @@ lyrics stopped_by "max_passes", error_after_retry 21; shard_fixture.lyrics_error
   trip it. A 502 comes back at once (`_get` retries only 429 and 503), so each row is one call. Four passes over about 4,400
   rows at 0.25 s would be about 4,400 s, against B + C + D at about 3,380 s. Counting 502 with 503 is a one-line change;
   not made without a call.
+
+### The breaker counts 502 and 504 (code `a3b057e`, log label `47c41d9`)
+
+**The change (README ba79bed).**
+- `SHED_STATUS` is `get` and `search` at 502, 503 and 504. It is the breaker's numerator in the in-pass check and in the pass
+  log line.
+- Unchanged: threshold 0.5, floor 300, `_get`'s retries (429 and 503 only), and `stopped_by` `"lrclib_503"`.
+- `test_breaker_trips_inside_a_shedding_pass` is parametrised: once on `search 503`, once on `get 502`.
+- `47c41d9`: the pass log line read `503 n of m calls` while counting 502s too; it now reads `502/503/504 n of m calls`.
+  String only.
+
+**Fixture and the two tests after `47c41d9`.**
+
+```
+$ python ml/data/harvest_v3.py --shard-file tests/fixtures/harvest_fixture_shard.json      (exit 0)
+fixture | E: pass 1 over 21 rows: 0 fetched, 0 none, 21 error {'HTTPStatusError': 21}, 0 not tried; status {'get 502': 21}; 502/503/504 21 of 21 calls
+fixture | E: pass 2 ... 3 ... 4 the same
+fixture | E: lyrics for 21 of 100 songs without a file, 4 passes, 21 still in error (21.0% of the songs)
+fixture | shard fixture done in 164 s: 100 songs, 0 dropped, 100 previews deleted
+
+$ python -m pytest -q tests/test_harvest_shard.py tests/test_harvest_resume.py
+11 passed, 1 warning in 118.91s (0:01:58)
+
+$ ls ml/data/previews | wc -l
+0
+
+catalog/v3/shard_fixture.manifest.json (downloaded, date 2026-10-31T08:51:38Z): sha256 clap 8c738a57 (unchanged),
+features d95cb5de, dropped e3b0c442, lyrics_error ef34edab; files features, clap, dropped, lyrics_error;
+lyrics stopped_by "max_passes", error_after_retry 21.
+```
+
+- The breaker did not fire on the fixture: 21 calls a pass is under the 300-call floor, as intended. The 21 rows end in error
+  with LRCLIB answering 502.
+- Nothing else is open before the restart. It waits on the owner's reboot; then the pre-start record, then `--shards 6` from
+  a00004.
