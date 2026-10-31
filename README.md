@@ -36,6 +36,59 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-31 22:40 IST WP5 PASSED; GO WP6 once two probes from the box say whether it is the key or the address being shed; everything else decided below
+
+**WP5 gate, from the dataset:** `MANIFEST.json` 10 shards, 47,274 songs, 40 dropped (0.08%), every shard manifest with
+matching SHA256 lists, claims empty, previews 0, free disk 143.6 GB against 135.2 (more, since the pagefile shrank). Rates
+from the manifest walls: a00000 to a00001 2,700 an hour, a00002 3,454, a00003 4,246, a00005 to a00009 5,687, which is 7.1
+days; with a00003's lyric wait added back, 8.0. Both under the line. **PASSED.** The gate command in the plan was mine and
+wrong (`shards` is a dict with `songs`); amended in SCALE_PLAN.md to `py -3` and the real shape, for WP5 and WP6.
+
+**The 503s are the box's, not LRCLIB's.** Your five probes at one a second between 18:00 and 21:40 were shed at 81 to 87%.
+From this Mac, anonymous, one a second, twelve distinct `/api/get` lookups at 17:30 returned twelve 200s, and twelve more at
+22:25 returned twelve 200s. Same hours, same endpoint, opposite answers. LRCLIB is shedding the box specifically: either the
+registered application (every call from the box carried `Lrclib-Api-Key`; my calls carried a User-Agent only) or the box's
+address, after the 20,000-call burst of a00004's first attempt this morning. Your probe-and-pass table cannot separate the
+two because both sides of every pair sent the key. That is the one thing to settle before WP6 starts:
+
+1. **Two probes now, from the box, one after the other**, `fetch_lyrics_remote.py` standalone, one thread, `--spacing 1.0`,
+   the same 20 songs without a lyric file, `--out` to scratch: first with `backend/.env` present as today (the key), then
+   with the application headers absent (move `.env` aside for the run or add a flag; `lyric_headers()` in the harvester must
+   not be touched). Post both status lines. Do not print the key.
+2. **Then one commit, by the result, and the fixture re-run** (exit 0, CLAP `8c738a57`, `pytest` both files, previews 0):
+   - **Anonymous clean, keyed shed:** the key is throttled. `lyric_headers()` sends the User-Agent only and no longer
+     refuses to run without the key (the WP1 rule was mine; the owner has confirmed LRCLIB asks for a clear User-Agent and
+     nothing else). Spacing stays 0.25 s. The breaker stays.
+   - **Both shed:** the address is throttled and stage E on the box is pointless for now. Add `--no-lyrics`: E's fetch is
+     skipped, every song without a lyric file goes to `shard_<id>.lyrics_error.txt`, `lyrics.stopped_by` is `"disabled"`,
+     theme, words per minute and language still run over the files that exist (none), as the code already does for a row
+     without a file. WP6 starts with the flag. The boundary probe keeps running, anonymous, 20 calls at one a second, so the
+     line shows the day the box is served again; when a probe comes back under 10% `get 503` on two consecutive boundaries,
+     say so and I will have the flag dropped at the next boundary.
+   - **Both clean:** post it and wait; that would mean the shedding is time-based and I want one more pair before deciding.
+3. **GO WP6 on that commit**, `--next --shards 200` from a00010, one runner (no second runner; rule 25 does not make the
+   claims and the appends safe), both windows up. No code changes in WP6 except a bug fix, which re-runs the fixture before
+   the run resumes, as the plan says.
+
+**Decided, no action needed:**
+- `MAX_503_RETRIES` stays at 5. Your table shows the breaker cutting every pass at about 110 s, so the in-row retries cost
+  nothing while the box is shed and earn their keep when it is not.
+- The backfill is a separate tool, specified now, built in WP6 as its own packet (`WP6b`), run beside the harvest from
+  whichever host LRCLIB serves: input the error lists (and, for a00000 to a00003, every song without a lyric file), output
+  lyric files plus the shard's `features.jsonl.gz` rewritten with `apply_lyric_theme`, words per minute and
+  `language_from_meta(row, lyrics=...)` for the rows that gained a file, the shard manifest's `sha256` updated, re-uploaded
+  and read back. Twenty-five thousand keys at one a second is about seven hours of fetching. It lands before WP7's index
+  build. I write its packet after the probe result says which host.
+- Memory: the hold rules stand. Note that RAM in use was flat across six shards (11.5 to 14.7 GB, available 16 to 19 GB,
+  pagefile use 91 MB) while commit charge grew about 1 GB a shard with the harvester gone; the wall that killed a00004 was
+  physical, and physical is not moving. Add `Pool Nonpaged Bytes` and `Pool Paged Bytes` (`Get-Counter`) to the daily line
+  so the commit growth gets a name; nothing else.
+- CI: the live p95 gate is WP7's. Red runs on channel commits are not yours to chase; say nothing about them in WP6 lines.
+
+**WP6 daily line** (one a day, in SCALE_PROGRESS.md, no README entry unless BLOCKED or a bug fix): shards done, rows,
+dropped, free disk, RAM in use and available, commit charge and available, the two pool counters, the latest boundary
+probe's `get 503` share, and `lyrics.stopped_by` of the day's shards.
+
 ### 2026-10-31 17:40 IST WP5: a00004 accepted; a 20-call probe from the box at every boundary settles the spacing at the WP5 report; the run continues
 
 **a00004 accepted** from `shard_a00004.manifest.json`: 4,410 songs, 2 dropped, A 1,501.1 not overlapped, B 1,058.5, C 850.0,
