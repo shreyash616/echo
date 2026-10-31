@@ -981,3 +981,61 @@ cannot prove it from here, and per README dcb05e7 I did not look further into th
 - Free disk 118 GB. The pagefile is still 43.7 GB, last written 10:31:34.
 
 The runner is not restarted: BLOCKED in the channel.
+
+### LRCLIB rate probe, spacing 0.25 s, in-pass breaker, lyric error list (code `08a1083`)
+
+**Rate probe (README 3927a8a point 1).**
+- One thread, `fetch_lyrics_remote.py`, 200 fresh a00004 songs a spacing. a00004's rows were re-resolved with the
+  harvester's `resolve()` into a scratch `WORK`: artists 0 to 13, 14 to 27 and 28 to 41, one set a run, so LRCLIB's cache
+  could not clean a later run.
+- The share of failed get calls does not fall with spacing, and 502s appear at 1.0 s. No spacing is clean.
+- README 045f348: LRCLIB is down, not throttling (12 × 502 on 12 gets from the reviewer's machine at 13:40).
+
+```
+0.25 s, 12:10-12:46: done {'fetched': 139, 'error': 100, 'none': 35, 'error_after_retry': 26} in 36 min; status {'get 200': 124, 'get 404': 180, 'get 503': 798, 'search 200': 95, 'search 503': 353}
+0.50 s, 12:49-13:14: done {'fetched': 170, 'error': 71, 'none': 15, 'error_after_retry': 15} in 25 min; status {'get 200': 169, 'get 404': 71, 'get 503': 660, 'search 200': 37, 'search 503': 126}
+1.00 s, 13:17-13:37: done {'fetched': 97, 'error': 176, 'none': 15, 'error_after_retry': 88} in 20 min; status {'get 200': 94, 'get 404': 87, 'get 502': 130, 'get 503': 375, 'search 200': 39, 'search 503': 127}
+```
+
+**`08a1083` (README 045f348).**
+- **Spacing.** `LYRIC_SPACING_S` 0.25: 4 requests a second app-wide under `_LAST_LOCK`.
+- **Breaker, inside the pass.** Each fetcher checks the pass's status delta after every row. From 300 calls on
+  (`LYRIC_BREAKER_MIN_CALLS`), `get 503 + search 503` at or above half the pass's calls (`LYRIC_503_BREAKER`) sets an event,
+  and every fetcher returns before its next row. Rows not tried join the rows in error; the pass records `untried`;
+  `lyrics.stopped_by` is `"lrclib_503"`, otherwise `"error_share"`, `"max_passes"` or `"no_rows"`.
+- **Error list.** Stage F writes `shard_<id>.lyrics_error.txt`, the kept songs still in lyric error, one key a line. It is
+  uploaded and read back with the shard's files and listed under `files` and `sha256`.
+- **Tests.** `test_harvest_resume` gets two cases, with a stub fetcher:
+  - 3,000 rows at 6 search-503 calls a row: the breaker fires within one pass, with over 2,000 rows never tried and all 3,000
+    in the error list;
+  - a pass of 200 calls never trips, and a pass of 1,000 calls with no 503s never trips.
+
+**Fixture and the two tests after `08a1083`.**
+
+```
+$ python ml/data/harvest_v3.py --shard-file tests/fixtures/harvest_fixture_shard.json      (exit 0)
+fixture | E: pass 1 over 21 rows: 0 fetched, 0 none, 21 error {'HTTPStatusError': 21}, 0 not tried; status {'get 502': 21}; 503 0 of 21 calls
+fixture | E: pass 2 over 21 rows: ... status {'get 502': 21}; 503 0 of 21 calls      (passes 3 and 4 the same)
+fixture | E: lyrics for 21 of 100 songs without a file, 4 passes, 21 still in error (21.0% of the songs)
+fixture | stage E lyric fetch done in 31.2 s
+fixture | stage D done in 76.9 s
+fixture | shard fixture done in 190 s: 100 songs, 0 dropped, 100 previews deleted
+
+$ python -m pytest -q tests/test_harvest_shard.py tests/test_harvest_resume.py
+10 passed, 1 warning in 128.28s (0:02:08)
+
+$ ls ml/data/previews | wc -l
+0
+
+catalog/v3/shard_fixture.manifest.json (downloaded): songs 100, dropped 0, describe_commit e4c1b1bd...,
+files {features, clap, dropped, lyrics_error: catalog/v3/shard_fixture.lyrics_error.txt},
+sha256 features 2c5f6b96, clap 8c738a57 (unchanged), dropped e3b0c442, lyrics_error 6260f720;
+lyrics stopped_by "max_passes", error_after_retry 21; shard_fixture.lyrics_error.txt downloaded: 21 lines.
+```
+
+- With LRCLIB down, all 21 fixture rows without a lyric file end in error. That is the expected result (README 045f348), not a
+  failure.
+- **Noticed, for the reviewer.** LRCLIB now answers 502, not 503, and the breaker counts 503 only, so a 502 outage does not
+  trip it. A 502 comes back at once (`_get` retries only 429 and 503), so each row is one call. Four passes over about 4,400
+  rows at 0.25 s would be about 4,400 s, against B + C + D at about 3,380 s. Counting 502 with 503 is a one-line change;
+  not made without a call.
