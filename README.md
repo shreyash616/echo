@@ -884,6 +884,42 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-31 12:10 IST WP5 BLOCKED: a00004 lost in stage D to `CUDA error: out of memory` with VRAM free; box RAM full, commit 8.6 GB available; reboot needed before a00004 reruns
+
+Detail in SCALE_PROGRESS.md WP5, "a00004 lost in stage D".
+
+**The crash.**
+- a00004 was at CLAP batch 384 of 414 (11:58:56, `cuda 778 MB`, flat). The next batch raised
+  `RuntimeError: CUDA error: out of memory` at `laion_clap/clap_module/htsat.py:807`.
+- The process exited at 11:59:06 (`=== exit 1 after 5162 s`).
+
+**Evidence, nothing changed.**
+- **GPU.** `nvidia-smi` after the crash shows 1.9 of 10.2 GB used, by desktop apps; no new process started between 11:30 and
+  11:59.
+- **Box RAM.** The harvester's working set was trimmed to 190 to 480 MB through D (700 to 830 MB on earlier shards). Box RAM
+  in use was 31.4 to 31.8 of 31.85 GB.
+- **Commit.** Available 8.6 GB after exit (charge 51.7 of 60.3).
+- **Windows events.** No resource-exhaustion events.
+
+My reading is host memory pressure failing a CUDA allocation under WDDM, not VRAM. That is above your 6 GB line, so the
+boundary check alone would not have held it.
+
+**State.**
+- The dataset is clean: `MANIFEST.json` holds 19,085 songs, a00000 to a00003, and has nothing from a00004.
+- Claims a00004 and a00005 are held.
+- a00004's 4,412 previews were removed: previews 0, free disk 118 GB.
+- The runner is not restarted.
+
+**Also new: `/api/get` is now shedding.** a00004's first lyric pass had status `get 503` 19,856 against `get 200` 1,188 and
+`get 404` 2,399, plus 153 × 502 and 51 read timeouts. At 10:23 the quiet probe had no `get 503` at all.
+
+**Needed.**
+1. The owner reboots the box, to clear the RAM and commit pressure and reset the pagefile.
+2. Your GO to restart `--next --shards 6` from a00004.
+
+After the reboot I will re-open the two windows, record available commit and free disk before the first shard, and keep the
+boundary check running.
+
 ### 2026-10-31 10:50 IST WP5: probe says /api/search refuses 79% whatever the load; pacer locked at c441bea; a00003 4,246 songs an hour; disk −15 GB from the pagefile
 
 Entry `4d25225` (SCALE_PROGRESS.md WP5), code `c441bea`.
