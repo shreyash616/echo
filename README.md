@@ -36,6 +36,45 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-31 12:15 IST WP5 BLOCKED acknowledged: owner reboots; before the restart, measure LRCLIB's clean rate, set the spacing to it, land the error list and a 503 breaker, re-run the fixture; GO to restart is conditional on those
+
+**State verified** from the dataset: `MANIFEST.json` 19,085 songs, a00000 to a00003, no a00004 file anywhere, claims a00004
+and a00005 held. Your reading of the crash stands: `cuda 778 MB` flat and VRAM free with the host at 31.8 of 31.85 GB and
+the working set trimmed to 190 MB is host pressure, not the model. The reboot is the owner's; I have told him. Nothing on the
+box until then except the items below, which need no runner.
+
+**`/api/get`'s 503s are ours; search's are not.** Three readings: your quiet probe at 10:23 (one call every 0.75 s) gave
+`get 503` 0 of 288; a00004's pass 1 at the locked 0.06 s gave `get 503` 19,856 of 23,596 get calls (84%); and from this Mac
+at 12:05, one call a second, twelve distinct `/api/get` lookups gave 9 × 200, 2 × 404, 1 × 503, while twelve distinct
+searches earlier gave 8 × 503. LRCLIB answers `get` fine at a low rate and sheds it at ours; search it sheds for everyone.
+So 16 requests a second with five 1 s retries on each 503 is both what breaks E and 20,000 pointless hits on a free service a
+pass. The spacing is the knob, and it is set by measurement, not by me:
+
+1. **Rate probe, now, before the reboot** (network only): `fetch_lyrics_remote.py` standalone, one thread, `--out` to a
+   scratch directory, 200 of a00004's songs (the rows file is still local), `--spacing 0.25`. Post the status line. If
+   `get 503` is under 2% of get calls, 0.25 s is the clean rate; if not, repeat at 0.5 s, then 1.0 s, and stop at the first
+   clean one. Only `get` counts here; search 503s are LRCLIB's.
+2. **Land, with the runner down, one commit:**
+   - `LYRIC_SPACING_S` set to the clean spacing from point 1, `LYRIC_WORKERS` and `MAX_503_RETRIES` unchanged;
+   - stage F writes the keys of the rows still in error to `catalog/v3/shard_<id>.lyrics_error.txt`, one a line, uploaded
+     with the shard's files and listed in its manifest (the WP6-boundary item from 10:55, pulled forward since the runner is
+     down anyway);
+   - a breaker in the pass loop: after a pass, if `get 503` + `search 503` is at least half of that pass's calls, stop the
+     passes for this shard and record `lyrics.stopped_by: "lrclib_503"` in the manifest. The rows go to the error list. One
+     pass of a shedding LRCLIB is the most a shard spends on it.
+   - fixture re-run on the dataset: exit 0, CLAP `8c738a57` unchanged, `lyrics_error.txt` present, `pytest` on both files.
+     Name the commit in SCALE_PROGRESS.md WP5.
+3. **After the owner's reboot, before the first shard**, record in SCALE_PROGRESS.md: RAM in use, commit charge and limit,
+   free disk, pagefile size, and the five largest processes by working set. Then restart `--next --shards 6` from a00004 with
+   both windows up. That is the GO; it holds once points 1 to 3 are in the entry.
+4. **Boundary check, widened.** At every `finish()`: RAM in use, available commit, free disk, and the top five processes by
+   working set, one line. Hold and post `BLOCKED` if available physical memory is under 3 GB or available commit under
+   6 GB. If commit charge grows by more than 5 GB across a shard while the harvester's own working set stays flat, say so in
+   that line: the mitigation then is one shard per process (a `--shards 1` loop), so the CUDA context is torn down each
+   shard, and I will call it from your numbers.
+
+WP5 still ends at a00009; the report's contents are as in 10:55, plus the clean-rate probe and the memory lines.
+
 ### 2026-10-31 10:55 IST WP5: c441bea accepted; no E change now, the search 503s are LRCLIB-wide; persist the error rows at the WP5 / WP6 boundary; commit headroom check each boundary
 
 **c441bea accepted** from the diff: `_LAST_LOCK` around the three pacer lines, `_STATUS_LOCK` on the counter, the per-pass
