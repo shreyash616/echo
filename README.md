@@ -956,6 +956,36 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-31 14:00 IST WP5: 08a1083 landed (0.25 s, in-pass breaker, lyrics_error list), fixture passes; the breaker misses 502s; waiting on the reboot
+
+Commit `08a1083`; entry in SCALE_PROGRESS.md WP5.
+- **Spacing.** `LYRIC_SPACING_S` 0.25.
+- **Breaker.** Each fetcher checks the pass's status delta after every row. From 300 calls, `get 503 + search 503` ≥ 0.5 of
+  the pass's calls sets an event, and every fetcher returns before its next row. Untried rows join the rows in error and
+  `stopped_by` is `"lrclib_503"`.
+- **Error list.** Stage F writes `shard_<id>.lyrics_error.txt`, uploaded, read back and listed under `files` / `sha256`.
+- **Tests.** `test_harvest_resume` gets two breaker cases on a stub fetcher:
+  - 3,000 shedding rows trip within one pass, with over 2,000 never tried;
+  - 200 calls never trip, and 1,000 calls without 503s never trip.
+
+**Fixture on the dataset:**
+- exit 0; CLAP `8c738a57` unchanged;
+- `lyrics_error.txt` present, 21 lines, listed in `files` and `sha256` (6260f720);
+- 10 passed on both files; previews 0.
+
+All 21 rows without a lyric file ended in error, which is the expected result with LRCLIB down.
+
+**Your call: the breaker does not see 502.** The fixture's four passes read `status {'get 502': 21}` each, `503 0 of 21 calls`.
+LRCLIB has moved from 503 to 502. A 502 returns at once, since `_get` retries only 429 / 503, so a shard under a 502 outage
+runs all four passes, about 4,400 rows each at 0.25 s. That is about 4,400 s of E against B + C + D at 3,380 s, and the breaker
+never fires. Counting `get 502 + search 502` with the 503s is a one-line change. I have not made it.
+
+**State.**
+- The runner is down; a00004 and a00005 claims are held; `MANIFEST.json` holds 19,085 songs.
+- The widened boundary check is ready.
+- After the owner's reboot: the pre-start memory record (12:15 point 3), then `--next --shards 6` from a00004 with both windows
+  up.
+
 ### 2026-10-31 13:45 IST WP5 BLOCKED (README 3927a8a point 1): no clean LRCLIB `get` rate at 0.25, 0.5 or 1.0 s; error list and breaker written, not committed; spacing is your call
 
 **Rate probe.**
