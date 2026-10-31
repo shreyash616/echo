@@ -36,6 +36,48 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-31 10:55 IST WP5: c441bea accepted; no E change now, the search 503s are LRCLIB-wide; persist the error rows at the WP5 / WP6 boundary; commit headroom check each boundary
+
+**c441bea accepted** from the diff: `_LAST_LOCK` around the three pacer lines, `_STATUS_LOCK` on the counter, the per-pass
+delta into the log line and `lyrics.passes[].status`, nothing else touched. Fixture CLAP `8c738a57` unchanged, 8 tests.
+
+**a00003 accepted.** Manifest matches your entry: 4,613 songs, 9 dropped, A 1,500.2 overlapped, B 1,336.4, C 1,275.7,
+D 767.5, E 3,748.9, F 73.5, `E_wait_after_D` 369.3, wall 3,911.0, 311 rows (6.7%) after passes of 50.7 / 53.8 / 53.9 /
+47.9%. `MANIFEST.json` 19,085 songs over four shards, claims a00004 and a00005. 4,246 songs an hour is 9.8 days: under the
+14-day line, so the pace is acceptable as it stands.
+
+**The 503s are not ours.** I probed `lrclib.net` from this Mac, anonymous, one call a second: the same `/api/search` query
+twelve times gave 10 × 200 and 2 × 503 (cached); twelve distinct `q=` searches gave 2 × 200, 2 × 400, 8 × 503. Your 79%
+and my 67% are the same thing: LRCLIB's search endpoint is shedding most uncached queries for everyone right now, and
+`/api/get` is not. So option (c)'s "another IP" buys nothing today, (b) only lengthens E against a server that is not
+rate-limiting us, and (a) throws away the search hits for good. None of the three. Decision:
+
+1. **No change to stage E for shards 4 to 9.** Cap 4, share 0.02, 24 workers, 0.06 s, five 1 s retries on 503, as c441bea
+   runs now. `error_after_retry` is recorded per shard, which is what the WP5 gate asks for.
+2. **At the WP5 / WP6 boundary**, when the runner is stopped anyway for the WP5 report, land one addition in stage F: write
+   the keys of the rows still in error to `catalog/v3/shard_<id>.lyrics_error.txt` next to the shard's files (one key a
+   line), so a refetch can target them once LRCLIB's search recovers. `fetch_lyrics_remote.py:139-141` writes a file only on a
+   hit, so today an error row and a `none` row look the same on disk. For shards 0 to 9 the refetch covers every song without a
+   file; that is about 13,000 rows and does not need the list.
+3. **Fail-fast is decided from the data, at that same boundary.** With `status` in a00004 to a00009's manifests, put per
+   pass: `search 503` over all search calls (the per-call share) next to `error` over `rows` (the per-row share). If the two
+   are close, the five 1 s retries inside `_get` rescue almost nothing, and `MAX_503_RETRIES` drops to 1 for search only,
+   since the pass loop already retries each row about fifteen minutes later; E would fall by roughly 4,400 rows × 5 s / 24
+   threads, about 900 s a shard, back under B + C + D. If per-row is well below per-call, the retries earn their keep and
+   stay. Bring the table, I make the call. Nothing else in E changes in WP6 without a shard's numbers behind it.
+
+**Pagefile.** Not harvest residue, so the WP5 disk line is judged on harvest data: previews 0 and the harvester's 200 MB
+pass it; state the pagefile figure separately in the WP5 report. The 29 GB of commit that no process owns is the owner's to
+look at, not yours: do not investigate further and touch nothing. What you do: at every shard boundary from now on, put
+`Available commit` (commit limit minus commit charge) and free disk in the SCALE_PROGRESS.md line. If available commit is
+under 6 GB at a boundary, hold there, post `BLOCKED: commit headroom <n> GB, reboot needed` and wait; a shard lost to
+commit exhaustion mid-D costs more than the overlapped A a hold costs.
+
+Expected next from you: the WP5 report after a00009's `finish()`, with the gate items in the plan's order, before and after
+rates separately (a00000 to a00001 sequential, a00002 on overlapped, a00003 on with A overlapped), the projection from the
+after rate, the per-pass status table from point 3, commit headroom and the pagefile figure. Daily one-liners are not needed
+in WP5; the report is.
+
 ### 2026-10-31 09:00 IST WP5: restart and a00002 accepted; the pass cap stays at four, fix the lyric pacer and record the status code instead
 
 **Restart accepted.** `41158112863` attempt 2 is success on `ce1980e` (checked with `gh run view`); warm p95 0.238 / 0.212 s
