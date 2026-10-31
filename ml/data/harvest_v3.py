@@ -23,7 +23,8 @@ Stages A to F a shard (README c2f8090: E overlapped with B to D, the next shard'
               songs; passes over the rows in error repeat while they exceed 2% of those songs, at most four
               passes; a breaker inside each pass stops every fetcher once, past 300 calls, LRCLIB has answered
               502 / 503 / 504 to half of them (lyrics.stopped_by "lrclib_503"; rows not tried join the error list); each
-              pass records LRCLIB's status counts. E's seconds are the fetchers' wall time. After D the thread is
+              pass records LRCLIB's status counts. --no-lyrics skips the fetch: every song without a lyric file
+              goes to the error list (lyrics.stopped_by "disabled"). E's seconds are the fetchers' wall time. After D the thread is
               joined, then the P4 theme (apply_lyric_theme), words per minute and language (artist-majority
               vote, then language_from_meta).
   F write     shard_<id>.features.jsonl.gz, shard_<id>.clap.f16.npy, shard_<id>.dropped.jsonl,
@@ -259,6 +260,7 @@ class Harvester:
         self.seconds: dict[str, float] = {}
         self.seconds_other: dict[str, float] = {}
         self.a_overlapped = False
+        self.no_lyrics = False
         self.songs: list[dict] = []
         self.dropped: list[dict] = []
         self.unresolved: list[dict] = []
@@ -480,6 +482,12 @@ class Harvester:
         repeat while they exceed LYRIC_ERROR_SHARE of the songs, at most LYRIC_MAX_PASSES passes."""
         LYRICS.mkdir(parents=True, exist_ok=True)
         todo = [s for s in songs if not rc.lyric_path(s).exists()]
+        if self.no_lyrics:  # README 8f54dec: LRCLIB is shedding the box, so the rows wait for the backfill
+            self.lyric_error_keys = [r["key"] for r in todo]
+            self.lyric_counts = {"songs": len(songs), "had_file": len(songs) - len(todo), "without_file": len(todo),
+                                 "passes": [], "error_after_retry": len(todo), "stopped_by": "disabled"}
+            self.log.info("E: --no-lyrics: nothing fetched, %d of %d songs without a file to the error list", len(todo), len(songs))
+            return
         lock = threading.Lock()
 
         def status_now() -> Counter:
@@ -655,7 +663,7 @@ class Harvester:
     def run_rest(self) -> dict:
         """B to F, with E's fetch in a thread from the start of B (README c2f8090)."""
         t_all = time.time()
-        headers = self.lyric_headers()  # raises before any stage starts
+        headers = {} if self.no_lyrics else self.lyric_headers()  # raises before any stage starts
         lyr: dict = {}
 
         songs_a = list(self.songs)  # stage A's songs, before B to D drop any
@@ -785,7 +793,7 @@ def discovery_shard_artists(store, shard: str) -> list[dict]:
     return rows[s["start"]:s["end"]]
 
 
-def run_shards(store, runner: str, count: int = 1, harvester_cls=Harvester) -> list[dict]:
+def run_shards(store, runner: str, count: int = 1, harvester_cls=Harvester, no_lyrics: bool = False) -> list[dict]:
     """Up to `count` shards in this process. When a shard's A finishes and more are wanted, the next shard is
     claimed and its A runs in a thread under this shard's B to F (README c2f8090), deduplicated against the
     global keys and this shard's A songs, which reach keys.txt only when this shard finishes."""
@@ -797,8 +805,10 @@ def run_shards(store, runner: str, count: int = 1, harvester_cls=Harvester) -> l
     def start(shard: str, extra_keys: set[str], extra_ids: set[str]):
         claim(store, shard, runner)
         keys, itunes = global_seen(store)
-        return harvester_cls(shard, discovery_shard_artists(store, shard), store, keys | extra_keys, itunes | extra_ids,
-                             runner=runner)
+        h = harvester_cls(shard, discovery_shard_artists(store, shard), store, keys | extra_keys, itunes | extra_ids,
+                          runner=runner)
+        h.no_lyrics = no_lyrics
+        return h
 
     shard = next_shard(store, ids, runner)
     if shard is None or count < 1:
@@ -848,16 +858,19 @@ def main() -> None:
     ap.add_argument("--runner", default=socket.gethostname())
     ap.add_argument("--store", default="dataset", help="'dataset', or a local directory")
     ap.add_argument("--max-artists", type=int, default=0, help="first N artists of the shard file only")
+    ap.add_argument("--no-lyrics", action="store_true", help="skip E's fetch; songs without a file go to the error list")
     args = ap.parse_args()
     store = DatasetStore() if args.store == "dataset" else LocalStore(Path(args.store))
     if args.shard_file:
         spec = json.loads(Path(args.shard_file).read_text(encoding="utf-8"))
         artists = spec["artists"][:args.max_artists] if args.max_artists else spec["artists"]
         # a named shard is harvested and uploaded under its own name only: no global manifest, no keys
-        manifest = Harvester(spec["shard"], artists, store, fixture=True, runner=args.runner).run()
+        h = Harvester(spec["shard"], artists, store, fixture=True, runner=args.runner)
+        h.no_lyrics = args.no_lyrics
+        manifest = h.run()
         print(json.dumps({k: v for k, v in manifest.items() if k not in ("keys", "itunes_ids")}, indent=1, ensure_ascii=False))
         return
-    for manifest in run_shards(store, args.runner, args.shards):
+    for manifest in run_shards(store, args.runner, args.shards, no_lyrics=args.no_lyrics):
         print(json.dumps({k: v for k, v in manifest.items() if k not in ("keys", "itunes_ids")}, indent=1, ensure_ascii=False))
 
 

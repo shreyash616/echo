@@ -9,7 +9,8 @@ Asserts:
 - with the next shard's stage A overlapped (README c2f8090), a crash while holding two claims leaves both, and the
   restart takes the lower one first, then the other; the overlapped A deduplicates against the running shard's songs;
 - stage E's breaker (README 045f348, ba79bed) stops a pass once LRCLIB has answered 502 / 503 / 504 to half of 300 or more
-  calls, sends the rows not tried to the error list, and never fires on a pass under 300 calls or one without them.
+  calls, sends the rows not tried to the error list, and never fires on a pass under 300 calls or one without them;
+- --no-lyrics (README 8f54dec) fetches nothing, lists every song without a file, and reaches the overlapped shard too.
 """
 from __future__ import annotations
 
@@ -59,6 +60,7 @@ class FakeHarvester:
         self.songs = [{"key": f"artist {a['deezer_id'] - 100}:song", "itunes_id": str(a["deezer_id"])} for a in self.artists]
 
     def run_rest(self):
+        self.entry["no_lyrics"] = getattr(self, "no_lyrics", None)
         for stage in "BCDEF":
             self._stage(stage)
         keys = [s["key"] for s in self.songs]
@@ -161,3 +163,23 @@ def test_breaker_needs_300_calls_and_503s(harvester, monkeypatch):
     monkeypatch.setattr(hv.flr, "fetch_lyrics", _stub_fetch(("get", 200), 2, fail=False))
     harvester.lyrics(_lyric_rows(500), headers={})                          # 1,000 calls, none 503
     assert harvester.lyric_counts["stopped_by"] == "error_share" and harvester.lyric_counts["passes"][0]["untried"] == 0
+
+
+def test_no_lyrics_fetches_nothing_and_lists_songs_without_a_file(harvester, monkeypatch, tmp_path):
+    def no_fetch(*a):
+        raise AssertionError("--no-lyrics must not call LRCLIB")
+    monkeypatch.setattr(hv.flr, "fetch_lyrics", no_fetch)
+    monkeypatch.setattr(hv.rc, "lyric_path", lambda s: tmp_path / f"{s['id']}.txt")
+    rows = _lyric_rows(5)
+    (tmp_path / "it_breakertest0.txt").write_text("la la la", encoding="utf-8")
+    harvester.no_lyrics = True
+    harvester.lyrics(rows, headers={})
+    assert harvester.lyric_error_keys == [r["key"] for r in rows[1:]]
+    assert harvester.lyric_counts == {"songs": 5, "had_file": 1, "without_file": 4, "passes": [],
+                                      "error_after_retry": 4, "stopped_by": "disabled"}
+
+
+def test_no_lyrics_reaches_the_overlapped_shard(store):
+    FakeHarvester.calls, FakeHarvester.crash_on = [], None
+    hv.run_shards(store, "box", 2, harvester_cls=FakeHarvester, no_lyrics=True)
+    assert [c["no_lyrics"] for c in FakeHarvester.calls] == [True, True]
