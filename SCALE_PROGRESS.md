@@ -785,3 +785,39 @@ finished at 22:04Z:
 - 0.313 s on the rerun at 22:16Z.
 
 No green run yet; the run on this entry's commit is the next one.
+
+### CI and the Space restart (README 70690e9)
+
+**Tests runs after discovery ended (22:04Z):**
+
+| Run | Commit | Result |
+|---|---|---|
+| 41135855564 | `6a04b7b` | red, p95 0.568 s; rerun red, 0.313 s |
+| 41136344566 | `3949be4` | red |
+| 41156708810 | `c2f8090` | green (01:43Z) |
+| 41157769469 | `c938999` | green |
+| 41158075211 | `7c14c83` | red, p95 0.354 s |
+| 41158112863 | `ce1980e` | green |
+
+The `7c14c83` and `ce1980e` runs started 28 s apart, so they overlapped on the Space.
+
+**Restart.** `HfApi().restart_space("shreyash616/echo-backend")` at 02:22:04Z: no code and no upload, sha `12e51b50` before
+and after. The Space was `RUNNING` at 02:23:24Z with `/api/health` `{"status":"ok","recommender_loaded":true}`. Admin status
+afterwards read `running false`, `started_at null`, `finished_at null`: a fresh process, without discovery's state.
+
+**Live p95 over 20 calls**, `py -3 -m pytest -q -s tests/test_candidate_pool.py` from the box, three runs each:
+- before the restart: 0.293 s, 0.272 s, 0.303 s;
+- after the restart: 0.337 s (the first run, against a cold process), then 0.238 s and 0.212 s.
+
+Once warm, p95 is back near P9's 0.225 s.
+
+**Tests re-run on `ce1980e` after the restart:** 41158112863 attempt 2, success, finished 02:30:35Z. This is the green run
+WP5 names.
+
+### Noticed
+
+- **Logging error in the runner tab.** At 07:31 IST the runner tab printed `--- Logging error --- ... UnicodeEncodeError:
+  'charmap'`. Python's stdout through the PowerShell pipe is cp1252, and an artist name outside it could not be printed. It
+  came from logging's `handleError`, not a crash: the shard went on, and the UTF-8 `<shard>.describe.log` and
+  `current.describe.log` have the line. The next runner start should set `PYTHONIOENCODING=utf-8`; not changed mid-run.
+- **`MAX_CLAIMS`** is declared and not read; the bound of two is structural (README 70690e9). Left as is.
