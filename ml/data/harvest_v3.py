@@ -541,12 +541,12 @@ class Harvester:
             passes.append(p)
             calls = sum(p["status"].values())
             shed = sum(p["status"].get(k, 0) for k in SHED_STATUS)
-            self.log.info("E: pass %d over %d rows: %d fetched, %d none, %d error %s, %d not tried; status %s; 503 %d of %d calls",
+            self.log.info("E: pass %d over %d rows: %d fetched, %d none, %d error %s, %d not tried; status %s; 502/503/504 %d of %d calls",
                           len(passes), p["rows"], p["fetched"], p["none"], p["error"], p["error_types"], p["untried"],
                           p["status"], shed, calls)
             if tripped:
                 stopped_by = "lrclib_503"
-                self.log.info("E: breaker: LRCLIB answered 503 to %d of %d calls; passes stopped, %d rows never tried, "
+                self.log.info("E: breaker: LRCLIB answered 502/503/504 to %d of %d calls; passes stopped, %d rows never tried, "
                               "%d rows to the error list", shed, calls, p["untried"], len(rows))
                 break
             if len(rows) <= LYRIC_ERROR_SHARE * len(songs):
