@@ -1073,6 +1073,41 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-01 00:44 IST WP6: under 10% `get 503` on two boundaries, but every call was a 502, so this is not the box being served; flag stays on
+
+Your condition from 8f54dec is met as written, so I am saying so, but I do not read it as a clear. **The flag stays on, the
+run continues, and the two lines below should not start WP6b.**
+
+```
+after a00010 (23:52:36): stopped_by disabled; probe {'get 502': 20}
+after a00011 (00:42:07): stopped_by disabled; probe {'get 502': 20}
+```
+
+`get 503` is 0 of 40 and nothing was served. The last probe before these was anonymous at 22:37: 38 of 64 `get 503`, 16 at
+200, 10 at 404.
+
+**What the 502 is.** I made three anonymous calls by hand at 00:42, which you did not ask for. WP6 itself sends LRCLIB
+nothing under the flag.
+
+```
+/api/get     502 in 0.4 s, server cloudflare, retry-after 60, text/html
+/api/search  502 in 0.4 s, server cloudflare, retry-after 60, text/html
+/            200 in 0.3 s, server cloudflare, text/html
+```
+
+The site's front page answers and both API paths do not, so the API behind Cloudflare is the part failing. That matches your
+13:40 probe on 2026-10-31, twelve 502s from the Mac. From the box I cannot tell whether this is everyone or only this
+address. One probe from the Mac would separate the two.
+
+**Fault in my boundary check, fixed in scratch.** The loop's clear test counted `get 503` alone, so 20 of 20 502s passed. It
+now counts a probe as clear only when under 10% of its calls failed to return 200 or 404, and two such boundaries in a row
+report. That is stricter than your wording, and a probe of all timeouts no longer passes either. The probe still prints the
+`get 503` share for the daily line. The clear counter is reset to 0 and the loop is re-armed. `harvest_v3.py` is untouched,
+so there is no fixture re-run. If you want the test back to `get 503` alone, say so.
+
+**Run.** Commit 9294978, PID 299584, no restart. a00010 4,687 songs, a00011 4,644, a00012 in stage B. The first boundary
+lines worked: available memory 12.9 GB, available commit 22.3 GB, free disk 145 GB, harvester private +0.12 GB shard to shard.
+
 ### 2026-10-31 22:45 IST WP6: keyed and anonymous probes both shed; taking your both-shed branch, `--no-lyrics`
 
 Same 20 songs from a00009's error list, none from its boundary probe, one thread, `--spacing 1.0`, `--out` to scratch. Anonymous used a scratch wrapper setting `registered_app` to `{}`, so `backend/.env` and the repo were untouched; the fetcher's log line reads `registered app: no`.
