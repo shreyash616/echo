@@ -1239,3 +1239,41 @@ Per-row is 27 points below per-call, but most of those 503s are `get`, not `sear
 The first four are two pairs pushed seconds apart; `4f5d116` ran alone at 0.305 s. Cause not established, and I changed nothing.
 
 **Stopped.** The runner is down, no claims are held, and shards from a00010 are unclaimed.
+
+## WP6
+
+### Key or address, then `--no-lyrics` (code `6a7ba74`)
+
+**Probes (README 8f54dec point 1).** The same 20 songs from a00009's error list, none from its boundary probe, one thread, spacing 1.0, out to scratch. Anonymous ran through a scratch wrapper with `registered_app` set to `{}`, leaving `backend/.env` and the repo untouched.
+
+```
+keyed     22:31:23 to 22:35:04  registered app: yes  done {'error': 13, 'fetched': 14, 'none': 1, 'error_after_retry': 5} in 4 min; status {'get 200': 15, 'get 404': 5, 'get 503': 111, 'search 503': 6}
+anonymous 22:35:04 to 22:37:20  registered app: no   done {'fetched': 15, 'error': 9, 'none': 1, 'error_after_retry': 4} in 2 min; status {'get 200': 16, 'get 404': 10, 'get 503': 38, 'search 200': 2, 'search 503': 25}
+```
+
+`get 503`: keyed 84.7% of 131, anonymous 59.4% of 64. Anonymous is not clean, so this is the both-shed branch.
+
+**`6a7ba74`.** `--no-lyrics` on `--next` and `--shard-file`: E's fetch is skipped, every song without a file goes to the error list, `lyrics.passes` is empty and `stopped_by` is `"disabled"`. The application headers are not required under the flag; `lyric_headers()` is unchanged. `run_shards` sets the flag on both the running and the overlapped shard. Two tests added.
+
+**Fixture and the two tests after `6a7ba74`.**
+
+```
+$ py -3 ml/data/harvest_v3.py --shard-file tests/fixtures/harvest_fixture_shard.json --no-lyrics      (exit 0)
+fixture | E: --no-lyrics: nothing fetched, 21 of 100 songs without a file to the error list
+fixture | stage E lyric fetch done in 0.0 s
+fixture | shard fixture done in 78 s: 100 songs, 0 dropped, 100 previews deleted
+
+$ py -3 -m pytest -q tests/test_harvest_shard.py tests/test_harvest_resume.py
+13 passed, 1 warning in 52.33s
+
+$ ls ml/data/previews | wc -l
+0
+
+catalog/v3/shard_fixture.manifest.json (downloaded, date 2026-10-31T17:11:01Z): songs 100, dropped 0, sha256 clap 8c738a57 (unchanged),
+features 1d0c859f, dropped e3b0c442, lyrics_error ecb072f9; files features, clap, dropped, lyrics_error;
+lyrics songs 100, had_file 79, without_file 21, passes [], error_after_retry 21, stopped_by "disabled"; lyrics_error.txt 21 lines.
+```
+
+**Start.** `--next --shards 200 --no-lyrics` from a00010, one runner, both windows up, log `wp6_runs.out`. Boundary lines go to `wp6_boundaries.txt`. The boundary probe is 20 anonymous `/api/get` calls at one a second over the finished shard's error list, with no retries, so its `get 503` share is out of 20.
+
+Daily lines follow.
