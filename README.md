@@ -923,6 +923,55 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-31 13:45 IST WP5 BLOCKED (README 3927a8a point 1): no clean LRCLIB `get` rate at 0.25, 0.5 or 1.0 s; error list and breaker written, not committed; spacing is your call
+
+**Rate probe.**
+- Command: `fetch_lyrics_remote.py`, one thread, registered app, `--out` to scratch, 200 a00004 songs a run.
+- a00004's rows were not on disk: stage A's songs are held in memory only, and its previews were removed after the crash.
+  So I re-resolved them with the harvester's own `resolve()` into a scratch `WORK` (the owner's `current.*.log` untouched).
+- Each run used **fresh** songs, so LRCLIB's cache from one run could not clean the next: a00004 artists 0 to 13, 14 to 27,
+  28 to 41.
+
+```
+0.25 s, 12:10-12:46: done {'fetched': 139, 'error': 100, 'none': 35, 'error_after_retry': 26} in 36 min; status {'get 200': 124, 'get 404': 180, 'get 503': 798, 'search 200': 95, 'search 503': 353}
+0.50 s, 12:49-13:14: done {'fetched': 170, 'error': 71, 'none': 15, 'error_after_retry': 15} in 25 min; status {'get 200': 169, 'get 404': 71, 'get 503': 660, 'search 200': 37, 'search 503': 126}
+1.00 s, 13:17-13:37: done {'fetched': 97, 'error': 176, 'none': 15, 'error_after_retry': 88} in 20 min; status {'get 200': 94, 'get 404': 87, 'get 502': 130, 'get 503': 375, 'search 200': 39, 'search 503': 127}
+```
+
+| Spacing | `get 503` / get calls | With `get 502` |
+|---|---|---|
+| 0.25 s | 798 / 1,102 = 72% | |
+| 0.50 s | 660 / 900 = 73% | |
+| 1.00 s | 375 / 686 = 55% | 505 / 686 = 74% |
+
+- The 0.75 s quiet probe this morning (09:57 to 10:23) had `get 503` 0 of 293.
+- None of the three meets the 2% line. The share does not fall with spacing: 0.25 and 0.5 s are the same, and 1.0 s adds
+  `502 Bad Gateway`.
+- Read with your 12:05 Mac reading (1 × 503 in 12 gets, one a second), this looks like LRCLIB degrading through the day, not a
+  rate of ours. Since about 11:00, slower calls from the box have not helped.
+- I stopped at 1.0 s, the end of the ladder you gave, and have not set `LYRIC_SPACING_S`.
+
+**Written, not committed (runner down), waiting on the spacing so the one commit goes in whole:**
+- **Stage F error list.** Stage F writes `catalog/v3/shard_<id>.lyrics_error.txt`: the keys still in error that are among
+  the shard's kept songs, one a line. It is uploaded and read back with the shard's files, and listed under `files` and
+  `sha256` in its manifest.
+- **503 breaker.** After a pass, if `get 503` + `search 503` is at least half of that pass's calls
+  (`LYRIC_503_BREAKER = 0.5`), the passes stop. The remaining rows go to the error list, and `lyrics.stopped_by` is
+  `"lrclib_503"`; otherwise it is `"error_share"`, `"max_passes"` or `"no_rows"`. The pass log line adds
+  `503 n of m calls`.
+- `test_harvest_resume` passes (4). The fixture re-run waits for the commit.
+
+**Widened boundary check, ready for the restart.** At each `finish()` it records one line:
+- RAM in use and available; commit charge, limit and available; free disk; the harvester's working set; the top five
+  working sets; commit growth since the last boundary, flagged when over 5 GB with the harvester's working set flat.
+
+It holds and says BLOCKED if available memory is under 3 GB or available commit is under 6 GB.
+
+**Needed from you: the spacing, or a different line.** With the breaker in place, a shedding LRCLIB costs a shard one pass,
+whatever the spacing. One option is to land at 1.0 s, the slowest tested, which is 1 request a second app-wide and the
+lightest on a free service, with the breaker doing the rest. Your call. The owner's reboot is still pending; nothing runs
+until then.
+
 ### 2026-10-31 12:10 IST WP5 BLOCKED: a00004 lost in stage D to `CUDA error: out of memory` with VRAM free; box RAM full, commit 8.6 GB available; reboot needed before a00004 reruns
 
 Detail in SCALE_PROGRESS.md WP5, "a00004 lost in stage D".
