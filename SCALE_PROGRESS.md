@@ -821,3 +821,127 @@ WP5 names.
   came from logging's `handleError`, not a crash: the shard went on, and the UTF-8 `<shard>.describe.log` and
   `current.describe.log` have the line. The next runner start should set `PYTHONIOENCODING=utf-8`; not changed mid-run.
 - **`MAX_CLAIMS`** is declared and not read; the bound of two is structural (README 70690e9). Left as is.
+
+### a00002 and a00003 on `c938999`
+
+From the manifests on the dataset:
+
+| | a00002 | a00003 |
+|---|---|---|
+| Songs | 4,650 | 4,613 |
+| Dropped | 11 (C) | 9 (C) |
+| A (s) | 1,525.9 | 1,500.2 |
+| B (s) | 1,174.1 | 1,336.4 |
+| C (s) | 1,220.7 | 1,275.7 |
+| D (s) | 756.5 | 767.5 |
+| E, lyric fetch (s) | 3,058.5 | 3,748.9 |
+| F (s) | 78.2 | 73.5 |
+| `E_wait_after_D` (s) | 0.0 | 369.3 |
+| `E_theme_language` (s) | 91.2 | 88.6 |
+| Wall (s) | 4,846.6 | 3,911.0 |
+| `a_overlapped` | False (first shard of the process) | True |
+
+**Lyric passes (rows: fetched / none / error):**
+- a00002: 4,379: 2,164 / 219 / 1,996; 1,996: 771 / 247 / 978; 978: 342 / 154 / 482; 482: 119 / 122 / 241. 241 left,
+  5.2% of 4,661.
+- a00003: 4,416: 1,903 / 274 / 2,239; 2,239: 770 / 264 / 1,205; 1,205: 301 / 255 / 649; 649: 138 / 200 / 311. 311 left,
+  6.7% of 4,622.
+
+**a00003's measured rate**, the first shard with both overlaps: 4,613 songs in 3,911 s of wall time is 4,246 songs an hour.
+A million at that rate is 235 hours, 9.8 days. On a00003, E set the pace: B + C + D = 3,380 s against E's 3,749 s.
+
+`MANIFEST.json`: 19,085 songs over a00000 to a00003.
+
+### The LRCLIB probe (README 0b03ff7)
+
+Command: `fetch_lyrics_remote.py --tracks <a00002_nofile_100.jsonl> --out <scratch> --spacing 0.75`. One thread, the
+registered app. The input is the first 100, in shard order, of the 977 a00002 songs with no lyric file. These mix rows E left
+in error with rows LRCLIB has no lyrics for.
+
+```
+probe 1, 08:58 to 09:23 IST, while a00003's E ran its 24 threads on the same key:
+done {'fetched': 5, 'none': 76, 'error': 68, 'error_after_retry': 19} in 25 min; status {'get 200': 5, 'get 404': 288, 'get 503': 22, 'search 200': 178, 'search 503': 632}
+probe 2, 09:57 to 10:23 IST, the runner held, no other LRCLIB traffic from the box:
+done {'fetched': 5, 'none': 81, 'error': 62, 'error_after_retry': 14} in 26 min; status {'get 200': 5, 'get 404': 288, 'search 200': 184, 'search 503': 708}
+```
+
+- In probe 2, every error is `503 Service Unavailable` on `/api/search` (62 of 62); `/api/get` never answers 503 when the
+  box is quiet.
+- `/api/search` answers 503 on 708 of 892 calls (79%), at one request every 0.75 s, after `_get`'s own five 1 s retries.
+- The first pass failed 48 of 100 rows with no load, against 49 under load.
+
+The failures are not load-dependent. They are LRCLIB's search endpoint refusing about four calls in five from this key or this
+IP, whatever the rate. Only the 22 `get 503` in probe 1 track our own load.
+
+### The lyric pacer and per-pass status (code `c441bea`)
+
+- **`fetch_lyrics_remote.py`.** `_LAST` is read, slept on and stamped under `_LAST_LOCK`, the shape of `_ITUNES_LOCK`.
+  `LRCLIB_STATUS` increments under `_STATUS_LOCK`; `+=` on a Counter is not atomic across threads, and the per-pass deltas
+  need exact counts.
+- **`harvest_v3.py`.** Each pass takes `LRCLIB_STATUS` before and after. The difference is logged with the pass and stored as
+  `lyrics.passes[].status`, keyed `"get 404"` etc. as the script prints them, and it includes `_get`'s own 429 / 503 retries.
+  `LYRIC_MAX_PASSES` 4, `LYRIC_ERROR_SHARE` 0.02, `LYRIC_WORKERS` 24 and `LYRIC_SPACING_S` 0.06 are unchanged.
+- **Pacer check.** A stand-in client sleeps 50 ms a request and records start times; 24 threads make 5 rows each:
+
+  ```
+  c441bea:          360 requests over 21.65 s, min gap 60.0 ms, mean 60.3 ms
+  HEAD before it:   360 requests over 0.98 s, min gap 0.0 ms, mean 2.7 ms, 367 requests a second
+  ```
+
+  On the real network the unlocked burst was bounded by latency, not by the 0.06 s spacing.
+
+### Fixture shard and the two tests after `c441bea`
+
+Runner held, so nothing else on the key:
+
+```
+$ python ml/data/harvest_v3.py --shard-file tests/fixtures/harvest_fixture_shard.json      (exit 0)
+fixture | stage A done in 93.6 s
+fixture | stage E start (lyric fetch, beside B to D)
+fixture | stage B start
+fixture | E: pass 1 over 22 rows: 1 fetched, 21 none, 0 error {}; status {'get 200': 20, 'get 404': 5, 'get 503': 4, 'search 200': 4, 'search 503': 1}
+fixture | E: lyrics for 22 of 100 songs without a file, 1 passes, 0 still in error (0.0% of the songs)
+fixture | stage E lyric fetch done in 11.9 s
+fixture | stage C done in 59.2 s
+fixture | stage D done in 47.3 s
+fixture | shard fixture done in 227 s: 100 songs, 0 dropped, 100 previews deleted
+
+$ python -m pytest -q tests/test_harvest_shard.py tests/test_harvest_resume.py
+8 passed, 1 warning in 109.43s (0:01:49)
+
+catalog/v3/shard_fixture.manifest.json (downloaded): songs 100, dropped 0, describe_commit e4c1b1bd...,
+lyrics.passes[0].status {'get 200': 20, 'get 404': 5, 'get 503': 4, 'search 200': 4, 'search 503': 1},
+sha256 clap 8c738a57 (unchanged), features 967383de, dropped e3b0c442; free_gb_at_start 133.8
+```
+
+**Previews.** `ls ml/data/previews | wc -l` gave 11 after the fixture, all written 09:57:10 to 09:57:12. They were a00004's
+stage B, cut by the hold; the fixture deleted its own 100. The 11 were removed (a00004 fetches them again), leaving 0.
+
+**Hold.** The runner was ended at 09:57:12, 5 s into a00004's B, after `finish(a00003)` returned. Claims afterwards:
+`Shreyash-PC.a00004.json`, `Shreyash-PC.a00005.json`. a00004's overlapped A (1,481 s) was lost, as accepted.
+
+### Shards 4 to 9 on `c441bea`
+
+Started 10:33 IST in the runner tab with `PYTHONIOENCODING=utf-8`, `--next --shards 6`. a00004 resumed from its own claim,
+from stage A. The owner's two windows are up.
+
+### Noticed: free disk fell 15 GB at 10:31, the Windows pagefile
+
+**What changed.**
+- a00004 started at 10:33 with 118.7 GB free; the fixture at 10:24 had 133.8 GB.
+- The harvester's own files account for none of it: `harvest_v3_work` 88 MB, lyrics 121 MB, previews 0, HF cache 4.8 GB
+  (unchanged), `%TEMP%` 1.1 GB.
+- `C:\pagefile.sys` is 43.7 GB on disk, last written 10:31:34; `Win32_PageFileUsage` reports a base of 29,860 MB. Windows grew
+  its system-managed pagefile by about 14.5 GB under commit pressure. It does not shrink until a reboot.
+
+**Commit pressure.**
+- Commit charge at 10:40: 51.9 GB of a 60.3 GB limit; free RAM 0.1 GB.
+- Process private bytes sum to 16.5 GB; nonpaged and paged pools are 3.6 and 2.8 GB. About 29 GB of commit is in no process
+  and no pool that `Get-Process` and the memory counters show.
+- The box had about 31 GB of its 31.8 GB RAM in use at the first WP5 sample, at 03:42, with the harvester at 0.8 GB. So this
+  predates WP5. The harvester's peak, 2.9 GB in stage C, is what tips commit over the pagefile's base.
+
+**What I did not do.** I did not change pagefile settings or touch other processes, since both are for the owner.
+
+**For the gate.** The WP5 line "free disk within 3 GB of WP1's 135.2 GB" now reads 118.7 GB. All but about 1 GB of the drop is
+the pagefile, not harvest data. A reboot would return the pagefile to its base, but it ends the runner.
