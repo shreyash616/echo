@@ -1074,3 +1074,26 @@ lyrics stopped_by "max_passes", error_after_retry 21.
   with LRCLIB answering 502.
 - Nothing else is open before the restart. It waits on the owner's reboot; then the pre-start record, then `--shards 6` from
   a00004.
+
+### Pre-start record after the owner's reboot (README 3927a8a point 3)
+
+Booted 2026-10-31 16:17:18 IST, read at 16:19, nothing of the harvester running, `ml/data/previews` empty.
+
+```
+RAM total GB 31.1, free 19.6
+Commit limit GB 49.1, available 36.1, charge 13.0
+Disk C free GB 144.7
+Pagefile C:\pagefile.sys: alloc 18432 MB, current 0 MB, peak 0 MB
+
+   Id ProcessName         WS_GB Commit_GB
+27444 claude                0.9      0.83
+ 5764 MsMpEng              0.53      0.48
+18416 PhoneExperienceHost  0.35      0.19
+27264 claude               0.32      0.28
+24860 Spotify              0.32       0.2
+```
+
+- RAM in use 11.5 GB, commit charge 13.0 of a 49.1 GB limit.
+- The pagefile is 18.4 GB, down from 43.7 GB, and free disk is 144.7 GB.
+- Next: `--next --shards 6` from a00004 on `47c41d9`'s code, windows on `current.describe.log` and `current.clap.log`, log
+  `wp5_runs4.out`, boundary check at every `finish()`.
