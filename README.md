@@ -973,16 +973,35 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
-### 2026-10-31 14:25 IST WP5: breaker counts 502 / 503 / 504 (a3b057e), log label fixed (47c41d9), fixture passes; waiting on the reboot
+### 2026-10-31 17:30 IST WP5: rebooted and restarted; a00004 done, the breaker fired, 55.1% of its songs in lyric error
 
-- **`a3b057e`.** `SHED_STATUS` is get and search at 502, 503 and 504, as you set. The tripping test is parametrised on
-  search 503 and on get 502.
-- **`47c41d9`.** The pass log line said `503 n of m` while counting 502s; it now says `502/503/504 n of m`. String only.
-- **Fixture on `47c41d9`:** exit 0; CLAP `8c738a57`; `lyrics_error` listed (ef34edab); `stopped_by` `"max_passes"`; 21 rows in
-  error on `get 502`, under the 300-call floor; 11 passed; previews 0.
+`8c56408` reposted my 14:25 entry here by mistake: a failed file write left the old text in place. This commit replaces that
+copy with this entry; the original 14:25 entry stands below. Progress entries: `ccc1e35`, `23f2bfa`.
 
-Entry in SCALE_PROGRESS.md WP5. Nothing open on my side. After the owner's reboot: the pre-start record, then
-`--next --shards 6` from a00004 with both windows up and the widened boundary check.
+**Pre-start, 16:19, booted 16:17:**
+- RAM in use 11.5 of 31.1 GB; commit 13.0 of 49.1 GB; free disk 144.7 GB.
+- Pagefile 18.4 GB, down from 43.7 GB.
+- Top 5: claude 0.9, MsMpEng 0.53, PhoneExperienceHost 0.35, claude 0.32, Spotify 0.32.
+
+**a00004:**
+- Songs 4,410, dropped 2, wall 3,857 s, `a_overlapped` false.
+- Stages: A 1,501, E 136, B 1,059, C 850, D 369, F 47; `E_wait_after_D` 0.
+- Lyrics: `stopped_by` `"lrclib_503"`, 2,433 still in error of 4,412 songs (55.1%).
+- Pass 1: 7 fetched, 7 none, 37 error, 2,396 not tried; status `{'get 200': 4, 'get 404': 58, 'get 503': 274, 'search 200': 20, 'search 503': 103}`.
+- Breaker: `E: breaker: LRCLIB answered 502/503/504 to 377 of 459 calls; passes stopped, 2396 rows never tried, 2433 rows to the error list`
+
+**Boundary:** RAM in use 14 GB, available 17 GB; commit 19.4 of 49.1 GB, available 29.7 GB; free disk 144.4 GB; harvester WS
+2.01 GB. No hold, no flag. The harvester's private bytes (5.57 GB) cover most of the 6.4 GB of commit growth.
+
+**Two things to read:**
+- **Rate.** 4,116 songs an hour is not the after rate: the restart left A not overlapped. a00005 is the first with A overlapped.
+- **Spacing rule.** Pass 1 `get 503` is 81.5% of gets, over 10%. No probe ran beside the shard, so the rule's condition is
+  unmet and spacing stays at 0.25 s. I will not run a probe beside the harvester from the same address unless you ask.
+
+**Your call, not blocking.** While LRCLIB sheds, each shard will leave about half its songs on the error list, so a00005 to
+a00009 would add about 12,000 keys to refetch later. The run continues.
+
+**State.** a00005 in B, a00006 in A. Boundary check re-armed, both windows up.
 
 ### 2026-10-31 14:25 IST WP5: breaker counts 502 / 503 / 504 (a3b057e), log label fixed (47c41d9), fixture passes; waiting on the reboot
 
