@@ -36,6 +36,22 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-31 07:15 IST WP5: shard a00000 projects 13.8 days; overlap stage E and the next shard's stage A at the next boundary
+
+Read from `catalog/v3/shard_a00000.manifest.json` on the dataset (rule 24), not from a log: 250 artists, 0 unresolved, 4,936 songs, 10 dropped (all stage C), describe commit e4c1b1b, free 133.9 GB, SHA256s in `MANIFEST.json`, claim released, `a00001` claimed at 23:45Z. Good shard.
+
+**Throughput.** Seconds per stage A 1,552 / B 1,101 / C 1,240 / D 724 / E 1,236 / F 17, total 5,870 s, so 3,027 songs an hour and 13.8 days to a million. That is the 14-day line of the WP5 gate, from one shard, and the stages run one after another. Two of them are pure waiting on remote rate limits: A is 500 iTunes calls at the 3 s spacing (1,500 s of sleep for 250 artists, nothing to speed up there), and E is LRCLIB's 503 shedding. Section 5 already says stage E runs "overlapped with the fetch and describe stages"; the code runs it after D. So these are conformance changes, not new scope, and I want them in before WP6 rather than after ten shards:
+
+1. **Stage E overlapped with B to D.** E needs only stage A's song list and the lyric directory. Start the 24 fetchers in a thread when A finishes; join it before the theme, words per minute and language pass, which stay where they are (they need E complete). The per-stage seconds keep their meaning; record E as the fetchers' wall time.
+2. **The next shard's stage A overlapped with the current shard's B to F.** When shard n's A finishes, claim shard n+1 and run its A in a background thread. The iTunes pacer is one shared `_LAST`, so A never runs twice at once and the 20 a minute holds. The runner holds at most two claims; both go stale after 6 h as today, and a crash restarts each from A as today. `test_harvest_resume` gets one case: a crash while holding two claims leaves both, and the restart takes the lower one first.
+3. **Lyric passes until the error share is small.** First pass 980 errors of 2,431 fetched rows (40%), second pass 481 still in error, 9.7% of the shard's songs, where P4's gate was 2%. Each pass roughly halves the errors, and a pass over a few hundred rows is minutes. Repeat the pass while errors exceed 2% of the shard's songs, at most four passes; record every pass in `lyrics` and keep `error_after_retry`.
+
+Arithmetic after 1 and 2: a shard costs about B + C + D, 3,065 s, with A and E hidden under it, so about 5,800 songs an hour and about 7 days to a million. The box's CPU is then the limit (C's 10 workers and B's decoding), not a remote queue.
+
+**How to land them.** At a shard boundary, never mid-shard: let the running shard finish, make the changes, re-run the fixture shard and the two tests (the WP6 rule), paste the block in the WP5 entry with the three changes named, then continue from the next unclaimed shard. The WP5 entry reports the per-shard seconds and songs an hour for the shards before and after the change separately, and the projected finish from the after rate.
+
+Two things from the manifest to carry into the entry: the `lyrics` counters still carry each error under two keys (read a pass as `none + fetched + error`), and 2,505 of the 4,936 songs already had lyric files from P4's catalogue, so shard 0 overstates coverage; later shards will show the real fetch share.
+
 ### 2026-10-31 03:45 IST WP3 passed; WP5 fixes accepted, shard a00000 running
 
 **WP3 passes.** From my own download of the dataset: `artists.jsonl` hashes to the manifest's 6ca1a153, 120,000 rows with 120,000 unique ids, sources seed 119 / chart 1,314 / genre 10 / related 118,557, 28 countries each with `chart_kind` and 22 official, `shards.json` 480 shards of 250 covering rows 0 to 119,999 exactly once, failures 0, `stopped_by cap`. Genre at 10 is accepted: the gate is above zero, and the shortfall against the dry run is overlap with the charts, not a defect; the related walk is where the catalogue comes from. No deploy happened during the run, confirmed from the dataset commit log (discovery wrote its four files at 22:04Z and nothing else touched the Space).
