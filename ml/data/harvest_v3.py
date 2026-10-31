@@ -22,7 +22,7 @@ Stages A to F a shard (README c2f8090: E overlapped with B to D, the next shard'
               backend/.env), 24 fetchers over disjoint row ranges, in a thread started with B over stage A's
               songs; passes over the rows in error repeat while they exceed 2% of those songs, at most four
               passes; a breaker inside each pass stops every fetcher once, past 300 calls, LRCLIB has answered
-              503 to half of them (lyrics.stopped_by "lrclib_503"; rows not tried join the error list); each
+              502 / 503 / 504 to half of them (lyrics.stopped_by "lrclib_503"; rows not tried join the error list); each
               pass records LRCLIB's status counts. E's seconds are the fetchers' wall time. After D the thread is
               joined, then the P4 theme (apply_lyric_theme), words per minute and language (artist-majority
               vote, then language_from_meta).
@@ -94,7 +94,8 @@ LYRIC_WORKERS = 24
 LYRIC_SPACING_S = 0.25          # shared across the fetchers under _LAST_LOCK: 4 requests a second app-wide (README 045f348)
 LYRIC_MAX_PASSES = 4            # passes in all, the first included (README c2f8090)
 LYRIC_ERROR_SHARE = 0.02        # another pass while the rows in error exceed this share of the shard's songs
-LYRIC_503_BREAKER = 0.5         # the passes stop once LRCLIB answers 503 to this share of a pass's calls
+LYRIC_503_BREAKER = 0.5         # the passes stop once LRCLIB answers 502 / 503 / 504 to this share of a pass's calls
+SHED_STATUS = [f"{e} {c}" for e in ("get", "search") for c in (502, 503, 504)]  # README ba79bed
 LYRIC_BREAKER_MIN_CALLS = 300   # ... counted from this many calls into the pass (README 045f348)
 STALE_CLAIM_S = 6 * 3600
 MAX_CLAIMS = 2                  # the running shard and the next shard's stage A
@@ -497,7 +498,7 @@ class Harvester:
                 # LYRIC_503_BREAKER stops every worker before its next row
                 d = status_now() - before
                 calls = sum(d.values())
-                if calls >= LYRIC_BREAKER_MIN_CALLS and d["get 503"] + d["search 503"] >= LYRIC_503_BREAKER * calls:
+                if calls >= LYRIC_BREAKER_MIN_CALLS and sum(d[k] for k in SHED_STATUS) >= LYRIC_503_BREAKER * calls:
                     tripped.set()
 
             def worker(mine: list[dict]) -> None:
@@ -539,7 +540,7 @@ class Harvester:
             rows, tripped = p.pop("_failed"), p.pop("_tripped")
             passes.append(p)
             calls = sum(p["status"].values())
-            shed = p["status"].get("get 503", 0) + p["status"].get("search 503", 0)
+            shed = sum(p["status"].get(k, 0) for k in SHED_STATUS)
             self.log.info("E: pass %d over %d rows: %d fetched, %d none, %d error %s, %d not tried; status %s; 503 %d of %d calls",
                           len(passes), p["rows"], p["fetched"], p["none"], p["error"], p["error_types"], p["untried"],
                           p["status"], shed, calls)

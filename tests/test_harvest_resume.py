@@ -8,8 +8,8 @@ Asserts:
 - the next shard deduplicates against those keys;
 - with the next shard's stage A overlapped (README c2f8090), a crash while holding two claims leaves both, and the
   restart takes the lower one first, then the other; the overlapped A deduplicates against the running shard's songs;
-- stage E's breaker (README 045f348) stops a pass once LRCLIB has answered 503 to half of 300 or more calls, sends the
-  rows not tried to the error list, and never fires on a pass under 300 calls or one without 503s.
+- stage E's breaker (README 045f348, ba79bed) stops a pass once LRCLIB has answered 502 / 503 / 504 to half of 300 or more
+  calls, sends the rows not tried to the error list, and never fires on a pass under 300 calls or one without them.
 """
 from __future__ import annotations
 
@@ -142,8 +142,9 @@ def harvester(tmp_path, monkeypatch):
     return hv.Harvester("breaker_test", [], hv.LocalStore(tmp_path / "dataset"), runner="test")
 
 
-def test_breaker_trips_inside_a_shedding_pass(harvester, monkeypatch):
-    monkeypatch.setattr(hv.flr, "fetch_lyrics", _stub_fetch(("search", 503), 6, fail=True))
+@pytest.mark.parametrize("shed", [("search", 503), ("get", 502)])   # README ba79bed: 502 and 504 count with 503
+def test_breaker_trips_inside_a_shedding_pass(harvester, monkeypatch, shed):
+    monkeypatch.setattr(hv.flr, "fetch_lyrics", _stub_fetch(shed, 6, fail=True))
     rows = _lyric_rows(3000)
     harvester.lyrics(rows, headers={})
     lc = harvester.lyric_counts
