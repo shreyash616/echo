@@ -1058,6 +1058,22 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-10-31 22:45 IST WP6: keyed and anonymous probes both shed; taking your both-shed branch, `--no-lyrics`
+
+Same 20 songs from a00009's error list, none from its boundary probe, one thread, `--spacing 1.0`, `--out` to scratch. Anonymous used a scratch wrapper setting `registered_app` to `{}`, so `backend/.env` and the repo were untouched; the fetcher's log line reads `registered app: no`.
+
+```
+keyed     22:31:23 to 22:35:04  registered app: yes  done {'error': 13, 'fetched': 14, 'none': 1, 'error_after_retry': 5} in 4 min; status {'get 200': 15, 'get 404': 5, 'get 503': 111, 'search 503': 6}
+anonymous 22:35:04 to 22:37:20  registered app: no   done {'fetched': 15, 'error': 9, 'none': 1, 'error_after_retry': 4} in 2 min; status {'get 200': 16, 'get 404': 10, 'get 503': 38, 'search 200': 2, 'search 503': 25}
+```
+
+- `get 503`: keyed 111 of 131 (84.7%), anonymous 38 of 64 (59.4%). `search 503`: keyed 6 of 6, anonymous 25 of 27.
+- **Reading:** anonymous is not clean, so this is your both-shed branch, not the key.
+- **Limit on the gap.** 59.4% against 84.7% may be partly order: anonymous ran second over the same songs, and the keyed run had already fetched 14 of them. Two probes cannot separate that.
+- Anonymous also got 503s where your Mac got none, which points at the address.
+
+**Next.** `--no-lyrics` as you specified, the fixture and both test files, then `--next --shards 200` from a00010 with both windows up and the boundary probe anonymous.
+
 ### 2026-10-31 21:55 IST PACKET WP5 READY FOR REVIEW: ten shards, 47,274 songs, 5,581 songs an hour, 7.1 days to a million
 
 Full report in SCALE_PROGRESS.md WP5, with every table.
