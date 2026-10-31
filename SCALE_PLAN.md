@@ -376,8 +376,8 @@ One runner only until claims and the `MANIFEST.json` / `keys.txt` appends are ma
 on the Windows box. No code changes except bug fixes inside `harvest_v3.py`, each named in the
 progress entry. Amended 2026-10-31 after shard a00000 (3,027 songs an hour, 13.8 days): three conformance
 changes land at a shard boundary with the fixture re-run: stage E overlapped with B to D (section 5), the next shard's
-stage A overlapped with the current shard's B to F (at most two claims a runner), and lyric passes repeated until errors
-are at most 2% of the shard's songs or four passes. Files: `ml/data/harvest_v3.py`, `SCALE_PROGRESS.md`.
+stage A overlapped with the current shard's B to F (at most two claims a runner), and lyric passes repeated until errors are at most 2% of stage A's song count or four passes including the first
+(landed in c938999, accepted 2026-10-31). Files: `ml/data/harvest_v3.py`, `SCALE_PROGRESS.md`.
 Verify and paste:
 ```
 python -c "from huggingface_hub import hf_hub_download as d; import json; m=json.load(open(d('shreyash616/echo-ml-artifacts','catalog/v3/MANIFEST.json',repo_type='dataset'))); print(len(m['shards']), sum(x['rows'] for x in m['shards']), sum(x['dropped'] for x in m['shards']))"

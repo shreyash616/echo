@@ -36,6 +36,19 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-31 07:55 IST WP5: c938999 accepted; restart the Space once so CI measures the serving code, not discovery's leftovers
+
+**c938999 is accepted**, read from the code. The E thread starts before B and is joined after D with its exception re-raised in the main thread (`harvest_v3.py:625-633`); the next shard's A runs on its own `Harvester` from a copy of the current shard's keys, so a song the current shard later drops stays blocked rather than harvested twice; the iTunes pacer sleeps and stamps inside `_ITUNES_LOCK` (`:277-281`), so two stage A threads cannot issue within 3 s; the pass loop stops at 2% of stage A's song count or four passes including the first (`:508-515`). Your reading of "at most four passes" is the one I meant, and the base is stage A's count; both now pinned in the plan. B, C and D have no hunk in the diff, which is why the fixture's CLAP SHA256 held at 8c738a57. The fixture re-run and shard a00001 hash-match on the dataset from my own download; the old single claim file is gone and `claims/Shreyash-PC.a00002.json` is the only claim.
+
+Three small things, none blocking:
+- The overlapped A runs the rule 23 disk check while the current shard's previews are still on disk, about 5 GB. At 132 GB free it cannot matter; it would on a box near the line. Leave it.
+- `MAX_CLAIMS` is declared and never read; the bound of two is structural. Leave it or delete it.
+- The 403/429 backoff sleeps outside the pacer lock, so while one shard's A backs off the other's keeps going at 20 a minute. The ceiling holds; fine.
+
+**CI.** After discovery ended the live p95 read 0.568, 0.313 and 0.354 s on three runs and under 0.300 on three others. P9 measured 0.225 s on the same code, so the Space is slower than it was, and the one thing that changed on it is that discovery's working set (the 120,000-artist dict, the visited sets, the checkpoint buffers) is still resident in the serving process, which makes every generation-2 collection longer; P9 already named gen-2 GC as the 0.42 s outlier. Restart the Space once now, `HfApi().restart_space("shreyash616/echo-backend")`, no code and no upload, so it is not a deploy; then re-run Tests on `ce1980e` and name the run. Measure p95 over 20 calls before and after with `tests/test_candidate_pool.py` and put both numbers in the entry; if the restart does not bring it back near 0.225 s, say so and WP7 takes it, since the gc.freeze and dict-assembly items are already on its list.
+
+**WP5 continues.** The ten-shard entry reports before and after rates separately with the projection from the after rate, as asked. If a00002's manifest shows `E_wait_after_D` well above zero, so E is now the pace, propose the retune then with that shard's pass numbers, not before; the candidates are the 1 s 503 sleep and the pass cap, and I want the measured error curve before choosing.
+
 ### 2026-10-31 07:15 IST WP5: shard a00000 projects 13.8 days; overlap stage E and the next shard's stage A at the next boundary
 
 Read from `catalog/v3/shard_a00000.manifest.json` on the dataset (rule 24), not from a log: 250 artists, 0 unresolved, 4,936 songs, 10 dropped (all stage C), describe commit e4c1b1b, free 133.9 GB, SHA256s in `MANIFEST.json`, claim released, `a00001` claimed at 23:45Z. Good shard.
