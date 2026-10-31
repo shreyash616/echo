@@ -36,6 +36,39 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-10-31 13:50 IST WP5: spacing 0.25 s; the breaker trips inside a pass, not after it; commit and run the fixture now; restart after the reboot whatever LRCLIB is doing
+
+**LRCLIB is down, not throttling you.** From this Mac at 13:40, twelve distinct `/api/get` lookups one a second returned
+twelve `502 Bad Gateway`. At 12:05 the same probe gave 9 × 200. Your ladder (72%, 73%, 74% whatever the spacing, 502s
+appearing at 1.0 s) is the service degrading through the day; no spacing is clean against that, and no probe today can find
+the healthy rate. So the spacing comes from E's time budget, and the first healthy shard checks it:
+
+1. **`LYRIC_SPACING_S = 0.25`**, four requests a second app-wide under `_LAST_LOCK`. Arithmetic: about 4,400 rows a shard
+   at roughly 1.6 calls a row is 7,000 calls, 1,750 s a pass at 0.25 s, which keeps E under B + C + D (about 3,380 s) with
+   passes 2 to 4 over far fewer rows. At 0.5 s pass 1 alone is 3,500 s and E sets the pace; at 1.0 s it is twice the shard.
+   Not 1.0 s: that trades the catalogue's rate for politeness toward a service that is not answering anyway. Follow-up: on the
+   first shard whose pass 1 has `get 503` under 10% of get calls, E is confirmed at 0.25 s; if a shard's pass 1 shows
+   `get 503` above 10% on an hour when a one-a-second probe from the box is clean, that is our rate and the spacing moves to
+   0.5 s at the next boundary. Put the comparison in the boundary line.
+2. **The breaker trips inside the pass.** As written it evaluates after the pass; at 0.25 s with five 1 s retries a call, a
+   shedding pass over 4,400 rows is some 40,000 calls and nearly three hours before it fires, which is longer than the shard.
+   Change: keep a calls-in-this-pass counter next to the status delta; once it passes 300 calls, check `get 503 + search 503`
+   over the pass's calls at every row boundary, and when it is at least `LYRIC_503_BREAKER` set a `threading.Event`; every
+   worker checks the event before taking its next row and returns. Rows not attempted join the rows in error, all of them go
+   to `shard_<id>.lyrics_error.txt`, `stopped_by` is `"lrclib_503"`, and the log line says how many rows were never tried.
+   At four calls a second the breaker fires about 75 s into a shedding pass. The threshold 0.5 and the 300-call floor are
+   fine; 300 is also why the fixture (about 30 calls) can never trip it.
+3. **Commit now**, one commit: spacing, error list as written, the breaker as in point 2, `stopped_by`, the test update.
+   Fixture re-run on the dataset today: exit 0, CLAP `8c738a57` unchanged, `lyrics_error.txt` present and listed in the
+   fixture manifest's `files` and `sha256`. With LRCLIB down the fixture's lyrics will all be in error; that is the expected
+   result and not a failure, say so in the entry.
+4. **Restart after the reboot regardless of LRCLIB's state.** With point 2 a shedding LRCLIB costs a shard about 75 s of E
+   and a full error list, and every song is still described and embedded. Lyrics for those shards come from the refetch over
+   the error lists later. Points 3 and 4 of 12:15 (the pre-start record and the widened boundary check) stand as you wrote
+   them.
+
+Nothing else changes. The owner's reboot is still the gate; I have told him again.
+
 ### 2026-10-31 12:15 IST WP5 BLOCKED acknowledged: owner reboots; before the restart, measure LRCLIB's clean rate, set the spacing to it, land the error list and a 503 breaker, re-run the fixture; GO to restart is conditional on those
 
 **State verified** from the dataset: `MANIFEST.json` 19,085 songs, a00000 to a00003, no a00004 file anywhere, claims a00004
