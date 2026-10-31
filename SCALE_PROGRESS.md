@@ -945,3 +945,39 @@ from stage A. The owner's two windows are up.
 
 **For the gate.** The WP5 line "free disk within 3 GB of WP1's 135.2 GB" now reads 118.7 GB. All but about 1 GB of the drop is
 the pagefile, not harvest data. A reboot would return the pagefile to its base, but it ends the runner.
+
+### a00004 lost in stage D: CUDA out of memory (11:59 IST)
+
+**Run.** `c441bea`, `--shards 6`, started 10:33. a00004 resumed from its own claim; a00005's A ran under it, 10:58 to about 11:23.
+
+**Stages before the crash** (from `a00004.describe.log`):
+- A 1,495.8 s, B 1,514.2 s, C 1,300.9 s.
+- D started 11:45:50.
+- E pass 1 over 4,312 rows: 1,203 fetched, 327 none, 2,782 error (`HTTPStatusError` 2,731, `ReadTimeout` 51); status
+  `{'get 200': 1188, 'get 404': 2399, 'get 502': 153, 'get 503': 19856, 'search 200': 808, 'search 502': 4, 'search 503': 4243}`.
+  `/api/get` is now shedding too: 19,856 503s against 3,587 answers. At 10:23 it gave none.
+
+**The crash.**
+- Batch 384 of 414 was logged at 11:58:56 (`cuda 778 MB`, flat through D, as on every shard).
+- The next `get_audio_embedding_from_data` raised `RuntimeError: CUDA error: out of memory` in
+  `laion_clap/clap_module/htsat.py:807` (`interpolate(torch.sigmoid(x)...)`).
+- The runner logged `=== exit 1 after 5162 s` at 11:59:06.
+
+**Evidence, as found; nothing changed.**
+- **GPU.** After the crash, `nvidia-smi` shows 1,882 of 10,240 MiB used, by desktop apps. No process started between 11:30
+  and the crash.
+- **Box RAM.** The harvester's working set was trimmed to 190 to 480 MB through D (`wp5_ram.csv`; 700 to 830 MB on shards 0
+  to 2). Box RAM in use was 31.4 to 31.8 GB of 31.85 GB, and free RAM was 0.1 to 0.3 GB.
+- **Commit.** 51.7 of 60.3 GB charged after the harvester exited; available 8.6 GB.
+- **Windows events.** None from the resource-exhaustion detector in the last 6 hours.
+
+The likeliest reading is host-side memory pressure under WDDM, with the CUDA allocation failing although VRAM was free. I
+cannot prove it from here, and per README dcb05e7 I did not look further into the box's memory.
+
+**State.**
+- `catalog/v3/MANIFEST.json`: 19,085 songs, a00000 to a00003; nothing of a00004 on the dataset.
+- Claims: `Shreyash-PC.a00004.json` and `Shreyash-PC.a00005.json` are held. A restart re-runs a00004 from A, then a00005.
+- a00004's 4,412 previews (about 4.5 GB, written from 10:58) were removed; previews 0.
+- Free disk 118 GB. The pagefile is still 43.7 GB, last written 10:31:34.
+
+The runner is not restarted: BLOCKED in the channel.
