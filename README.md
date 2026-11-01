@@ -1083,6 +1083,62 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-01 12:12 IST BLOCKED: available memory 2.9 GB after a00025, reboot needed
+
+**The hold rule fired at the a00025 boundary and the harvester is stopped.** Nothing failed. a00025 is in the dataset; the
+owner has to reboot before the run can resume.
+
+```
+2026-11-01T12:10:01 after a00025: RAM in use 28.2 GB, available 2.9 GB; commit 40.1 of 49.1 GB, available 9 GB; free disk 143.7 GB; pool nonpaged 2.57 GB, paged 1.91 GB; harvester WS 2.01 GB; harvester private 6.29 GB (+0.01 GB since a00024); HELD
+BLOCKED: available memory 2.9 GB, available commit 9 GB
+```
+
+With the harvester gone at 12:10:45: RAM in use 26.2 GB, available 4.9 GB, commit 33.7 of 49.1 GB, available 15.4 GB. The
+pre-start record after the last reboot was 13.0 GB of commit.
+
+**Dataset (`MANIFEST.json`, force-downloaded after the hold).** 26 shards, 123,929 rows, per-shard sum equal, 228 dropped.
+WP6 so far is a00010 to a00025: 16 shards, 76,655 songs, 188 dropped (0.25%). That is 5,700 songs an hour over 13.4 hours,
+which leaves 6.4 days of run for the remaining 876,071, before reboots.
+
+**Where it was stopped.** a00026 was 20 seconds into stage B and a00027 in stage A. Their claims are still in the dataset,
+so the restart takes a00026 first, then a00027, each from stage A. 46 previews from a00026 are left on disk; I will give the
+count again once a00026 finishes.
+
+**Memory across WP6.**
+
+| Between a00010 and a00025 | Start | End | Per shard |
+|---|---|---|---|
+| Available memory | 13.9 GB | 2.9 GB | -0.73 GB |
+| Available commit | 23.2 GB | 9.0 GB | -0.95 GB |
+| Pool nonpaged + paged | 2.70 GB | 4.48 GB | +0.12 GB |
+| Harvester private | 5.46 GB | 6.29 GB | flat from a00015, under 0.5 GB shard to shard |
+
+No shard raised the private bytes flag. The pools explain about an eighth of the commit growth and the harvester very little,
+and I have not looked further, as you said at dcb05e7. The box did 22 shards, a00004 to a00025, between reboots, so at this
+rate a run of 200 shards means about eight more.
+
+**LRCLIB's API came back between 07:08 and 07:57, and the box is still shed.** The boundary probes, out of 20:
+
+```
+a00010 to a00019  get 502 20 at each of the ten boundaries
+a00020  07:57  get 503 18, get 404 2
+a00021  08:47  get 503 19, get 404 1
+a00022  09:34  get 503 13, get 200 4, get 404 3
+a00023  10:22  get 503 18, get 200 1, get 404 1
+a00024  11:16  get 503 14, get 200 3, get 404 3
+a00025  held, no probe
+```
+
+Not clear by the amended test: 65 to 95% of each probe came back as something other than 200 or 404. The flag stays on.
+
+**Two more faults in my boundary script, fixed in scratch.** A boundary with no probe counted as clean, because an empty
+share read as 0, so a00025 left the counter at 1. It also left `songs` empty in the state file. The hold exits the loop, so
+neither changed a report. The counter is back at 0 and `songs` is 4,891.
+
+**After the reboot, unless you say otherwise:** pre-start record, then `--next --shards 184 --no-lyrics` on the same code, so
+the total stays at 200, with both windows up and a new log file. The old log's `=== exit` line would otherwise end the
+boundary loop at once. No code changes, so no fixture run. The first daily line is in SCALE_PROGRESS.md.
+
 ### 2026-11-01 00:44 IST WP6: under 10% `get 503` on two boundaries, but every call was a 502, so this is not the box being served; flag stays on
 
 Your condition from 8f54dec is met as written, so I am saying so, but I do not read it as a clear. **The flag stays on, the
