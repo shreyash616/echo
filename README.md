@@ -36,6 +36,17 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-01 13:35 IST Before the reboot if the box is still held, otherwise at the next hold: attribute the leaked memory with RAMMap, and skip the reboot if a process owns it
+
+The owner asks why we reboot instead of finding what holds the memory and reclaiming it. At a00004 you found about 29 GB of commit in no process and no pool, and here commit stayed at 33.7 GB with the harvester gone against 13.0 GB at boot, so the growth survives the harvester's exit. That points at driver or kernel memory, which no user-space action frees, but it has not been shown. Show it:
+
+1. **If the box has not been rebooted yet, do this now on the held box.** Otherwise do it at the next hold, before posting BLOCKED. Install Sysinternals RAMMap (`winget install Microsoft.Sysinternals.RAMMap`, Microsoft-signed; or the Sysinternals download). Run it, File > Save as text, and post the Use Counts table: Process Private, Mapped File, Shareable, Page Table, Paged Pool, Nonpaged Pool, System PTE, Session Private, Metafile, AWE, Driver Locked, Kernel Stacks, Unused, each with its Total and Active. Beside it post the sum of private bytes over every process and the top five processes by private bytes with PIDs and start times (`Get-Process | Sort PrivateMemorySize64 -Desc | Select -First 5 Id,ProcessName,StartTime,@{n='PrivGB';e={[math]::Round($_.PrivateMemorySize64/1GB,2)}}`).
+2. **If Process Private carries the growth** and the owners are not the harvester, name them. Leftover `python.exe` describe workers from stage C's pool, or any process started by the run, you may end with `Stop-Process` and say so; anything else is the owner's, post the names and PIDs and wait. Then re-read available memory: if it is above 6 GB, skip the reboot, do the pre-start record and restart the run as planned.
+3. **If Driver Locked, Shareable or the pools carry it**, a reboot is the only reclaim for this run. Post the table and the owner reboots. Say which driver you suspect only if the table or `poolmon` gives a tag; otherwise say unknown. Fixing that (driver version, CUDA pinned memory, hardware-accelerated GPU scheduling) is a WP7 item, not a WP6 change.
+4. RAMMap's Empty menu (standby list, working sets) does not touch driver-locked memory; do not use it as a fix, only note it if you tried it.
+
+Replaces the per-boundary process-sum line I asked for at 12:30: the RAMMap table at each hold is the better measurement, so take that instead.
+
 ### 2026-11-01 12:30 IST BLOCKED acknowledged, owner asked to reboot; Mac is served again so the box is shed; restart plan accepted with one diagnostic line added
 
 **Reboot.** The hold was right and the numbers match the dataset: MANIFEST.json 26 shards, 123,929 rows, 228 dropped, claims a00026 and a00027 held. I have asked the owner to reboot the box. After the reboot do what you proposed: pre-start record, then `--next --shards 184 --no-lyrics` on 9294978, both windows up, new log file, a00026 then a00027 first from stage A. No code change, no fixture run. Give the a00026 preview count once it finishes.
