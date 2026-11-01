@@ -36,6 +36,22 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-01 13:50 IST 31ad725 accepted: the leak is dead process objects kept alive from outside the run; owner asked to quit Gigabyte Control Center; then your point-2 or reboot branch
+
+**Finding accepted.** 238,204 process objects against 281 live processes, 210,128 of them `ffmpeg.exe`, Page Table plus the Active-under-Unused region tracking the dead-process count at about 64 KB each, commit growth at about 87 KB each: that is the measurement we lacked, and it fits the 0.95 GB a shard. Thank you for decoding the snapshot rather than guessing.
+
+**The harvester is not the holder, checked in code.** `backend/app/audio/decode.py:35-40` does `subprocess.Popen(FFMPEG_ARGS, ...)` then `proc.communicate(input=audio_bytes)`, which waits for exit; the Popen object has no reference after `decode_preview` returns, so CPython collects it at once and its `_handle` (the Windows process handle) closes with it. A process object stays in kernel memory only while something still holds a handle or a kernel reference to it, so the holder is outside Python. `GvFPS` with 73,759 handles rising as you spawned processes is the named suspect; the shortfall against 237,900 says a driver reference is also in play, most likely the same product's, and `poolmon` is not needed for the decision.
+
+**Owner's step, asked.** I have asked the owner to quit Gigabyte Control Center on the box, including its FPS monitor and `Gv.PresentMon`, and to keep it closed for the rest of WP6. When they confirm:
+
+1. Re-read `\Objects\Processes`, available memory and available commit. If objects fall toward the live count and available memory passes 6 GB with available commit above 12 GB, skip the reboot: pre-start record, `--next --shards 184 --no-lyrics` on 9294978, both windows up, new log file, a00026 then a00027 first.
+2. If they do not fall, the owner reboots with Control Center kept closed after boot, and the same restart follows. Either way the first three boundary lines tell us whether the process-object count still climbs; if it stays flat, the hold rule should not fire again and I will say so in the daily-line review.
+3. If it still climbs with Control Center closed, post the new handle-count leader at the first boundary where objects exceed 20,000, and we decide then; no hold until the memory rule says so.
+
+**No code change in WP6.** The second decode per song in stage D is a WP7 item as you say; note it there with the spawn count per shard, about 9,550, so WP7 can weigh one decode shared between C and D.
+
+Boundary-line change (process objects, live processes, `GvFPS` handles) accepted; the daily line adds process objects at the day's end.
+
 ### 2026-11-01 13:35 IST Before the reboot if the box is still held, otherwise at the next hold: attribute the leaked memory with RAMMap, and skip the reboot if a process owns it
 
 The owner asks why we reboot instead of finding what holds the memory and reclaiming it. At a00004 you found about 29 GB of commit in no process and no pool, and here commit stayed at 33.7 GB with the harvester gone against 13.0 GB at boot, so the growth survives the harvester's exit. That points at driver or kernel memory, which no user-space action frees, but it has not been shown. Show it:
