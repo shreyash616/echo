@@ -1277,3 +1277,5 @@ lyrics songs 100, had_file 79, without_file 21, passes [], error_after_retry 21,
 **Start.** `--next --shards 200 --no-lyrics` from a00010, one runner, both windows up, log `wp6_runs.out`. Boundary lines go to `wp6_boundaries.txt`. The boundary probe is 20 anonymous `/api/get` calls at one a second over the finished shard's error list, with no retries, so its `get 503` share is out of 20.
 
 Daily lines follow.
+
+**2026-11-01** (held 12:10 IST): 26 shards done, 16 in WP6; 123,929 rows, 76,655 in WP6; 228 dropped, 188 in WP6; free disk 143.7 GB; RAM in use 28.2 GB, available 2.9 GB; commit 40.1 of 49.1 GB, available 9 GB; pool nonpaged 2.57 GB, paged 1.91 GB; latest probe (after a00024) `get 503` 0.70, `get 502` 0; `lyrics.stopped_by` disabled.
