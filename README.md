@@ -1104,6 +1104,91 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-01 13:39 IST WP6: RAMMap on the held box: the memory is about 237,900 dead processes still held open, 210,128 of them `ffmpeg.exe`; still BLOCKED, owner's step next
+
+**Your table does not land on either branch.** No live process carries the growth, and neither do Driver Locked, Shareable or the
+pools. The box has **238,204 process objects and 281 live processes** (`\Objects\Processes`, `\System\Processes`). Processes that
+exited since the boot on 2026-10-31 16:17 are still held in kernel memory, which would explain why commit stayed up with the
+harvester gone.
+
+**Use Counts,** RAMMap 1.63, snapshot 13:34:48 IST, box held, no harvester running. The owner approved the install. The snapshot is
+RAMMap's `.rmp`, saved from the command line and decoded by me, not the GUI's text export. Labels are by position in your list
+order. The decode reproduces the counters' list totals, Nonpaged Pool sits at 2.68 GB against 2.58 GB on the counter, standby lands
+on Mapped File, and zero and free land on Unused. Page Table has no independent check beyond its position.
+
+| Use | Total GB | Active GB |
+|---|---|---|
+| Process Private | 4.24 | 3.77 |
+| Mapped File | 4.50 | 2.05 |
+| Shareable | 0.60 | 0.59 |
+| **Page Table** | **7.45** | **7.45** |
+| Paged Pool | 1.79 | 1.78 |
+| Nonpaged Pool | 2.68 | 2.68 |
+| System PTE | 0.53 | 0.53 |
+| Session Private | 0.00 | 0.00 |
+| Metafile | 0.27 | 0.19 |
+| AWE | 0.00 | 0.00 |
+| Driver Locked | 0.57 | 0.57 |
+| Kernel Stacks | 0.10 | 0.10 |
+| **Unused** | **8.37** | **7.14** |
+| Total | 31.10 | 26.85 |
+
+Private bytes over all live processes: 9.0 GB across 273.
+
+```
+   Id ProcessName       StartTime           PrivGB
+27444 claude            31-10-2026 16:19:12    0.6
+28580 claude            31-10-2026 16:19:22   0.54
+ 5764 MsMpEng                                 0.37
+23300 Spotify           31-10-2026 16:18:13   0.29
+21952 EpicGamesLauncher 31-10-2026 16:18:01   0.27
+```
+
+**What the two large lines are.** Page Table 7.45 GB and the 7.14 GB marked Active under Unused are what stands out.
+Decoding every physical page in the snapshot, they split into 237,803 and 238,000 separate owners, against 237,801 process entries
+in the snapshot. That is about 33 KB and 31 KB for each dead process. I do not know what the 31 KB is, only that it is in one kernel
+region and tracks the process count.
+
+**Who the dead processes are.** Entries by name; all but about twenty of these have no private pages left:
+
+```
+ffmpeg.exe 210,128 | git.exe 7,715 | bash.exe 7,397 | conhost.exe 3,529 | tzutil.exe 1,869 | gh.exe 921 | cut.exe 909 | head.exe 903 | sleep.exe 872 | python.exe 308
+```
+
+Two `ffmpeg` runs a song over 22 shards would be about 210,000, which points at the harvester's decoding; I did not count the
+spawns. `git`, `bash`, `gh`, `cut`, `head` and `sleep` are mine: the channel watcher and my commands. So this is not specific to
+`ffmpeg`; the harvester simply spawns the most.
+
+**This fits the growth.** Commit against boot is 33.7 - 13.0 = 20.7 GB, so about 87 KB for each dead process. At about 9,550 `ffmpeg`
+a shard that is 0.83 GB a shard, against the measured 0.95.
+
+**What holds them: part named, part unknown.**
+
+```
+   Id ProcessName         HandleCount StartTime
+18284 GvFPS                     73759 31-10-2026 16:17:50    (73,787 two minutes later, while I ran commands)
+    4 System                     6106
+10652 explorer                   4467
+```
+
+- `GvFPS` (PID 18284) holds 35% of all handles on the box, and the count rose while I spawned processes. It
+  runs elevated, so I could not read its path, signer or handle types. Its neighbours are `Gv.PresentMon` (PID 8576) and
+  `AorusLcdService` under `C:\Program Files\GIGABYTE\Control Center`, so I infer it is Gigabyte Control Center's FPS monitor. That is
+  an inference, not a reading.
+- It cannot be all of it. Handles across the whole box total 211,204, under 237,900 dead processes. The rest are held by something
+  that does not show as a handle, such as a kernel driver's reference. Unknown; `poolmon` is not installed and I did not look further.
+
+**Nothing stopped.** `GvFPS` is the owner's, not the run's, and from this session it could not be stopped anyway. No RAMMap Empty
+command was used.
+
+**Next, owner's step.** Quit Gigabyte Control Center, then I re-read `\Objects\Processes` and available memory. If the objects fall
+and available memory passes 6 GB, the rule in your point 2 skips the reboot and I restart. If they do not, the owner reboots. Either
+way we learn whether reboots can be avoided for the rest of WP6, which is eight fewer holds.
+
+**Scratch change.** The boundary line drops the process sum you withdrew and now carries process objects, live processes and
+`GvFPS` handles, so each shard shows the rate directly. `harvest_v3.py` is untouched. Reducing `ffmpeg` spawns is a WP7 question; I
+am not proposing it for WP6.
+
 ### 2026-11-01 12:12 IST BLOCKED: available memory 2.9 GB after a00025, reboot needed
 
 **The hold rule fired at the a00025 boundary and the harvester is stopped.** Nothing failed. a00025 is in the dataset; the
