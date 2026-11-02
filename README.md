@@ -1134,6 +1134,49 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-02 13:35 IST WP6: before the reboot, the leak measured on the held box; every image leaks, holder not yet named; owner reboots now
+
+fae9b3d read. The owner asked me to find the cause before rebooting, so the reboot waited. What I measured on the held box, all
+read-only except one elevated trace the owner approved:
+
+**Not handles.** A handle census of the whole box found 3,013 process handles (top holder `System`, 1,287) and 7,084 thread handles,
+against about 259,000 process objects with 273 live. The dead processes are held by kernel references, not by handles.
+
+**Every new process leaks.** Starting 200 `hostname.exe`, all exited, left +434 and then +449 process objects, about 2 a start.
+
+**Whole process records stay.** Pool tags outstanding, each about one an exited process: `Proc` 259,017 (928 MB), `MiP2` (398 MB),
+`PsIn`, `EtwS`, `SeTd`, `Toke` 267,829 (581 MB). Each grew by about 449 on the 200 starts.
+
+**Which processes.** The kernel's rundown of exited processes still in memory (ETW, Process opcode 39) lists 260,282.
+
+| Image | Held |
+|---|---|
+| `ffmpeg.exe` | 210,128 |
+| `bash.exe` | 14,231 |
+| `git.exe` | 12,604 |
+| `conhost.exe` | 6,355 |
+| `HOSTNAME.EXE` (my tests) | 650 |
+
+By exit day, UTC: 2026-10-31 152,405; 2026-11-01 99,687; 2026-11-02 8,190. Every image leaks; `ffmpeg` leads because the harvester
+starts it most.
+
+**Reference trace, no holder named.** `wpr` with object reference stacks, memory mode, 50 test starts. The ring wrapped on the busy
+CPUs, so no process start events survived and the references taken at creation and exit were lost. What was kept on the 50 test
+objects is 3 references and 3 dereferences each, balanced, all from `ntoskrnl`. None of the 50 was freed. A file-mode trace that
+cannot wrap is written and its profile checked; the owner skipped it to reboot.
+
+**Drivers able to do it, not proven.** Running third-party kernel drivers that import a process notify routine and
+`PsLookupProcessByProcessId`: `amduw23g` (`amdkmdag.sys` 31.0.24002.92, January 2024, the Ryzen integrated GPU, no monitor on it),
+`nvlddmkm` 32.0.16.1088, `IDMWFP`. Every file filter driver loaded is Microsoft's. A public write-up
+(github.com/yzx-deepseek/windows-zombie-process-leak) traced the same leak on build 26200 to an older `amdkmdag.sys` and saw it gone
+after an Adrenalin update; one machine, not verified here.
+
+**Proposal, your call.** After the boot, before the harvester starts, the 200-start leak test answers in a minute whether the leak is
+live, without waiting three boundaries. If it is, the file-mode trace (one admin prompt from the owner, no setting changed) names the
+module holding the reference, in place of stopping one suspect a shard.
+
+**Next.** The owner reboots now. Then the pre-start record with your list, and the run as in fae9b3d.
+
 ### 2026-11-02 10:59 IST WP6: `GvFPS` gone and process objects did not fall, so it is not the main holder; your point 2, owner reboots
 
 **Result of your step 1.** Objects did not fall, so the skip-reboot branch does not apply. Available commit passes; the other two do not.
