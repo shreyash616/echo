@@ -1120,6 +1120,44 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-02 10:59 IST WP6: `GvFPS` gone and process objects did not fall, so it is not the main holder; your point 2, owner reboots
+
+**Result of your step 1.** Objects did not fall, so the skip-reboot branch does not apply. Available commit passes; the other two do not.
+
+| Reading | 2026-11-01 14:19 | 2026-11-02 10:58 | To skip the reboot |
+|---|---|---|---|
+| `\Objects\Processes` | 239,781 | 256,980 | toward the live count |
+| `\System\Processes` | 281 | 273 | |
+| Available memory | 4.26 GB | 3.02 GB | above 6 GB |
+| Commit | 34.3 GB | 34.8 GB | |
+| Available commit | 14.8 GB | 14.3 GB | above 12 GB |
+| Pools, nonpaged + paged | 4.59 GB | 4.89 GB | |
+| All handles on the box | 215,017 | 136,327 | |
+| `GvFPS` handles | 76,321 | not running | |
+
+**`GvFPS`'s handles were not what holds the dead processes.** About 79,000 handles left the box and no process objects left with them.
+Handles now total 136,327 against 256,980 objects, so at least about 120,000 dead processes are held by something that is not a
+handle in any process I can read. That reverses the suspicion in my last entry. The rise I saw alongside my commands was real, but
+it was not this leak.
+
+**How it ended.** My stop did nothing. `GvFPS` and `Gv.PresentMon` were already gone when I went to stop them, so I never ran the
+elevated command. I do not know when they went. `AorusLcdService` and the scheduled task `GCC` are gone too, so Control Center may
+have been removed rather than closed. The owner would know.
+
+**Objects keep rising with no run.** 17,199 in 20.6 hours with the harvester stopped, about 830 an hour. My channel watcher is part of
+that and I have not split it out. So the leak does not need `ffmpeg`, as the `git` and `bash` counts already said.
+
+**Still running, not touched.** `PresentMon_x64` (PID 19488), child of `nvfvsdksvc_x64` (PID 8728), the NVIDIA service I named to the
+owner. Its handle count is 245 and has not moved, so nothing here points at it beyond its being a process monitor. The holder is
+still unknown. Your point 2 assumed a driver of the same product; with the product gone from user space and the objects unchanged I
+cannot confirm or rule that out, because a reference held by a loaded driver would stay until the reboot.
+
+**Next.** The owner reboots. Then pre-start record, `--next --shards 184 --no-lyrics`, both windows up, log `wp6_runs_2.out`, a00026
+then a00027 first. I check that no `Gv` process came back before starting. The first three boundary lines then answer whether Control
+Center was the cause: if the driver was its, objects stay flat after this boot.
+
+The WP7 note goes in SCALE_PROGRESS.md with the restart record, about 9,550 `ffmpeg` spawns a shard.
+
 ### 2026-11-01 13:39 IST WP6: RAMMap on the held box: the memory is about 237,900 dead processes still held open, 210,128 of them `ffmpeg.exe`; still BLOCKED, owner's step next
 
 **Your table does not land on either branch.** No live process carries the growth, and neither do Driver Locked, Shareable or the
