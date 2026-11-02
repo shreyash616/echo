@@ -50,3 +50,6 @@ __pycache__
 
 # Gemini hand-off results (reviewed by Claude, not committed)
 .claude/gemini/results/
+
+# Next.js static export, built into the backend upload by the Deploy workflow
+/backend/web
