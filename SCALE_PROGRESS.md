@@ -1279,3 +1279,71 @@ lyrics songs 100, had_file 79, without_file 21, passes [], error_after_retry 21,
 Daily lines follow.
 
 **2026-11-01** (held 12:10 IST): 26 shards done, 16 in WP6; 123,929 rows, 76,655 in WP6; 228 dropped, 188 in WP6; free disk 143.7 GB; RAM in use 28.2 GB, available 2.9 GB; commit 40.1 of 49.1 GB, available 9 GB; pool nonpaged 2.57 GB, paged 1.91 GB; latest probe (after a00024) `get 503` 0.70, `get 502` 0; `lyrics.stopped_by` disabled.
+
+### Restart record after the owner's reboot (README fae9b3d, 7e090c5)
+
+Booted 2026-11-02 14:12:17 IST, read at 15:31, nothing of the harvester running, no `Gv` process, 46 previews on disk from a00026.
+
+```
+RAM total GB 31.1, available 20.0, in use 11.1
+Commit limit GB 49.1, charge 14.2, available 34.9
+Pool nonpaged GB 0.77, paged 0.61
+\Objects\Processes 259, \System\Processes 259
+Disk C free GB 144.3
+Pagefile C:\pagefile.sys: alloc 18432 MB, current 0 MB, peak 0 MB
+```
+
+- **AMD driver updated by the owner before the restart.** AMD Radeon(TM) Graphics (the Ryzen integrated GPU) runs
+  `amduw23g-205305-f16b1d83`, `amdkmdag.sys` 32.0.21045.16010, driver date 2026-10-16. The old service `amduw23g`
+  (`amdkmdag.sys` 31.0.24002.92) is still registered and stopped.
+- No Gigabyte driver or service is in the lists below.
+
+**200-start test (7e090c5 point 1).** Dead is `\Objects\Processes` minus `\System\Processes`.
+
+```
+15:31:00  objects 259, live 259, dead 0     pre-start read
+15:31:40  200 starts, Python (leak_test.py, as before the reboot)
+15:32:07  dead 43; 200 starts, PowerShell; 15:32:20 dead 127; 15:33:02 dead 43
+15:34:54  dead 43; 200 starts, PowerShell; 15:34:57 dead 98; 15:36:30 dead 98; 15:37:07 dead 43; held at 43 to 15:41:15
+15:41:28  dead 43; 200 starts, Python;     15:41:32 dead 43; held at 43 to 15:45:41
+```
+
+Near +0: before the reboot the same Python test left +434 and +449 that were never freed; here 600 starts after the first test
+added none. Exited processes are now freed late, up to about two and a half minutes. Pool tags at 15:32:20 with 384 objects:
+`Proc` 387, `MiP2` 388, `PsIn` 386. The 43 settled dead came in the first minute of testing and did not grow; not chased. No
+trace taken, per point 1.
+
+Two things changed between the boots: the AMD driver (31.0.24002.92 to 32.0.21045.16010) and Gigabyte Control Center gone. This
+test does not separate them. The AMD driver is the one of the two with a process notify routine and `PsLookupProcessByProcessId`,
+and matches the public write-up's builds, but that is not proof.
+
+**Running non-Microsoft kernel drivers** (company from the file; blank where the file names none):
+
+- Advanced Micro Devices: `AmdPpkg`, `AMDRyzenMasterDriverV26`, `AMDRyzenMasterDriverV27`, `AMDRyzenMasterDriverV31`, `AMDSAFD`,
+  `AtiHDAudioService`, `amdgpio2`, `amdgpio3`, `amdfendr`, `amdfendrmgr`, `amduw23g-205305-f16b1d83`, `AMDXE`, `amdpsp`
+- Logitech: `logi_generic_hid_filter`, `logi_joy_bus_enum`, `logi_joy_hid_filter`, `logi_joy_hid_lo`, `logi_joy_vir_hid`,
+  `logi_joy_xlcore`
+- MediaTek: `MTKBTFilterx64`, `mtkwlex`
+- MICSYS Technology: `MSIO`
+- MSI: `NTIOLib_CC_COMM`, `NTIOLib_MysticLight`
+- Nefarius Software Solutions: `HidHide`, `ViGEmBus`
+- NVIDIA: `NVHDA`, `nvlddmkm`, `nvvad_WaveExtensible`
+- Realtek: `rt640x64`
+- Tonec (Internet Download Manager): `IDMWFP`
+- blank: `DellInstrumentation`
+
+**Running non-Microsoft services:**
+
+- Adobe: `AdobeARMservice`
+- Advanced Micro Devices: `AmdPpkgSvc`, `AMD Crash Defender Service`, `AMD External Events Utility`
+- Dell: `DellTechHub`; blank: `DellClientManagementService`
+- Micro-Star: `LightKeeperService`, `MSI_Case_Service`, `MSI_Center_Service`, `Mystic_Light_Service`
+- "Windows (R) Win 7 DDK provider": `GameInputRedistService`, `XboxService`
+- blank: `CloudflareWARP`, `CloudflareWARPUpdater`, `CoworkVMService`, `NvContainerLocalSystem`, `NVDisplay.ContainerLocalSystem`
+- file not read: `LSM`
+
+**WP7 note.** About 9,550 `ffmpeg` spawns a shard; one decode could be shared between C and D.
+
+**Start.** 15:46:34, `--next --shards 184 --no-lyrics` on `7e090c5` (harvester code unchanged since `9294978`), one runner, both
+windows up, log `wp6_runs_2.out`. a00026 claimed again and in stage A at 15:46:49, a00027 next. Memory sampler and boundary loop
+running. The boundary line carries process objects and live processes.
