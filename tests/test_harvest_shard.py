@@ -8,6 +8,12 @@ Asserts:
 - every row has exactly the fields of a row of today's catalog_features.jsonl with the same has_lyrics;
 - batched CLAP (64 windows a batch) equals P4's one-window-at-a-time path (redescribe_catalog.clap_windows) to 2e-3;
 - the shard's previews are deleted.
+A tracks-source shard (WP6-IN), four Aashiqui 2 songs from tests/fixtures/bollywood, one already in the catalogue and
+one repeated:
+- stage A sends no iTunes request and skips the catalogue's key and the repeat; the manifest says source "tracks";
+- its rows have the catalogue's fields (film, film_year, ... stay out), language hi, and its previews are deleted;
+- run_shards with --spec discovery/bollywood/shards.json takes b00000 then b00001, rows [start:end] each, and the
+  finished shards join MANIFEST.json and keys.txt (stage A only, no network).
 """
 from __future__ import annotations
 
@@ -103,3 +109,79 @@ def test_previews_deleted(shard):
     h, _, _ = shard
     left = [s for s in h.songs if (hv.PREVIEWS / f"{s['itunes_id']}.m4a").exists()]
     assert not left
+
+
+# ---- WP6-IN: a tracks-source shard ------------------------------------------------------------------
+BOLLYWOOD = ROOT / "tests" / "fixtures" / "bollywood" / "itunes_lookup_aashiqui2.json"
+
+
+def bollywood_rows(n: int) -> list[dict]:
+    import discover_bollywood as db
+    items = json.loads(BOLLYWOOD.read_text(encoding="utf-8"))["results"]
+    return [r for r in (db.track_row(it, "film", "Aashiqui 2", 2013) for it in items) if r][:n]
+
+
+@pytest.fixture(scope="module")
+def tracks_shard(tmp_path_factory):
+    tmp = tmp_path_factory.mktemp("harvest_tracks")
+    hv.WORK = tmp / "work"
+    store = hv.LocalStore(tmp / "dataset")
+    rows = bollywood_rows(4)
+    h = hv.Harvester("fixture_tracks", [], store, global_keys={rows[0]["key"]}, fixture=True, runner="test")
+    h.tracks = rows + [dict(rows[1])]
+    h.no_lyrics = True
+    pacer = hv._ITUNES_LAST[0]
+    manifest = h.run()
+    return h, store, manifest, rows, pacer
+
+
+def test_tracks_shard(tracks_shard):
+    h, store, m, rows, pacer = tracks_shard
+    assert hv._ITUNES_LAST[0] == pacer  # the pacer moves on every iTunes request
+    assert m["source"] == "tracks" and m["artists"] == 0
+    dropped = {json.loads(l)["key"] for l in (store.root / m["files"]["dropped"]).read_text(encoding="utf-8").splitlines()}
+    assert m["keys"] == [r["key"] for r in rows[1:] if r["key"] not in dropped] and m["keys"]
+    feats = [json.loads(l) for l in gzip.open(store.root / m["files"]["features"], "rt", encoding="utf-8")]
+    assert all(not {"film", "film_year", "collection_id", "discovery_source"} & set(r) for r in feats)
+    assert all(r["language"] == "hi" and r["genre"] == "Bollywood" for r in feats)
+    assert not [s for s in h.songs if (hv.PREVIEWS / f"{s['itunes_id']}.m4a").exists()]
+
+
+@pytest.mark.skipif(not CATALOG.exists(), reason="catalog_features.jsonl not on this machine")
+def test_tracks_shard_fields_match_catalogue(tracks_shard):
+    _, store, m, _, _ = tracks_shard
+    with open(CATALOG, encoding="utf-8") as f:
+        want = next(set(json.loads(l)) for l in f if not json.loads(l).get("has_lyrics"))
+    for r in (json.loads(l) for l in gzip.open(store.root / m["files"]["features"], "rt", encoding="utf-8")):
+        assert set(r) == want, (r["key"], sorted(want - set(r)), sorted(set(r) - want))
+
+
+def test_run_shards_tracks_spec(tmp_path, monkeypatch):
+    monkeypatch.setattr(hv, "WORK", tmp_path / "work")
+    store = hv.LocalStore(tmp_path / "dataset")
+    rows = bollywood_rows(5)
+    d = tmp_path / "dataset" / "discovery" / "bollywood"
+    d.mkdir(parents=True)
+    (d / "tracks.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    spec = {"tracks": "discovery/bollywood/tracks.jsonl", "shard_size": 3,
+            "shards": [{"shard": "b00000", "start": 0, "end": 3, "source": "tracks"},
+                       {"shard": "b00001", "start": 3, "end": 5, "source": "tracks"}]}
+    (d / "shards.json").write_text(json.dumps(spec), encoding="utf-8")
+    seen = []
+
+    class StageAOnly(hv.Harvester):
+        def run_rest(self):
+            seen.append((self.shard, [s["key"] for s in self.songs], {s["_film"] for s in self.songs}))
+            return {"shard": self.shard, "songs": len(self.songs), "dropped": 0, "sha256": {}, "describe_commit": "x",
+                    "date": "d", "runner": self.runner, "keys": [s["key"] for s in self.songs],
+                    "itunes_ids": [s["itunes_id"] for s in self.songs]}
+
+    pacer = hv._ITUNES_LAST[0]
+    done = hv.run_shards(store, "box", 2, harvester_cls=StageAOnly, no_lyrics=True, spec_path="discovery/bollywood/shards.json")
+    assert [x[0] for x in seen] == ["b00000", "b00001"] and len(done) == 2
+    assert seen[0][1] == [r["key"] for r in rows[:3]] and seen[1][1] == [r["key"] for r in rows[3:]]
+    assert all(x[2] == {"Aashiqui 2"} for x in seen)
+    assert hv._ITUNES_LAST[0] == pacer
+    assert set(hv.finished_shards(store)) == {"b00000", "b00001"}
+    keys = store.read_text(f"{hv.PREFIX}/keys.txt")
+    assert all(f"{r['key']}\t{r['itunes_id']}" in keys for r in rows)

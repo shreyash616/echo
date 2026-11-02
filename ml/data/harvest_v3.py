@@ -11,7 +11,10 @@ Stages A to F a shard (README c2f8090: E overlapped with B to D, the next shard'
               shards' A never run at once; exponential backoff on 403 / 429. With --shards N > 1, when a
               shard's A finishes the next shard is claimed and its A runs in a thread under this shard's B
               to F, deduplicated against the global set and this shard's A songs.
-  B fetch     previews to ml/data/previews/<itunes_id>.m4a, 8 connections, one retry; failures to the
+              A tracks-source shard (a spec entry with "source": "tracks", WP6-IN) takes its songs from rows
+              [start:end] of the spec's tracks file instead, with the same deduplication and no iTunes call;
+              the rows' discovery fields (film, film_year, ...) stay out of the features file.
+  B fetch    previews to ml/data/previews/<itunes_id>.m4a, 8 connections, one retry; failures to the
               shard's dropped list with the reason.
   C describe  describe_audio over a pool of 10 workers (redescribe_catalog._describe_one, the P4 path),
               with the current catalogue's header cut points.
@@ -34,7 +37,8 @@ Stages A to F a shard (README c2f8090: E overlapped with B to D, the next shard'
               then, except for the fixture, the shard joins catalog/v3/MANIFEST.json and its keys
               catalog/v3/keys.txt; the shard's previews are deleted.
 
-Resume: --next reads catalog/v3/MANIFEST.json and discovery/shards.json, takes the lowest shard that is
+Resume: --next reads catalog/v3/MANIFEST.json and the shard spec (--spec, default discovery/shards.json; the
+Bollywood tracks shards are discovery/bollywood/shards.json), takes the lowest shard that is
 neither finished nor claimed by another runner within 6 hours (catalog/v3/claims/<runner>.<shard>.json), and
 runs it from stage A. A runner holds at most two claims (the running shard and the one whose A runs under
 it); a crash leaves both, and a restart takes its own claims first, the lower one first, each from stage A.
@@ -98,6 +102,10 @@ LYRIC_ERROR_SHARE = 0.02        # another pass while the rows in error exceed th
 LYRIC_503_BREAKER = 0.5         # the passes stop once LRCLIB answers 502 / 503 / 504 to this share of a pass's calls
 SHED_STATUS = [f"{e} {c}" for e in ("get", "search") for c in (502, 503, 504)]  # README ba79bed
 LYRIC_BREAKER_MIN_CALLS = 300   # ... counted from this many calls into the pass (README 045f348)
+SPEC = "discovery/shards.json"
+# stage A's song fields, in resolve's order; a tracks row carries these plus its discovery fields
+SONG_FIELDS = ("id", "itunes_id", "deezer_id", "key", "title", "artist", "album", "albumArtUrl", "previewUrl",
+               "durationMs", "genre", "year", "decade")
 STALE_CLAIM_S = 6 * 3600
 MAX_CLAIMS = 2                  # the running shard and the next shard's stage A
 USER_AGENT = "echo-harvest-v3/1.0 (feel-based music discovery)"
@@ -261,6 +269,7 @@ class Harvester:
         self.seconds_other: dict[str, float] = {}
         self.a_overlapped = False
         self.no_lyrics = False
+        self.tracks: list[dict] | None = None  # a tracks-source shard's rows (WP6-IN); None resolves self.artists
         self.songs: list[dict] = []
         self.dropped: list[dict] = []
         self.unresolved: list[dict] = []
@@ -351,6 +360,23 @@ class Harvester:
                     kept += 1
                 self.log.info("A %s: iTunes artist %s, %d songs", name, match["artistId"], kept)
         self.log.info("A: %d songs from %d artists, %d unresolved", len(self.songs), len(self.artists), len(self.unresolved))
+
+    def resolve_tracks(self) -> None:
+        """Stage A for a tracks-source shard: the spec's rows, deduplicated as resolve does, no iTunes call. The
+        discovery fields are kept with a leading underscore, so F leaves them out of the features file."""
+        seen_keys, seen_ids = set(), set()
+        for t in self.tracks:
+            key, tid = t["key"], str(t["itunes_id"])
+            if key in self.global_keys or key in seen_keys or tid in self.global_itunes or tid in seen_ids:
+                continue
+            seen_keys.add(key)
+            seen_ids.add(tid)
+            song = {k: t[k] for k in SONG_FIELDS}
+            song.update({f"_{k}": v for k, v in t.items() if k not in SONG_FIELDS})
+            song["_artist_deezer_id"] = None
+            self.songs.append(song)
+        self.log.info("A: %d songs from %d tracks rows, %d already in the catalogue or repeated",
+                      len(self.songs), len(self.tracks), len(self.tracks) - len(self.songs))
 
     # ---- B ---------------------------------------------------------------------------------------
     def fetch(self) -> None:
@@ -613,6 +639,7 @@ class Harvester:
                 f.write(json.dumps(d, ensure_ascii=False) + "\n")
         manifest = {
             "shard": self.shard, "fixture": self.fixture, "runner": self.runner,
+            "source": "artists" if self.tracks is None else "tracks",
             "artists": len(self.artists), "first_deezer_id": self.artists[0].get("deezer_id") if self.artists else None,
             "last_deezer_id": self.artists[-1].get("deezer_id") if self.artists else None,
             "artists_unresolved": len(self.unresolved), "songs": len(self.songs), "dropped": len(self.dropped),
@@ -657,8 +684,12 @@ class Harvester:
         if free < rc.MIN_FREE_BYTES:
             self.log.info("shard %s not started: %.1f GB free on the previews drive, under 8 GB", self.shard, free / 1024 ** 3)
             raise SystemExit(f"{free / 1024 ** 3:.1f} GB free < 8 GB (rule 23)")
-        self.log.info("shard %s: %d artists, runner %s, %.1f GB free", self.shard, len(self.artists), self.runner, free / 1024 ** 3)
-        self._timed("A", self.resolve)
+        if self.tracks is None:
+            self.log.info("shard %s: %d artists, runner %s, %.1f GB free", self.shard, len(self.artists), self.runner, free / 1024 ** 3)
+            self._timed("A", self.resolve)
+        else:
+            self.log.info("shard %s: %d tracks rows, runner %s, %.1f GB free", self.shard, len(self.tracks), self.runner, free / 1024 ** 3)
+            self._timed("A", self.resolve_tracks)
 
     def run_rest(self) -> dict:
         """B to F, with E's fetch in a thread from the start of B (README c2f8090)."""
@@ -786,28 +817,39 @@ def global_seen(store) -> tuple[set[str], set[str]]:
     return keys, ids
 
 
-def discovery_shard_artists(store, shard: str) -> list[dict]:
-    spec = store.read_json("discovery/shards.json")
+def discovery_shard_artists(store, shard: str, spec_path: str = SPEC) -> list[dict]:
+    spec = store.read_json(spec_path)
     rows = [json.loads(l) for l in (store.read_text("discovery/artists.jsonl") or "").splitlines() if l.strip()]
     s = next(x for x in spec["shards"] if x["shard"] == shard)
     return rows[s["start"]:s["end"]]
 
 
-def run_shards(store, runner: str, count: int = 1, harvester_cls=Harvester, no_lyrics: bool = False) -> list[dict]:
+def shard_tracks(store, spec: dict, shard: str) -> list[dict]:
+    """A tracks-source shard's rows: [start:end] of the spec's tracks file (WP6-IN)."""
+    rows = [json.loads(l) for l in (store.read_text(spec["tracks"]) or "").splitlines() if l.strip()]
+    s = next(x for x in spec["shards"] if x["shard"] == shard)
+    return rows[s["start"]:s["end"]]
+
+
+def run_shards(store, runner: str, count: int = 1, harvester_cls=Harvester, no_lyrics: bool = False,
+               spec_path: str = SPEC) -> list[dict]:
     """Up to `count` shards in this process. When a shard's A finishes and more are wanted, the next shard is
     claimed and its A runs in a thread under this shard's B to F (README c2f8090), deduplicated against the
     global keys and this shard's A songs, which reach keys.txt only when this shard finishes."""
-    spec = store.read_json("discovery/shards.json")
+    spec = store.read_json(spec_path)
     if not spec:
-        raise RuntimeError("discovery/shards.json not on the dataset yet")
+        raise RuntimeError(f"{spec_path} not on the dataset yet")
     ids = [s["shard"] for s in spec["shards"]]
+    source = {s["shard"]: s.get("source", "artists") for s in spec["shards"]}
 
     def start(shard: str, extra_keys: set[str], extra_ids: set[str]):
         claim(store, shard, runner)
         keys, itunes = global_seen(store)
-        h = harvester_cls(shard, discovery_shard_artists(store, shard), store, keys | extra_keys, itunes | extra_ids,
-                          runner=runner)
+        tracks = shard_tracks(store, spec, shard) if source[shard] == "tracks" else None
+        artists = [] if tracks is not None else discovery_shard_artists(store, shard, spec_path)
+        h = harvester_cls(shard, artists, store, keys | extra_keys, itunes | extra_ids, runner=runner)
         h.no_lyrics = no_lyrics
+        h.tracks = tracks
         return h
 
     shard = next_shard(store, ids, runner)
@@ -859,18 +901,21 @@ def main() -> None:
     ap.add_argument("--store", default="dataset", help="'dataset', or a local directory")
     ap.add_argument("--max-artists", type=int, default=0, help="first N artists of the shard file only")
     ap.add_argument("--no-lyrics", action="store_true", help="skip E's fetch; songs without a file go to the error list")
+    ap.add_argument("--spec", default=SPEC, help="with --next: the shard spec on the store (WP6-IN: discovery/bollywood/shards.json)")
     args = ap.parse_args()
     store = DatasetStore() if args.store == "dataset" else LocalStore(Path(args.store))
     if args.shard_file:
         spec = json.loads(Path(args.shard_file).read_text(encoding="utf-8"))
-        artists = spec["artists"][:args.max_artists] if args.max_artists else spec["artists"]
+        artists = spec.get("artists", [])
+        artists = artists[:args.max_artists] if args.max_artists else artists
         # a named shard is harvested and uploaded under its own name only: no global manifest, no keys
         h = Harvester(spec["shard"], artists, store, fixture=True, runner=args.runner)
         h.no_lyrics = args.no_lyrics
+        h.tracks = spec.get("tracks")  # a tracks-source fixture: {'shard': id, 'tracks': [...]}
         manifest = h.run()
         print(json.dumps({k: v for k, v in manifest.items() if k not in ("keys", "itunes_ids")}, indent=1, ensure_ascii=False))
         return
-    for manifest in run_shards(store, args.runner, args.shards, no_lyrics=args.no_lyrics):
+    for manifest in run_shards(store, args.runner, args.shards, no_lyrics=args.no_lyrics, spec_path=args.spec):
         print(json.dumps({k: v for k, v in manifest.items() if k not in ("keys", "itunes_ids")}, indent=1, ensure_ascii=False))
 
 

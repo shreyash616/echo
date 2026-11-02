@@ -1384,3 +1384,58 @@ Found while doing it, not changed (backend):
 - `/api/identify` returns no recommendations for a clip it cannot identify (`mic_recording`), on both pages.
 - No artist, album or paged-search endpoint; the artist page is capped at the 20 songs search returns.
 - With the export mounted at `/`, unknown `/api/...` paths answer with the web app's 404 page, not JSON.
+
+## Packet WP6-IN: Bollywood film soundtracks (README 2ba543e)
+
+**Files.** `ml/data/discover_bollywood.py` (new), `ml/data/harvest_v3.py` (stage A, the spec and the shard-file only),
+`tests/test_discover_bollywood.py` (new), `tests/test_harvest_shard.py` (a tracks-source shard), `tests/fixtures/bollywood/`
+(saved wikitext for 1975, 1994, 2013 and 2025; iTunes India answers for Sholay, Aashiqui 2 and Kishore Kumar, the last
+cut to 60 results), `SCALE_PROGRESS.md`.
+
+**Written outside the running checkout.** The a-run's describe pool is made each shard (`harvest_v3.py:394`, `mp.Pool`
+with spawn), and each spawned worker imports `harvest_v3.py` from disk again. So the code was written and tested in a
+second worktree on this box, and the runner's checkout stays at `2ba543e` with `harvest_v3.py` as it was; it is pulled
+only when the a-run stops at the switch. Discovery runs from the second worktree.
+
+**Discovery as written.**
+- Films: italic wikilinks inside the year's tables, label first, `(<year> film)` and `(film)` stripped. `<ref>` tags and
+  `efn`, `refn`, `cite`, `sfn` templates are removed first: 2025's list names *Hindustan Times* in an italic link inside an
+  `efn` footnote. 81, 113, 119 and 126 films for 1975, 1994, 2013 and 2025.
+- Albums, depth, filters, cap, output and pacing as the packet says. The album search keeps `wrapperType` collection only.
+  The depth list is the 50 names in 2ba543e first, then every album and song credit in order of appearance, each name
+  searched once. I did not add names from the harvest's genre data; the credits of the accepted albums extend the list.
+- Every answer is cached under `ml/data/bollywood_work/cache`, so a crash costs no request on rerun.
+  `ml/data/bollywood_work/PAUSE` holds the iTunes and Wikipedia requests while it exists.
+- Estimate, not measured: about 110 films a year, so about 6,300 album searches, then the lookups and the name
+  searches, at 7.5 s each: about a day.
+
+**Stage A.** A spec entry with `"source": "tracks"` gives the harvester rows `[start:end]` of the spec's `tracks` file;
+`resolve_tracks` deduplicates them against `keys.txt` and the shard as `resolve` does, since the a-run adds keys after
+discovery reads them, and sends no iTunes request. `--spec` picks the spec (default `discovery/shards.json`).
+`--shard-file` also takes `{"shard": id, "tracks": [...]}` for a tracks-source fixture. The shard manifest gains
+`"source"`.
+
+**One departure, asked in the README.** The packet puts `film`, `film_year`, `collection_id` and `discovery_source` on
+the rows. `tests/test_harvest_shard.py:85` (`test_fields_match_catalogue`) asserts a shard row has exactly the
+catalogue's fields. So stage A keeps them as `_film` and the rest, and F leaves `_` fields out of the features file
+(`harvest_v3.py:635`). They stay in `discovery/bollywood/tracks.jsonl` by iTunes id.
+
+**Conflict, not changed, asked in the README.** `next_shard` (`harvest_v3.py:777`) resumes the runner's own unfinished
+claims first, whatever the spec. Stopping the a-run after `finish()` leaves the claim of the next a-shard, whose stage A
+ran under the finished one. The b-run's first `--next` would take that a-shard and stop at `source[shard]` (KeyError) in
+`run_shards`.
+
+**Verification** (second worktree; `ml/inference/header.json` and `ml/data/catalog_features.jsonl`, both untracked, copied
+from the runner's checkout for the shard tests):
+
+```
+$ py -m pytest -q tests/test_discover_bollywood.py tests/test_harvest_resume.py
+16 passed, 1 warning in 22.48s
+
+$ py -m pytest -q tests/test_harvest_shard.py -k tracks
+3 passed, 4 deselected, 1 warning in 30.87s
+```
+
+The warning is timm's FutureWarning, as before. The tracks shard was 4 Aashiqui 2 songs with previews, one of them
+already in the catalogue and one repeated, run with `--no-lyrics`: 3 songs, `hi` on each, no iTunes request.
+The full fixture re-run with the CLAP SHA256 check comes after discovery, as the packet orders.
