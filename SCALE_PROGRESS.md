@@ -1356,3 +1356,7 @@ The owner could not find a playlist made with the web page's Create Spotify Play
 checked a response, so it showed "Playlist created" when Spotify had refused. Fixed there only: the two new endpoints, and each
 response checked with Spotify's error shown. Inline script parses (`node --check`); not tested against Spotify, which needs the
 owner's login. Harvester and WP6 run not touched.
+
+Deployed on the owner's say, outside a packet (rule 20a): Deploy run 41476064249 at `d150967`, both jobs success. The only
+backend change since the last deploy (`7dbde4c`, 2026-10-30) was this one. At 21:25 IST the live page carries `v1/me/playlists`
+and `/api/health` reads `{"status":"ok","recommender_loaded":true}`.
