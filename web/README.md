@@ -11,7 +11,6 @@ serves from the Hugging Face Space. It replaced the old single-file page, `backe
 | `/song/?id=<track id>&key=<artist:title>&d=<0.50–0.95>` | A song and its matches (`d` only when not the default 0.70) |
 | `/search/?q=<query>` | Up to 20 songs for a query |
 | `/artist/?name=<artist>` | That artist's songs among the top 20 search results (there is no artist endpoint) |
-| `/visualizations/` | Model visualizations (images from `/static/`) |
 
 Song ids are in the query string because a static export cannot pre-build a page per song.
 
@@ -22,7 +21,7 @@ npm install
 npm run dev
 ```
 
-`next dev` proxies `/api` and `/static` to the live Space; set `ECHO_BACKEND` to use another backend.
+`next dev` proxies `/api` to the live Space; set `ECHO_BACKEND` to use another backend.
 
 ## Build
 
@@ -32,7 +31,7 @@ npm run build
 ```
 
 The build writes `out/`. The manual Deploy workflow builds it and copies it to `backend/web`, which
-`backend/main.py` mounts at `/` (after `/api` and `/static`).
+`backend/main.py` mounts at `/` (after `/api`).
 
 ## Spotify
 

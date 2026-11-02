@@ -54,13 +54,8 @@ app.add_middleware(
 
 app.include_router(router)
 
-# Mount the static images (model visualizations) and the web app
-STATIC_DIR = Path(__file__).parent / "static"
 # The Next.js web app (web/), as a static export the Deploy workflow builds and copies here; not in git
 WEB_DIR = Path(__file__).parent / "web"
-if STATIC_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-
 if WEB_DIR.exists():
-    # Last, so /api and /static match first; html=True serves song/index.html for /song/ and 404.html
+    # Last, so /api matches first; html=True serves song/index.html for /song/ and 404.html
     app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
