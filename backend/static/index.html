@@ -1993,6 +1993,16 @@
       await initiateSpotifyAuth(clientId, redirectUri);
     });
 
+    // Spotify's own error text from a failed response, e.g. "403: User not registered in the Developer Dashboard"
+    async function spotifyError(res) {
+      let msg = res.statusText;
+      try {
+        const body = await res.json();
+        if (body.error) msg = body.error.message || body.error_description || body.error;
+      } catch (e) {}
+      return `${res.status}: ${msg}`;
+    }
+
     async function executeCreateSpotifyPlaylist(token, seedTitle, tracks) {
       createSpotifyPlaylistBtn.disabled = true;
       spotifyBtnText.textContent = "Creating in Spotify...";
@@ -2013,11 +2023,12 @@
           else spotifyModal.style.display = 'flex';
           return;
         }
-        const me = await meRes.json();
+        if (!meRes.ok) throw new Error(await spotifyError(meRes));
 
-        // 2. Create the playlist in the user's account
+        // 2. Create the playlist in the user's account (POST /users/{id}/playlists was removed for
+        // development-mode apps in February 2026; /me/playlists replaces it)
         const playlistName = `Echo: ${seedTitle} Mix`;
-        const createRes = await fetch(`https://api.spotify.com/v1/users/${me.id}/playlists`, {
+        const createRes = await fetch('https://api.spotify.com/v1/me/playlists', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -2029,6 +2040,7 @@
             public: true
           })
         });
+        if (!createRes.ok) throw new Error(await spotifyError(createRes));
         const playlist = await createRes.json();
 
         // 3. Search Spotify track URIs for each track concurrently
@@ -2063,9 +2075,9 @@
 
         const trackUris = (await Promise.all(searchPromises)).filter(Boolean);
 
-        // 4. Add tracks to playlist
+        // 4. Add tracks to playlist (/tracks was renamed /items in February 2026)
         if (trackUris.length > 0) {
-          await fetch(`https://api.spotify.com/v1/playlists/${playlist.id}/tracks`, {
+          const addRes = await fetch(`https://api.spotify.com/v1/playlists/${playlist.id}/items`, {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -2073,10 +2085,11 @@
             },
             body: JSON.stringify({ uris: trackUris })
           });
+          if (!addRes.ok) throw new Error("playlist made but songs not added, " + await spotifyError(addRes));
         }
 
         // 5. Open newly created playlist in Spotify
-        showToast("Playlist created in Spotify! Opening...");
+        showToast(`Playlist created in Spotify with ${trackUris.length} of ${tracks.length} songs! Opening...`);
         if (playlist.external_urls && playlist.external_urls.spotify) {
           window.open(playlist.external_urls.spotify, '_blank');
         }

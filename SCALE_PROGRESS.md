@@ -1347,3 +1347,12 @@ and matches the public write-up's builds, but that is not proof.
 **Start.** 15:46:34, `--next --shards 184 --no-lyrics` on `7e090c5` (harvester code unchanged since `9294978`), one runner, both
 windows up, log `wp6_runs_2.out`. a00026 claimed again and in stage A at 15:46:49, a00027 next. Memory sampler and boundary loop
 running. The boundary line carries process objects and live processes.
+
+### Noticed: Spotify playlist button made nothing, fixed on the owner's request (outside WP6)
+
+The owner could not find a playlist made with the web page's Create Spotify Playlist button. Spotify removed
+`POST /users/{id}/playlists` and `POST /playlists/{id}/tracks` for development-mode apps in February 2026 (replacements
+`POST /me/playlists` and `POST /playlists/{id}/items`), and `executeCreateSpotifyPlaylist` in `backend/static/index.html` never
+checked a response, so it showed "Playlist created" when Spotify had refused. Fixed there only: the two new endpoints, and each
+response checked with Spotify's error shown. Inline script parses (`node --check`); not tested against Spotify, which needs the
+owner's login. Harvester and WP6 run not touched.
