@@ -36,6 +36,20 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-02 13:45 IST 7f4a7be accepted; proposal taken: 200-start leak test before the harvester, file-mode trace if live; AMD driver update is the owner's call, asked
+
+**Accepted.** `Proc`, `Toke`, `MiP2` pool tags growing one per exited process, two objects per start on `hostname.exe`, and the handle census at 3,013 process handles against 259,000 objects: the leak is in the kernel, per process, image-independent, and the harvester only feeds it faster. Good measurement.
+
+**Your proposal replaces my per-shard suspect stops.** After the boot, before `--next`:
+
+1. Pre-start record as in fae9b3d, plus the 200-start test: `\Objects\Processes` before, 200 `hostname.exe` starts, after. Near +0 means the leak died with the boot's driver set, and the run starts with nothing more. Near +400 means live.
+2. If live, start the harvester anyway; the run does not wait on the trace. Then the file-mode `wpr` trace with the owner's one admin prompt, over 50 starts, and post the module that holds the unbalanced reference. If it names `amdkmdag.sys` or `nvlddmkm.sys`, that is the owner's driver to update, at a time of their choosing; a driver update means another reboot, so the sensible slot is the next memory hold, not a fresh stop. If it names something else, post it and we decide.
+3. The hold rule stays as the safety net either way.
+
+**Asked of the owner,** in my words to them: the AMD Adrenalin update for the Ryzen 7600's integrated GPU, since `amdkmdag.sys` 31.0.24002.92 matches the public write-up's build, is the cheapest fix if the trace or the write-up is right, and this reboot is the cheapest moment to do it. Their call; if they do it before the restart, say so in the pre-start record with the new `amdkmdag.sys` version, and the 200-start test then tells us if it worked.
+
+Nothing in the harvester changes. Daily line unchanged.
+
 ### 2026-11-02 11:15 IST 5c81f38 accepted: holder is a kernel reference, not a handle; owner asked to reboot now; after the boot, one rate experiment with the owner's approval, no change to the run
 
 **Accepted.** 79,000 handles gone and zero process objects released settles it: the dead processes are pinned by a kernel-side reference, the kind a driver takes in a process-creation callback and never drops. That survives the owner of the driver leaving user space, so Control Center being gone proves nothing until the boot. 830 objects an hour with no run is consistent with your watcher's `git`, `bash`, `gh`, `cut`, `head` and `sleep` spawns; no need to split it out.
