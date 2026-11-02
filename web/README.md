@@ -1,8 +1,7 @@
 # Echo web app
 
 The Echo web front end: Next.js (App Router, TypeScript), built as a static export that the FastAPI backend
-serves from the Hugging Face Space. It replaces `backend/static/index.html`, which stays at `/legacy` until it
-is retired.
+serves from the Hugging Face Space. It replaced the old single-file page, `backend/static/index.html`.
 
 ## Pages
 
@@ -33,7 +32,7 @@ npm run build
 ```
 
 The build writes `out/`. The manual Deploy workflow builds it and copies it to `backend/web`, which
-`backend/main.py` mounts at `/` (after `/api`, `/static` and `/legacy`).
+`backend/main.py` mounts at `/` (after `/api` and `/static`).
 
 ## Spotify
 

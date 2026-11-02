@@ -1,9 +1,8 @@
 import { pageUrl } from "./api";
 import type { Track } from "./types";
 
-// Spotify playlist export, ported from backend/static/index.html (with the d150967 fix: /me/playlists,
-// /playlists/{id}/items, every response checked). PKCE per RFC 7636. localStorage keys are the old page's,
-// so a login started on either page completes on this one.
+// Spotify playlist export, ported from the old single-file page (with the d150967 fix: /me/playlists,
+// /playlists/{id}/items, every response checked). PKCE per RFC 7636. localStorage keys are the old page's.
 
 export const LS = {
   token: "spotify_token",

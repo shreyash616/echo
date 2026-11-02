@@ -16,7 +16,6 @@ files_to_upload = [
     ("backend/app/api/routes.py", "app/api/routes.py"),
     ("backend/requirements.txt", "requirements.txt"),
     ("backend/startup.sh", "startup.sh"),
-    ("backend/static/index.html", "static/index.html"),
 ]
 
 dataset_id = "shreyash616/echo-ml-artifacts"

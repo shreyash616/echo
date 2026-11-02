@@ -53,6 +53,8 @@ jobs:
               repo_id='shreyash616/echo-backend',
               repo_type='space',
               ignore_patterns=['**/__pycache__/**', '**/*.pyc', '**/.env*'],
+              # The old single-file page, replaced by the web app; upload_folder never removes files on its own
+              delete_patterns=['static/index.html'],
               commit_message='Deploy backend from GitHub Actions'
           )
           "
