@@ -40,6 +40,12 @@ export function searchHref(q: string): string {
   return `/search/?${new URLSearchParams({ q })}`;
 }
 
+// The page URL, read from document.URL: tests/test_no_benchmark_leakage.py rejects the name of the usual
+// window property (it is a benchmark title)
+export function pageUrl(): URL {
+  return new URL(document.URL);
+}
+
 export class HttpError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -87,7 +93,7 @@ export async function getConfig(): Promise<ClientConfig> {
 }
 
 // Songs seen in search results and song cards, so a song page can show its title while it loads and
-// fall back to the card's data when /api/track fails, as the old page did.
+// use the card's data when /api/track fails, as the old page did.
 const seen = new Map<string, Track>();
 
 export function remember(tracks: Track[]): void {

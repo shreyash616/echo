@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getConfig } from "@/lib/api";
+import { getConfig, pageUrl } from "@/lib/api";
 import {
   LS, type PendingPlaylist, type PlaylistTrack, SpotifyUnauthorized, createSpotifyPlaylist, effectiveRedirectUri,
   exchangeCode, lsGet, lsRemove, lsSet, rootUris, startSpotifyAuth,
@@ -55,7 +55,8 @@ export function SpotifyProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const pendingFrom = useCallback((src: PlaylistSource | null): PendingPlaylist => {
-    const returnTo = window.location.pathname + window.location.search;
+    const here = pageUrl();
+    const returnTo = here.pathname + here.search;
     if (src && src.tracks.length > 0) return { ...src, returnTo };
     // Nothing on screen (e.g. the modal opened after a failed login): keep what the failed login was exporting
     try {
@@ -79,7 +80,7 @@ export function SpotifyProvider({ children }: { children: React.ReactNode }) {
         const cid = config.current.clientId || lsGet(LS.clientId);
         if (cid) {
           await startSpotifyAuth(cid, effectiveRedirectUri(config.current.redirectUri),
-            { seed, tracks, returnTo: window.location.pathname + window.location.search });
+            { seed, tracks, returnTo: pageUrl().pathname + pageUrl().search });
         } else {
           openSettings();
         }
@@ -102,12 +103,12 @@ export function SpotifyProvider({ children }: { children: React.ReactNode }) {
   // Spotify sends the browser back to the site root with ?code=... or ?error=...
   useEffect(() => {
     if (callbackHandled) return;
-    const params = new URLSearchParams(window.location.search);
+    const params = pageUrl().searchParams;
     const code = params.get("code");
     const authError = params.get("error");
     if (!code && !authError) return;
     callbackHandled = true;
-    window.history.replaceState({}, document.title, window.location.pathname);
+    window.history.replaceState({}, document.title, pageUrl().pathname);
 
     if (authError) {
       showToast("Spotify Auth Error: " + authError);

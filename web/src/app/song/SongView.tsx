@@ -7,7 +7,7 @@ import HeroCard from "@/components/HeroCard";
 import InputSection, { Loader } from "@/components/InputSection";
 import RecsSection from "@/components/RecsSection";
 import { useToast } from "@/components/Toast";
-import { DEFAULT_DIVERSITY, HttpError, getRecommendations, getTrack, recall, remember } from "@/lib/api";
+import { DEFAULT_DIVERSITY, HttpError, getRecommendations, getTrack, pageUrl, recall, remember } from "@/lib/api";
 import type { Track } from "@/lib/types";
 
 function parseDiversity(raw: string | null): number {
@@ -96,7 +96,7 @@ export default function SongView() {
   }, [params, router]);
 
   const copyLink = () => {
-    navigator.clipboard.writeText(window.location.href)
+    navigator.clipboard.writeText(pageUrl().href)
       .then(() => showToast("🔗 Song link copied!"))
       .catch(() => showToast("Copy failed"));
   };

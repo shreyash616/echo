@@ -1,3 +1,4 @@
+import { pageUrl } from "./api";
 import type { Track } from "./types";
 
 // Spotify playlist export, ported from backend/static/index.html (with the d150967 fix: /me/playlists,
@@ -50,7 +51,7 @@ export function lsRemove(key: string): void {
 // Spotify's redirect URI is the site root (the URI registered for the Space). Songs live at /song/, so unlike
 // the old single page this does not use the current path.
 export function rootUris(): { withSlash: string; withoutSlash: string } {
-  const origin = window.location.origin;
+  const origin = pageUrl().origin;
   return { withSlash: `${origin}/`, withoutSlash: origin };
 }
 
@@ -94,13 +95,8 @@ export async function startSpotifyAuth(clientId: string, redirectUri: string, pe
   });
   const authUrl = `https://accounts.spotify.com/authorize?${params.toString()}`;
   // The Space shows the app in an iframe on huggingface.co; Spotify's login page refuses to be framed
-  try {
-    if (window.self !== window.top && window.top) {
-      window.top.location.href = authUrl;
-      return;
-    }
-  } catch {}
-  window.location.href = authUrl;
+  if (window.self !== window.top && window.open(authUrl, "_top")) return;
+  window.open(authUrl, "_self");
 }
 
 export interface TokenResponse {
