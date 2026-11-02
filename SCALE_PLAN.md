@@ -404,6 +404,7 @@ dataset, upload, redeploy. Files: `ml/inference/build_index_v3.py` (bug fixes on
 Verify and paste: the whole of section 8's acceptance table, with every command, plus the blind
 listen sheet (40 rows: world, hidden title revealed after rating, yes or no).
 Gate: section 8, every row. Recall at 20 is reported without a threshold.
+Amended 2026-11-02 (owner's decision): recommendations come from the catalogue only. The side index of on-the-fly records (`recommender.py` `_side_index`, `_extra_records` as candidates, `routes.py` `/api/track` and the cold-seed path writing to them) is removed from candidate retrieval; a seed outside the catalogue is still resolved and described so it can be scored against catalogue songs, but it is never itself a candidate and nothing is persisted to `extra_records.jsonl`. Found 2026-11-02: the side path stored each record twice in the dict and once in the index, so `extra_list[s_idx]` resolved to the wrong song (`recommender.py:1172-1176`); the fix is removal, not repair. Test: a non-catalogue seed returns only catalogue ids, and the debug pool has no id outside `strings.parquet`.
 
 A packet's gate is checked by the owner before `GO`. The owner may also run
 `ml/experiments/offline_rerank/report.py` and the live tests independently at any time; a
