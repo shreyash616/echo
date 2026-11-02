@@ -53,9 +53,9 @@ jobs:
               repo_id='shreyash616/echo-backend',
               repo_type='space',
               ignore_patterns=['**/__pycache__/**', '**/*.pyc', '**/.env*'],
-              # backend/static (the old page, then the visualization images) is gone; upload_folder never removes
-              # files on its own
-              delete_patterns=['static/**'],
+              # upload_folder never removes files on its own: drop backend/static (gone) and any web/ file the new
+              # export no longer has (removed pages, old _next chunks); files being uploaded are never deleted
+              delete_patterns=['static/**', 'web/**'],
               commit_message='Deploy backend from GitHub Actions'
           )
           "
