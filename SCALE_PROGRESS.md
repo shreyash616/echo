@@ -1362,3 +1362,25 @@ backend change since the last deploy (`7dbde4c`, 2026-10-30) was this one. At 21
 and `/api/health` reads `{"status":"ok","recommender_loaded":true}`.
 
 **2026-11-02** (23:32 IST, boundary after a00035 at 23:21): 36 shards done, 26 in WP6; 171,568 rows, 124,294 in WP6; 371 dropped, 331 in WP6; free disk 143.7 GB; RAM in use 15.1 GB, available 16 GB; commit 26.2 of 49.1 GB, available 22.9 GB; pool nonpaged 1.01 GB, paged 1.03 GB; latest probe (after a00035) `get 503` 0.75, `get 502` 0; `lyrics.stopped_by` disabled; process objects 353, live 303 at 23:32. Ten boundaries since the restart (a00026 to a00035): process objects 320 to 358, always 50 above live, so no dead-process growth.
+
+### Noticed: web app moved to Next.js on the owner's request (outside WP6), branch `web-nextjs`
+
+The owner asked for the web page (`backend/static/index.html`) as a Next.js app, with routes for songs. Hosting is
+option (a), chosen by the owner: a static export (`web/`) that FastAPI serves from the same Space, songs at
+`/song/?id=...`. New pages: song, search (`/search/?q=`), artist (`/artist/?name=`, built on `/api/search` since
+there is no artist endpoint), visualizations. `backend/main.py` mounts `backend/web` at `/` when present and keeps
+the old page at `/legacy`; the Deploy workflow builds `web/` into `backend/web`; a new `Web` workflow lints and
+builds on PRs. Not deployed. Spotify redirect URI unchanged (site root).
+
+Checked against the live backend through `main.py`'s own mount code: the same hero and all 20 cards as the old page
+on two songs; search, artist, slider, card click, back, record (synthetic tone), settings modal, `?error=` return,
+and the playlist calls against stubbed Spotify responses. The Spotify login itself was not run (owner's account).
+
+Found while doing it, not changed (backend):
+- The old page's Discovery slider showed 0.72 but sent 0.70 (the range input snaps to its 0.05 steps); the new
+  app uses 0.70 and says so.
+- `/api/track` returns Deezer preview links the backend cached when it described the song; they are signed and
+  expire, so some hero previews no longer play (403). The old page shows "Pause" anyway; the new one says so.
+- `/api/identify` returns no recommendations for a clip it cannot identify (`mic_recording`), on both pages.
+- No artist, album or paged-search endpoint; the artist page is capped at the 20 songs search returns.
+- With the export mounted at `/`, unknown `/api/...` paths answer with the web app's 404 page, not JSON.
