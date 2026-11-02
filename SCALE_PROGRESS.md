@@ -1361,6 +1361,8 @@ Deployed on the owner's say, outside a packet (rule 20a): Deploy run 41476064249
 backend change since the last deploy (`7dbde4c`, 2026-10-30) was this one. At 21:25 IST the live page carries `v1/me/playlists`
 and `/api/health` reads `{"status":"ok","recommender_loaded":true}`.
 
+**2026-11-02** (23:32 IST, boundary after a00035 at 23:21): 36 shards done, 26 in WP6; 171,568 rows, 124,294 in WP6; 371 dropped, 331 in WP6; free disk 143.7 GB; RAM in use 15.1 GB, available 16 GB; commit 26.2 of 49.1 GB, available 22.9 GB; pool nonpaged 1.01 GB, paged 1.03 GB; latest probe (after a00035) `get 503` 0.75, `get 502` 0; `lyrics.stopped_by` disabled; process objects 353, live 303 at 23:32. Ten boundaries since the restart (a00026 to a00035): process objects 320 to 358, always 50 above live, so no dead-process growth.
+
 ### Noticed: web app moved to Next.js on the owner's request (outside WP6), branch `web-nextjs`
 
 The owner asked for the web page (`backend/static/index.html`) as a Next.js app, with routes for songs. Hosting is
