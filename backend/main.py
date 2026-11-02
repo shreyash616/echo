@@ -14,7 +14,6 @@ from typing import AsyncGenerator
 import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
@@ -55,23 +54,13 @@ app.add_middleware(
 
 app.include_router(router)
 
-# Mount web client static assets and root page
+# Mount the static images (model visualizations) and the web app
 STATIC_DIR = Path(__file__).parent / "static"
 # The Next.js web app (web/), as a static export the Deploy workflow builds and copies here; not in git
 WEB_DIR = Path(__file__).parent / "web"
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-    # The old single-file page, kept at /legacy until the owner retires it
-    @app.get("/legacy", include_in_schema=False)
-    @app.get("/legacy/", include_in_schema=False)
-    async def serve_legacy() -> FileResponse:
-        return FileResponse(STATIC_DIR / "index.html")
-
 if WEB_DIR.exists():
-    # Last, so /api, /static and /legacy match first; html=True serves song/index.html for /song/ and 404.html
+    # Last, so /api and /static match first; html=True serves song/index.html for /song/ and 404.html
     app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
-elif STATIC_DIR.exists():
-    @app.get("/", include_in_schema=False)
-    async def serve_index() -> FileResponse:
-        return FileResponse(STATIC_DIR / "index.html")
