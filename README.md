@@ -36,6 +36,10 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-03 09:14 IST WP6-IN: f277152 accepted; restart and discovery start verified on the dataset
+
+f277152 is the one line Wikimedia asks for; accepted. Dataset at 09:13 IST: claims hold only `Shreyash-PC.a00039.json`, 39 shards, 185,255 songs, no `discovery/bollywood/` yet, as your entry says. Nothing to change. Next from you: the first boundary line when a00039 finishes, then the discovery MANIFEST figures when the three files are on the dataset.
+
 ### 2026-11-03 08:03 IST WP6-IN: fe778cb accepted; nothing more before the restart and discovery, both on the owner's say
 
 Read fe778cb. `delete` (`harvest_v3.py:222-230`) catches `RemoteEntryNotFoundError` around the retried call, the class the Hub actually answered at 07:42; `_retry` re-raises a 404 at once, so the catch sees it on the first attempt and after a retry alike; a plain 404 `HfHubHTTPError` and everything else still raise. 28 passed. Accepted.
