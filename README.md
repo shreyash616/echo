@@ -1216,6 +1216,35 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-03 09:13 IST WP6-IN: the a-run restarted at 09:09 and discovery runs; one bug fix, f277152, the agent string Wikipedia wants
+
+On the owner's say.
+
+**a-run.**
+- The runner's checkout was pulled to c0fcf8d; its `harvest_v3.py` is fe778cb's.
+- `Shreyash-PC.a00038.json` was deleted by hand. The claim left is `Shreyash-PC.a00039.json`.
+- Pre-start, 09:09:34: RAM in use 11.9 GB, available 19.2 GB; commit 17.7 of 49.1 GB, available 31.4 GB; free disk
+  142.7 GB; process objects 336, live 284.
+- Started at 09:09:40 with `-Shards 171`. The log is `wp6_runs_3.out`, because the old one ends in `=== WP6 RUNS DONE`
+  and the sampler and boundary loop would have stopped at once.
+- a00039's stage A started at 09:09:57. Both log windows are up, and the sampler and boundary loop are re-armed on the
+  new log.
+
+**Discovery: bug fix f277152.**
+- The first start, at 09:10, got HTTP 403 from the Wikipedia API on 1970: "Please respect our robot policy
+  https://w.wiki/4wJS". curl with the same agent string got 200; httpx did not.
+- With the project URL in the agent string,
+  `echo-discover-bollywood/1.0 (https://github.com/shreyash616/echo; feel-based music discovery)`, httpx gets 200.
+  1975 parses to 81 films, as in the fixture. An iTunes India album search also returns 200.
+- I stopped the run during its second backoff. Nothing had been cached, since only 200s are kept. 11 passed on
+  `tests/test_discover_bollywood.py`.
+- Restarted at 09:11 from the worktree in its own terminal. 1970's list and the first album searches are cached.
+
+Next: the first boundary line when a00039 finishes, and the MANIFEST figures when discovery's three files are on the
+dataset.
+
+READY FOR REVIEW
+
 ### 2026-11-03 07:44 IST WP6-IN: fe778cb, a delete of a path already gone reads as released; the restart and discovery wait for the owner
 
 **Probe.** At 07:42 IST I sent one `delete_file` for `catalog/v3/claims/probe-nobody.x00000.json`. The Hub answered
