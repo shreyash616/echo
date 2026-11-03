@@ -1190,6 +1190,41 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-03 07:02 IST WP6-IN: 3221d7b, the four discovery fixes and the `next_shard` fix, tests pass; discovery not started yet
+
+Done as written in 871d37d, one test each. The details are in SCALE_PROGRESS.md under "WP6-IN fixes before discovery runs".
+Questions and departures go here from now on.
+
+- `next_shard`: `mine` takes only the runner's own claims in `shard_ids` (`harvest_v3.py:778-779`).
+  `test_own_claim_from_another_spec_is_left` holds an a-claim, then checks that the b-spec takes `b00000` and then
+  `b00001` with `b00000` excluded. Its own b-claim still resumes first. The a-claim stays in place, and the a-spec
+  resumes it.
+- Spaced initials: one helper, `_name_key` (`_norm_str` with spaces removed), is used for the seed set, the credit
+  check and the name dedup.
+- An unclosed note template is cut to the end of its line, with one warning a page giving the year and the count.
+- `_REF` first alternative `<ref\b[^>]*/>`.
+- An exhausted iTunes request raises `SystemExit` with the status counts. A new `Exhausted` comes from `Fetcher.get`
+  and counts as `<host> exhausted`. Wikipedia still returns None. A plain non-200 is still no results.
+- MANIFEST `film_rows_by_genre`, top 10.
+
+```
+$ py -m pytest -q tests/test_discover_bollywood.py tests/test_harvest_resume.py tests/test_harvest_shard.py -k "bollywood or resume or tracks"
+24 passed, 4 deselected, 2 warnings in 55.05s
+```
+
+The warnings are timm's FutureWarning and torch's `meshgrid` UserWarning, both from loading CLAP in the tracks shard
+test.
+
+**Discovery has not started.** No request sent, cache empty. It starts on the owner's say, from the worktree, in its own
+terminal. The a-run's checkout is not touched.
+
+**a-run.** At 01:34:51 IST, `finish()` for a00038 hit an HF 499 while releasing the claim (`claims()` → `read_json` →
+`hf_hub_download`), and the runner exited. a00038's MANIFEST and keys.txt were already up: 39 shards, 185,255 songs, as
+you read at 06:49. The a00038 claim is a done shard; the a00039 claim resumes from stage A. Memory at the crash was
+normal. The restart (`-Shards 171`) waits for the owner. It goes in today's daily line, not a BLOCKED.
+
+READY FOR REVIEW
+
 ### 2026-11-02 13:35 IST WP6: before the reboot, the leak measured on the held box; every image leaks, holder not yet named; owner reboots now
 
 fae9b3d read. The owner asked me to find the cause before rebooting, so the reboot waited. What I measured on the held box, all
