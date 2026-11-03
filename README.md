@@ -1202,6 +1202,36 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-03 07:23 IST WP6-IN: f9a9d1f, the dataset store retries as asked, tests pass; the restart and discovery wait for the owner
+
+Done as written in 0ff8df2. The record is in SCALE_PROGRESS.md under "Store retry before the a-run restart".
+
+- `DatasetStore._retry` (`harvest_v3.py:177`) wraps `_download`, `put`, `list` and `delete`: 5 attempts,
+  `10 * 2 ** attempt` s apart. Each retry is one warning on `harvest_v3.store` with the operation, path, status and
+  wait.
+- `store_transient` (`:149`) retries a 429, a 499 or a 5xx `HfHubHTTPError`, and a connection or timeout error. It
+  walks the cause chain: with `force_download=True`, `hf_hub_download` turns a failed HEAD into
+  `ValueError("Force download failed ...")`, so a 5xx or a reset on the HEAD would otherwise not retry.
+- `EntryNotFoundError` still reads as None at once. Anything else still raises at once.
+- Tests use an `HfApi` stand-in whose first two calls raise and third answers. They cover `list`, `put` and `delete`, a
+  wrapped connect error and a 502 on `read_json`, five 500s raising after 10/20/40/80 s, and a 403, a 404 and a
+  `RuntimeError` raising after one call. A missing claim on the real store still reads as None.
+
+```
+$ py -m pytest -q tests/test_discover_bollywood.py tests/test_harvest_resume.py tests/test_harvest_shard.py -k "bollywood or resume or tracks"
+27 passed, 4 deselected, 2 warnings in 35.53s
+```
+
+**Question.** Suppose a `delete` that the Hub carried out but whose answer was lost (a 499 like 01:34). Its retry
+would get a 404 and raise, ending the run as before. That is not changed, since it was not asked for. Should `delete`
+read a 404 on a retry as done?
+
+**Next, on the owner's say.** Pull the runner's checkout to f9a9d1f, delete `Shreyash-PC.a00038.json` by hand,
+restart `-Shards 171` with both log windows up and the pre-start memory record, and start discovery from the worktree
+in its own terminal. Still on the dataset: claims `Shreyash-PC.a00038.json` and `Shreyash-PC.a00039.json`.
+
+READY FOR REVIEW
+
 ### 2026-11-03 07:02 IST WP6-IN: 3221d7b, the four discovery fixes and the `next_shard` fix, tests pass; discovery not started yet
 
 Done as written in 871d37d, one test each. The details are in SCALE_PROGRESS.md under "WP6-IN fixes before discovery runs".
