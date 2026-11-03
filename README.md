@@ -36,7 +36,38 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
-### 2026-11-03 10:40 IST PACKET WP6-IN: Bollywood film soundtracks 1970 to today, GO for the discovery script and the tracks-source shard type; the a-run continues untouched until the spec is on the dataset
+### 2026-11-03 07:15 IST WP6-IN: c69e6a2 accepted for the harvester; four discovery fixes and the `next_shard` fix before discovery runs; answers to both questions
+
+Read c69e6a2 and the SCALE_PROGRESS block. The dataset at 06:49 IST: 39 shards, 185,255 songs, claims a00038 and a00039, no `discovery/bollywood/` yet. The a-run is not touched by anything below.
+
+**Channel.** Your two questions were only in SCALE_PROGRESS.md; I found them by diffing the commit. A question or a departure goes in a README entry, the progress file is the record. Also my packet header said 10:40 IST; the commit is 00:54 IST, fixed below.
+
+**Accepted as written.**
+- Stage A for a tracks shard: `resolve_tracks` dedups against `global_keys` and the shard (`harvest_v3.py:364-378`), sends nothing, and `run_shards` only touches the a-path through `source[shard]` (`:843-849`). The shard manifest's `"source"` is right.
+- The `_film` departure, yes: F drops every `_` key at `:635`, so `test_fields_match_catalogue` holds and the film fields stay in `tracks.jsonl` by iTunes id, which is where WP7 reads them if it ever needs them.
+
+**`next_shard` conflict, your fix.** Resume own claims only inside the spec being run. In `next_shard` (`:769`) restrict `mine` to `shard_ids`:
+
+```
+mine = sorted({c["shard"] for c in active if c["runner"] == runner and c["shard"] not in done
+               and c["shard"] in shard_ids} - set(exclude))
+```
+
+Then the switch is: stop the a-run after `finish()`, its overlapped a-claim stays; pull the runner checkout; `--spec discovery/bollywood/shards.json --next --shards <n> --no-lyrics` takes b00000; after the b-run, the default spec resumes that a-claim from stage A as today. Test in `tests/test_harvest_resume.py`: an own claim on a shard outside `shard_ids` is left in place and the lowest unfinished spec shard is returned; and the existing resume tests still pass.
+
+**Discovery: four fixes before it runs, each with a test on the saved fixtures.** All verified against the code, not the docstrings.
+1. Seed credit match misses spaced initials. `accept_album` (`discover_bollywood.py:130`) compares `_norm_str(credit) in seeds`, and `_norm_str` (`harvest_v2.py:148`) deletes punctuation without a space, so "A.R. Rahman" is `ar rahman` and iTunes' "A. R. Rahman" is `a r rahman`; the same pair is also searched twice at `:248-252`. Compare names with spaces removed as well: one helper, `_norm_str(n).replace(" ", "")`, used for the seed set, the credit check and the name dedup. "Mohd. Rafi" still differs from "Mohammed Rafi"; that is fine, the names search covers him.
+2. An unclosed `{{efn`, `{{cite` or similar drops the rest of the page. `_strip_notes` (`:88-104`) scans `j` to the end of the text when `depth` never returns to 0, then `i = j`, so every film after it is lost with no log. On an unbalanced template cut only to the end of that line and log the year once. Test: an unclosed `{{efn` on one row, a film link on a later row, the film is kept.
+3. `_REF` (`:71`) swallows films between a self-closing ref with a `/` in an attribute and the next `</ref>`: `<ref name="a/b"/>` fails `[^>/]*` and the second alternative then runs `.*?</ref>` across the table. First alternative `<ref\b[^>]*/>`. Test: `<ref name="a/b"/>`, a film link, then a `<ref>x</ref>`, both films kept.
+4. An exhausted fetch reads as a miss. `Fetcher.get` returns None after 8 attempts (`:200`) and `itunes` (`:209`) turns it into `[]`, so a 403 wall marks every film it hits unmatched and every name searched, and only the status counts show it. For iTunes, stop the run instead: raise `SystemExit` from `itunes` when `get` was exhausted, with the status counts in the message. The cache (200 only, `:198`) keeps everything fetched, so the rerun costs nothing already fetched. Wikipedia stays as is; `page: false` already records it.
+
+Add to the MANIFEST: film-path rows by track `primaryGenreName`, top 10. An album accepted on a seed credit keeps every track, dubs and dialogue albums included; that count tells us before the harvest whether the `hi` gate is at risk.
+
+**Known, not changed.** The prefix rule accepts "Dil Hai Ke Manta Nahin" (1991) for "Dil" (1990), so `film` and `film_year` are wrong on such rows and the later film reads matched with no new rows. The by-decade count uses the album year when it must; I read the gate on `year`. A title that normalises to empty still costs one album search. `albums_accepted` counts an album once per film that accepts it.
+
+**Order.** Fixes and tests, the resume test, `py -m pytest -q tests/test_discover_bollywood.py tests/test_harvest_resume.py tests/test_harvest_shard.py -k "bollywood or resume or tracks"`, post the counts. If discovery has already started, stop it and restart after the fixes; the cache makes that free. Post the MANIFEST figures (by decade, matched and unmatched films, requests by status, film-path rows by genre) when the three files are on the dataset. The b-run waits for my ack of those figures.
+
+### 2026-11-03 00:54 IST PACKET WP6-IN: Bollywood film soundtracks 1970 to today, GO for the discovery script and the tracks-source shard type; the a-run continues untouched until the spec is on the dataset
 
 The owner's priority: the first users are in India, so Hindi film music has to be deep, not the 20 songs a singer the Deezer graph gives. Checked before writing this: 55 of 60 marquee Bollywood singers and composers are in `discovery/artists.jsonl` and the harvest so far holds 0 to 70 songs each (Rafi, Mukesh, R.D. Burman, A.R. Rahman at 0), capped by `MAX_PER_ARTIST = 20`; iTunes India answers film-title album searches with the soundtrack, genre Bollywood, 11 of 11 tracks with previews on Aashiqui 2 and Sholay (1975) found as a 7-track 1975 album; Wikipedia's per-year Hindi film lists parse to about 80 to 250 titles a year; `language_from_meta` already maps genre Bollywood to `hi`. The full spec is SCALE_PLAN.md **WP6-IN**, inserted before WP7. In short:
 
