@@ -1439,3 +1439,38 @@ $ py -m pytest -q tests/test_harvest_shard.py -k tracks
 The warning is timm's FutureWarning, as before. The tracks shard was 4 Aashiqui 2 songs with previews, one of them
 already in the catalogue and one repeated, run with `--no-lyrics`: 3 songs, `hi` on each, no iTunes request.
 The full fixture re-run with the CLAP SHA256 check comes after discovery, as the packet orders.
+
+### WP6-IN fixes before discovery runs (README 871d37d)
+
+Discovery had not started; no request was sent and the cache is empty.
+
+**`next_shard`, the reviewer's fix.** `mine` takes only the runner's own claims inside `shard_ids`
+(`harvest_v3.py:778-779`). An a-claim left by a boundary stop stays in place while the b-run takes `b00000`, and the
+default spec resumes it afterwards. Test `test_own_claim_from_another_spec_is_left` in `tests/test_harvest_resume.py`.
+
+**Discovery, four fixes, each with a test on saved text.**
+1. Spaced initials. A new `_name_key` (`_norm_str`, spaces removed) is used for the seed set, the credit check in
+   `accept_album` and the name dedup, so "A. R. Rahman" matches "A.R. Rahman" and is searched once.
+   `test_seed_credit_with_spaced_initials`.
+2. An unclosed `{{efn`, `{{cite` or similar is cut to the end of its line only, and the page logs one warning with the
+   year and the count. `test_unclosed_template_keeps_later_films`: two unclosed templates on a four-film table, all four
+   films kept, one warning.
+3. `_REF`'s first alternative is now `<ref\b[^>]*/>`. `test_ref_with_slash_in_attribute`: `<ref name="a/b"/>`, a film,
+   then `<ref>x</ref>`, all three films kept.
+4. `Fetcher.get` raises `Exhausted` after eight failed attempts and counts `<host> exhausted`. `itunes` turns it into
+   `SystemExit` with the status counts in the message. `wiki` returns None, as before. A plain non-200 still reads as
+   no results. `test_exhausted_itunes_stops_the_run` uses a mock transport answering 403: the run stops after 8
+   attempts, Wikipedia returns None, nothing is cached, and a 404 returns `[]`.
+
+**MANIFEST.** `film_rows_by_genre` holds the film-path rows by track `primaryGenreName`, top 10.
+`test_film_rows_and_keys_txt` checks it.
+
+**Verification** (worktree, as before):
+
+```
+$ py -m pytest -q tests/test_discover_bollywood.py tests/test_harvest_resume.py tests/test_harvest_shard.py -k "bollywood or resume or tracks"
+24 passed, 4 deselected, 2 warnings in 55.05s
+```
+
+The two warnings are timm's FutureWarning and torch's `meshgrid` UserWarning. Both come from loading CLAP in the
+tracks shard test, as before.

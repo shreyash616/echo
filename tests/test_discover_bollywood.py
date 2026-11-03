@@ -7,6 +7,13 @@ Asserts:
 - a row is stage A's song plus the discovery fields, and rows without a preview or with an unclean name are skipped;
 - end to end: rows are unique by key and iTunes id and miss catalog/v3/keys.txt, artist rows are Bollywood only,
   the MANIFEST counts agree with the rows, shards.json covers the rows in order, and the cap stops the requests.
+README 871d37d:
+- a seed matches its credit with or without spaced initials ("A.R. Rahman", "A. R. Rahman"), and is searched once;
+- an unclosed note template costs only the rest of its line, logged once a page; a self-closing ref with a "/" in
+  an attribute does not swallow the films up to the next </ref>;
+- an iTunes request that fails eight times stops the run, with the status counts, instead of reading as a miss;
+  Wikipedia's reads as a missing page;
+- the MANIFEST counts film-path rows by genre.
 """
 from __future__ import annotations
 
@@ -25,7 +32,7 @@ FIX = ROOT / "tests" / "fixtures" / "bollywood"
 STAGE_A = {"id", "itunes_id", "deezer_id", "key", "title", "artist", "album", "albumArtUrl", "previewUrl", "durationMs",
            "genre", "year", "decade"}
 EXTRA = {"film", "film_year", "collection_id", "discovery_source"}
-SEEDS = {db._norm_str(s) for s in db.SEED_ARTISTS}
+SEEDS = {db._name_key(s) for s in db.SEED_ARTISTS}
 
 
 def load(name: str) -> dict:
@@ -154,6 +161,7 @@ def test_film_rows_and_keys_txt(tmp_path, monkeypatch):
     assert all(r["film"] == "Aashiqui 2" and r["film_year"] == 2013 for r in film)
     assert len(film) == len(clean_tracks(items)) - 1
     assert m["by_decade"] == {"2010s": len(rows)}
+    assert m["film_rows_by_genre"] == {"Bollywood": len(film)}
 
 
 def test_cap_stops_requests(tmp_path, monkeypatch):
@@ -162,6 +170,47 @@ def test_cap_stops_requests(tmp_path, monkeypatch):
     rows, m = db.discover(fetch, set(), set(), range(1975, 1976), seeds=["Kishore Kumar", "Lata Mangeshkar"], max_tracks=5)
     assert len(rows) == 5 and m["artists_searched"] == 1
     assert sum(1 for c in fetch.calls if c[2].get("entity") == "song" and c[1] == "search") == 1
+
+
+def test_seed_credit_with_spaced_initials(tmp_path, monkeypatch):
+    album = {"collectionName": "Roja (Original Motion Picture Soundtrack)", "releaseDate": "1992-08-15T07:00:00Z",
+             "primaryGenreName": "Soundtrack", "artistName": "A. R. Rahman"}
+    assert db.accept_album(album, "Roja", 1992, SEEDS)
+    assert not db.accept_album({**album, "artistName": "Ilaiyaraaja"}, "Roja", 1992, SEEDS)
+    monkeypatch.setattr(db, "WORK", tmp_path / "work")
+    fetch = FakeFetcher()
+    _, m = db.discover(fetch, set(), set(), range(1975, 1975), seeds=["A.R. Rahman", "A. R. Rahman", "Kishore Kumar"])
+    assert m["artist_names"] == m["artists_searched"] == 2
+    assert [c[2]["term"] for c in fetch.calls] == ["A.R. Rahman", "Kishore Kumar"]
+
+
+def test_unclosed_template_keeps_later_films(caplog):
+    text = ("{|\n|-\n| ''[[Alpha (1980 film)|Alpha]]'' {{efn|source ''[[Hindustan Times]]''\n|-\n| ''[[Beta]]''\n"
+            "|-\n| ''[[Gamma]]''{{cite web|title=''[[Somewhere]]''\n|-\n| ''[[Delta]]''{{efn|''[[Closed]]''}}\n|}\n")
+    with caplog.at_level("WARNING", logger="discover_bollywood"):
+        assert db.parse_films(text, 1980) == ["Alpha", "Beta", "Gamma", "Delta"]
+    warnings = [r.getMessage() for r in caplog.records]
+    assert warnings == ["1980: 2 unclosed note template(s), each cut to the end of its line"]
+
+
+def test_ref_with_slash_in_attribute():
+    text = "{|\n|-\n| ''[[Alpha]]''<ref name=\"a/b\"/>\n|-\n| ''[[Beta]]''<ref>x</ref>\n|-\n| ''[[Gamma]]''\n|}\n"
+    assert db.parse_films(text) == ["Alpha", "Beta", "Gamma"]
+
+
+def test_exhausted_itunes_stops_the_run(tmp_path, monkeypatch):
+    import httpx
+    monkeypatch.setattr(db, "PAUSE", tmp_path / "PAUSE")
+    monkeypatch.setattr(db.time, "sleep", lambda s: None)
+    client = httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(403)))
+    fetch = db.Fetcher(tmp_path / "cache", client)
+    with pytest.raises(SystemExit, match="8 attempts failed") as e:
+        fetch.itunes("search", {"term": "Sholay", "entity": "album"})
+    assert "'itunes 403': 8" in str(e.value) and "'itunes exhausted': 1" in str(e.value)
+    assert fetch.wiki(1975) is None and fetch.counts["wikipedia 403"] == 8
+    assert not list((tmp_path / "cache").iterdir())
+    ok = db.Fetcher(tmp_path / "cache", httpx.Client(transport=httpx.MockTransport(lambda req: httpx.Response(404))))
+    assert ok.itunes("lookup", {"id": "1"}) == [] and ok.counts["itunes 404"] == 1  # a plain non-200 is a miss
 
 
 def test_shard_spec_sizes():

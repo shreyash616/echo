@@ -769,12 +769,14 @@ def claim_path(runner: str, shard: str) -> str:
 def next_shard(store, shard_ids: list[str], runner: str, now: float | None = None,
                exclude: set[str] | frozenset = frozenset()) -> str | None:
     """The lowest shard neither finished nor claimed by another runner within STALE_CLAIM_S; a runner's
-    own claims (a crash mid-shard, up to two) are resumed first, the lower first. `exclude`: shards this
-    process already holds."""
+    own claims (a crash mid-shard, up to two) are resumed first, the lower first, but only those in `shard_ids`:
+    an own claim from another spec (an a-shard left by a stop at a boundary while the b-run runs) stays for that
+    spec's next run (README 871d37d). `exclude`: shards this process already holds."""
     now = time.time() if now is None else now
     done = finished_shards(store)
     active = claims(store)
-    mine = sorted({c["shard"] for c in active if c["runner"] == runner and c["shard"] not in done} - set(exclude))
+    mine = sorted({c["shard"] for c in active if c["runner"] == runner and c["shard"] not in done
+                   and c["shard"] in shard_ids} - set(exclude))
     if mine:
         return mine[0]
     taken = {c["shard"] for c in active if c["runner"] != runner and now - c["t"] < STALE_CLAIM_S}

@@ -68,7 +68,7 @@ SEED_ARTISTS = [
 
 _TABLE = re.compile(r"^\{\|.*?^\|\}", re.S | re.M)
 _ITALIC_LINK = re.compile(r"''+\s*\[\[([^\]|#]+)(?:\|([^\]]+))?\]\]\s*''")
-_REF = re.compile(r"<ref[^>/]*/>|<ref[^>]*>.*?</ref>", re.S | re.I)
+_REF = re.compile(r"<ref\b[^>]*/>|<ref[^>]*>.*?</ref>", re.S | re.I)
 _NOTE_OPEN = re.compile(r"\{\{\s*(?:efn|refn|cite|sfn|notelist|reflist)", re.I)
 _DISAMBIG = re.compile(r"\s*\((?:\d{4}\s+)?(?:hindi\s+|indian\s+)?film\)\s*$", re.I)
 
@@ -80,13 +80,21 @@ def _norm_str(s: str) -> str:
     return norm(s)
 
 
-def _strip_notes(wikitext: str) -> str:
-    """The text without <ref> tags and footnote or citation templates, whose italic links name sources, not films."""
+def _name_key(name: str) -> str:
+    """A singer or composer's name for matching: normalised, spaces removed, so "A.R. Rahman" is "A. R. Rahman"."""
+    return _norm_str(name).replace(" ", "")
+
+
+def _strip_notes(wikitext: str, label: object = "") -> str:
+    """The text without <ref> tags and footnote or citation templates, whose italic links name sources, not films.
+    A template never closed is cut to the end of its line only, and logged once for the page."""
     text = _REF.sub("", wikitext)
-    out, i = [], 0
+    out, i, unclosed = [], 0, 0
     while True:
         m = _NOTE_OPEN.search(text, i)
         if not m:
+            if unclosed:
+                log.warning("%s: %d unclosed note template(s), each cut to the end of its line", label, unclosed)
             return "".join(out) + text[i:]
         out.append(text[i:m.start()])
         depth, j = 0, m.start()
@@ -99,13 +107,17 @@ def _strip_notes(wikitext: str) -> str:
                     break
             else:
                 j += 1
+        if depth:
+            unclosed += 1
+            j = text.find("\n", m.start())
+            j = len(text) if j < 0 else j
         i = j
 
 
-def parse_films(wikitext: str) -> list[str]:
+def parse_films(wikitext: str, year: int | None = None) -> list[str]:
     """The film titles of one year's list: italic wikilinks inside its tables, label first, disambiguator stripped."""
     out, seen = [], set()
-    for table in _TABLE.findall(_strip_notes(wikitext)):
+    for table in _TABLE.findall(_strip_notes(wikitext, year)):
         for target, label in _ITALIC_LINK.findall(table):
             title = _DISAMBIG.sub("", (label or target).replace("''", "").strip())
             if title and title.casefold() not in seen:
@@ -127,7 +139,7 @@ def accept_album(album: dict, title: str, year: int, seeds: set[str]) -> bool:
         return False
     if album.get("primaryGenreName") == "Bollywood":
         return True
-    return any(_norm_str(n) in seeds for n in split_credit(album.get("artistName", "")))
+    return any(_name_key(n) in seeds for n in split_credit(album.get("artistName", "")))
 
 
 def track_row(it: dict, source: str, film: str | None = None, film_year: int | None = None) -> dict | None:
@@ -152,6 +164,10 @@ def track_row(it: dict, source: str, film: str | None = None, film_year: int | N
     }
 
 
+class Exhausted(Exception):
+    """Eight attempts at one request, each a 403, a 429, a transport error or a 200 without JSON."""
+
+
 class Fetcher:
     """GET with a per-host pacer, backoff on 403 / 429, the pause file, and a response cache on disk."""
 
@@ -163,6 +179,7 @@ class Fetcher:
         self.counts: Counter = Counter()
 
     def get(self, host: str, url: str, params: dict, spacing: float) -> dict | None:
+        """The JSON answer, None for any other status; Exhausted after eight failed attempts."""
         key = hashlib.sha1(json.dumps([url, sorted(params.items())]).encode("utf-8")).hexdigest()
         hit = self.cache / f"{key}.json"
         if hit.exists():
@@ -197,22 +214,33 @@ class Fetcher:
                 continue
             hit.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
             return data
-        return None
+        self.counts[f"{host} exhausted"] += 1
+        raise Exhausted(f"{host} {url} {params}")
 
     def wiki(self, year: int) -> str | None:
-        d = self.get("wikipedia", WIKI_API, {"action": "parse", "page": f"List of Hindi films of {year}", "prop": "wikitext",
-                                             "format": "json", "formatversion": "2", "redirects": "1"}, WIKI_SPACING_S)
+        """None for a missing or unreachable page; the MANIFEST's "page": false records it."""
+        try:
+            d = self.get("wikipedia", WIKI_API, {"action": "parse", "page": f"List of Hindi films of {year}",
+                                                 "prop": "wikitext", "format": "json", "formatversion": "2",
+                                                 "redirects": "1"}, WIKI_SPACING_S)
+        except Exhausted:
+            return None
         return ((d or {}).get("parse") or {}).get("wikitext")
 
     def itunes(self, path: str, params: dict) -> list[dict]:
-        d = self.get("itunes", f"{ITUNES}/{path}", {**params, "country": "IN"}, ITUNES_SPACING_S)
+        """The results; an exhausted request stops the run rather than read as a miss (README 871d37d). The cache
+        keeps every answer already fetched, so the rerun repeats none of them."""
+        try:
+            d = self.get("itunes", f"{ITUNES}/{path}", {**params, "country": "IN"}, ITUNES_SPACING_S)
+        except Exhausted as e:
+            raise SystemExit(f"stopped: 8 attempts failed on {e}; requests so far {dict(sorted(self.counts.items()))}")
         return (d or {}).get("results") or []
 
 
 def discover(fetch: Fetcher, seen_keys: set[str], seen_ids: set[str], years: range,
              seeds: list[str] = SEED_ARTISTS, max_tracks: int = MAX_TRACKS) -> tuple[list[dict], dict]:
     rows: list[dict] = []
-    seed_norm = {_norm_str(s) for s in seeds}
+    seed_norm = {_name_key(s) for s in seeds}
     credits: list[str] = []
     films_by_year: dict[str, dict] = {}
     albums_accepted = 0
@@ -226,7 +254,7 @@ def discover(fetch: Fetcher, seen_keys: set[str], seen_ids: set[str], years: ran
 
     for year in years:
         text = fetch.wiki(year)
-        films = parse_films(text) if text else []
+        films = parse_films(text, year) if text else []
         matched = 0
         for title in films:
             if len(rows) >= max_tracks:
@@ -246,7 +274,7 @@ def discover(fetch: Fetcher, seen_keys: set[str], seen_ids: set[str], years: ran
 
     names, done = [], set()
     for n in seeds + credits:
-        k = _norm_str(n)
+        k = _name_key(n)
         if k and k not in done:
             done.add(k)
             names.append(n)
@@ -271,6 +299,7 @@ def discover(fetch: Fetcher, seen_keys: set[str], seen_ids: set[str], years: ran
         "films": {"listed": listed, "matched": matched, "unmatched": listed - matched, "by_year": films_by_year},
         "albums_accepted": albums_accepted, "artists_searched": searched,
         "artist_names": len(names), "seeds": len(seeds),
+        "film_rows_by_genre": dict(Counter(r["genre"] for r in rows if r["discovery_source"] == "film").most_common(10)),
         "requests": dict(sorted(fetch.counts.items())),
     }
     return rows, manifest

@@ -8,6 +8,8 @@ Asserts:
 - the next shard deduplicates against those keys;
 - with the next shard's stage A overlapped (README c2f8090), a crash while holding two claims leaves both, and the
   restart takes the lower one first, then the other; the overlapped A deduplicates against the running shard's songs;
+- an own claim on a shard outside the spec being run (README 871d37d) is left in place, the spec's lowest unfinished
+  shard is taken, and the claim's own spec resumes it;
 - stage E's breaker (README 045f348, ba79bed) stops a pass once LRCLIB has answered 502 / 503 / 504 to half of 300 or more
   calls, sends the rows not tried to the error list, and never fires on a pass under 300 calls or one without them;
 - --no-lyrics (README 8f54dec) fetches nothing, lists every song without a file, and reaches the overlapped shard too.
@@ -98,6 +100,17 @@ def test_crash_resumes_same_shard_from_stage_a_then_finishes(store):
     assert m2["shard"] == "a00001"
     assert FakeHarvester.calls[2]["global_keys"] == {"artist 0:song", "artist 1:song"}  # dedupe set passed on
     assert store.read_json("catalog/v3/MANIFEST.json")["songs"] == 4
+
+
+def test_own_claim_from_another_spec_is_left(store):
+    hv.claim(store, "a00002", "box")                                             # an a-claim left at a boundary stop
+    b_ids = ["b00000", "b00001"]
+    assert hv.next_shard(store, b_ids, "box") == "b00000"                       # the b-run takes its lowest shard
+    hv.claim(store, "b00000", "box")
+    assert hv.next_shard(store, b_ids, "box", exclude={"b00000"}) == "b00001"
+    assert hv.next_shard(store, b_ids, "box") == "b00000"                       # its own b-claim still resumes first
+    assert store.read_json(hv.claim_path("box", "a00002"))["shard"] == "a00002"  # the a-claim stays in place
+    assert hv.next_shard(store, SHARDS, "box") == "a00002"                      # and the a-spec resumes it
 
 
 def test_nothing_left(store):
