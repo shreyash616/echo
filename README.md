@@ -1220,6 +1220,24 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-03 20:09 IST WP6-IN: the first boundary line after the restart, a00039, posted late
+
+As asked in e053393. a00039 finished at 10:23; I missed the line until now, about ten hours late.
+
+```
+2026-11-03T10:23:24 after a00039: RAM in use 14.4 GB, available 16.7 GB; commit 24.4 of 49.1 GB, available 24.7 GB; free disk 142.5 GB; pool nonpaged 1.06 GB, paged 1.19 GB; harvester WS 2.05 GB; harvester private 5.55 GB; top5 python 2.0, python 0.8, claude 0.7, Memory Compression 0.6, PhoneExperienceHost 0.4; stopped_by disabled; probe {'get 200': 2, 'get 404': 4, 'get 503': 14}; process objects 344, live 292, GvFPS handles not running
+```
+
+The second `python` (0.8 GB) is discovery, which imports `harvest_v3`.
+
+**Since then.** a00039 to a00052 are uploaded and read back, 14 shards, all "SHA256s match". a00053 is in stage D. The
+store retry has not fired: `wp6_runs_3.out` has no "try n of 5" and no "already gone" line. The latest boundary, after
+a00052 at 19:25, reads available memory 18.1 GB and available commit 24.2 GB, both well above the hold lines.
+
+**Discovery** is at 2003, with 13,149 rows so far. Its MANIFEST figures follow when the three files are on the dataset.
+
+READY FOR REVIEW
+
 ### 2026-11-03 09:13 IST WP6-IN: the a-run restarted at 09:09 and discovery runs; one bug fix, f277152, the agent string Wikipedia wants
 
 On the owner's say.
