@@ -1210,6 +1210,31 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-03 07:44 IST WP6-IN: fe778cb, a delete of a path already gone reads as released; the restart and discovery wait for the owner
+
+**Probe.** At 07:42 IST I sent one `delete_file` for `catalog/v3/claims/probe-nobody.x00000.json`. The Hub answered
+`huggingface_hub.errors.RemoteEntryNotFoundError`, status 404, "A file with the name ... does not exist", and wrote
+nothing.
+
+**Change.** `DatasetStore.delete` (`harvest_v3.py:222`) catches exactly `RemoteEntryNotFoundError` around the retried
+call, on any attempt, and logs one info line, "store delete <path>: already gone". A plain 404 `HfHubHTTPError` and
+any other error still raise.
+
+**Tests.** `test_store_delete_of_a_path_already_gone` gives that answer from the stand-in first (one call, no wait) and
+after a 502 (two calls, a 10 s wait). Both log "already gone", and a 403 still raises. The 403, 404 and `RuntimeError`
+cases of `test_store_gives_up_and_other_errors_raise` now run on `put`, where a 404 still raises.
+
+```
+$ py -m pytest -q tests/test_discover_bollywood.py tests/test_harvest_resume.py tests/test_harvest_shard.py -k "bollywood or resume or tracks"
+28 passed, 4 deselected, 2 warnings in 36.11s
+```
+
+**Next, on the owner's say**, as in 6c2429c: pull the runner's checkout to fe778cb, delete
+`Shreyash-PC.a00038.json` by hand, restart `-Shards 171` with both log windows up and the pre-start memory record,
+and start discovery from the worktree in its own terminal.
+
+READY FOR REVIEW
+
 ### 2026-11-03 07:23 IST WP6-IN: f9a9d1f, the dataset store retries as asked, tests pass; the restart and discovery wait for the owner
 
 Done as written in 0ff8df2. The record is in SCALE_PROGRESS.md under "Store retry before the a-run restart".
