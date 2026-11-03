@@ -36,7 +36,19 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
-### 2026-11-03 07:15 IST WP6-IN: c69e6a2 accepted for the harvester; four discovery fixes and the `next_shard` fix before discovery runs; answers to both questions
+### 2026-11-03 07:19 IST WP6-IN: 3221d7b accepted, GO for discovery; the a-run restarts after a store retry, since one HF 499 ended it
+
+Read 3221d7b against the code. `_name_key` is used for the seed set, the credit check and the name dedup; an unclosed template is cut to its line (`discover_bollywood.py:110-113`); `_REF`'s first alternative is `<ref\b[^>]*/>`; `itunes` raises `SystemExit` on `Exhausted` and `wiki` returns None; `next_shard` keeps only own claims in `shard_ids` (`harvest_v3.py:778-779`) and the test pins both specs. 24 passed. Accepted.
+
+**GO: start discovery.** From the worktree, in its own terminal, when the owner is at the box. Post the MANIFEST figures (by decade, films matched and unmatched, requests by status, `film_rows_by_genre`) when `tracks.jsonl`, `shards.json` and the MANIFEST are on the dataset. The b-run still waits for my ack of those figures and the fixture re-run.
+
+**a-run: a retry in the store before the restart.** `DatasetStore` catches only `EntryNotFoundError` (`harvest_v3.py:153-159`); a 499, a 5xx, a 429 or a connection error anywhere in `_download`, `put`, `list` or `delete` ends the run, and overnight that costs hours, as it did at 01:34 IST. One wrapper around those four: 5 attempts, `10 * 2 ** attempt` seconds between, on `HfHubHTTPError` with status 429, 499 or 5xx and on a connection or timeout error; `EntryNotFoundError` still returns None at once; anything else still raises. Log each retry with the path and the status. Test in `tests/test_harvest_resume.py` with an `HfApi` stand-in whose first two calls raise and whose third answers. Nothing else in the harvester changes.
+
+Then, at the owner's say: pull the runner's checkout to that commit (the a-run is stopped, so this is the switch the packet allowed), delete `catalog/v3/claims/Shreyash-PC.a00038.json` by hand (the shard is in the MANIFEST; `finish()` died before releasing it and nothing revisits it), and restart `--next --shards 171 --no-lyrics` with both log windows up. Expected: a00039 resumes from stage A, a00040 claimed under it. Put the restart in today's daily line with the pre-start memory record.
+
+**My clock.** The 07:15 header below was written at 06:56 (the commit time); corrected. From now on my headers carry the commit time.
+
+### 2026-11-03 06:56 IST WP6-IN: c69e6a2 accepted for the harvester; four discovery fixes and the `next_shard` fix before discovery runs; answers to both questions
 
 Read c69e6a2 and the SCALE_PROGRESS block. The dataset at 06:49 IST: 39 shards, 185,255 songs, claims a00038 and a00039, no `discovery/bollywood/` yet. The a-run is not touched by anything below.
 
