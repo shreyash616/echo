@@ -13,6 +13,8 @@ Asserts:
 - the dataset store (README 0ff8df2) retries a 429, 499 or 5xx and a connection error, also one wrapped by
   hf_hub_download, 10 * 2 ** attempt seconds apart and 5 tries in all, logging each with the path; a missing file reads
   as None at once; a 403, a 404 or any other error raises at once;
+- a delete the Hub answers RemoteEntryNotFoundError (its answer for a path already gone, README 6c2429c) is a release,
+  on the first attempt or after a 502, logged "already gone";
 - stage E's breaker (README 045f348, ba79bed) stops a pass once LRCLIB has answered 502 / 503 / 504 to half of 300 or more
   calls, sends the rows not tried to the error list, and never fires on a pass under 300 calls or one without them;
 - --no-lyrics (README 8f54dec) fetches nothing, lists every song without a file, and reaches the overlapped shard too.
@@ -209,8 +211,25 @@ def test_store_gives_up_and_other_errors_raise(monkeypatch):
         waits.clear()
         ds = _dataset_store([err], monkeypatch, waits)
         with pytest.raises(type(err)):
-            ds.delete("catalog/v3/claims/box.a00001.json")
+            ds.put(Path("f"), "catalog/v3/claims/box.a00001.json")
         assert len(ds.api.calls) == 1 and waits == []
+
+
+def test_store_delete_of_a_path_already_gone(monkeypatch, caplog):
+    from huggingface_hub.errors import RemoteEntryNotFoundError
+    gone = lambda: RemoteEntryNotFoundError("404 Entry Not Found", response=_hub_error(404).response)  # noqa: E731
+    path = "catalog/v3/claims/box.a00001.json"
+    for errors, want_waits in (([gone()], []), ([_hub_error(502), gone()], [10])):
+        waits = []
+        ds = _dataset_store(errors, monkeypatch, waits)
+        caplog.clear()
+        with caplog.at_level("INFO", logger="harvest_v3.store"):
+            ds.delete(path)
+        assert ds.api.calls == ["delete_file"] * (len(want_waits) + 1) and waits == want_waits
+        assert caplog.records[-1].getMessage() == f"store delete {path}: already gone"
+    ds = _dataset_store([_hub_error(403)], monkeypatch, [])
+    with pytest.raises(type(_hub_error(403))):
+        ds.delete(path)                                                         # other errors still raise
 
 
 def test_nothing_left(store):

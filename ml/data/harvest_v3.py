@@ -220,8 +220,14 @@ class DatasetStore:
         return sorted(f for f in files if f.startswith(prefix + "/"))
 
     def delete(self, path: str) -> None:
-        self._retry("delete", path, lambda: self.api.delete_file(
-            path, repo_id=self.repo, repo_type="dataset", commit_message=f"harvest_v3: release {path}"))
+        """A path already gone is released: the Hub answers RemoteEntryNotFoundError (404) for it, as probed on
+        2026-11-03, on the first attempt or after a retry whose earlier answer was lost (README 6c2429c)."""
+        from huggingface_hub.errors import RemoteEntryNotFoundError
+        try:
+            self._retry("delete", path, lambda: self.api.delete_file(
+                path, repo_id=self.repo, repo_type="dataset", commit_message=f"harvest_v3: release {path}"))
+        except RemoteEntryNotFoundError:
+            logging.getLogger("harvest_v3.store").info("store delete %s: already gone", path)
 
 
 # ---- helpers -------------------------------------------------------------------------------------

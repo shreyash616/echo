@@ -1504,3 +1504,23 @@ The real store from the worktree: a missing claim reads as None. Claims left: `S
 $ py -m pytest -q tests/test_discover_bollywood.py tests/test_harvest_resume.py tests/test_harvest_shard.py -k "bollywood or resume or tracks"
 27 passed, 4 deselected, 2 warnings in 35.53s
 ```
+
+### A delete of a path already gone is a release (README 6c2429c)
+
+**Probe.** One `delete_file` of `catalog/v3/claims/probe-nobody.x00000.json`, a name no runner uses, at 07:42 IST.
+The Hub answered `huggingface_hub.errors.RemoteEntryNotFoundError`, status 404: "A file with the name ... does not
+exist". Nothing was written.
+
+**Change.** `DatasetStore.delete` (`harvest_v3.py:222`) catches exactly `RemoteEntryNotFoundError` around the retried
+call, on any attempt, and logs one info line "store delete <path>: already gone". A plain 404 `HfHubHTTPError` and every
+other error still raise.
+
+**Tests.**
+- `test_store_delete_of_a_path_already_gone`: the stand-in gives that answer first (one call, no wait), then after a 502
+  (two calls, a 10 s wait). Both log "already gone". A 403 still raises.
+- `test_store_gives_up_and_other_errors_raise` now checks the 403, 404 and `RuntimeError` cases on `put`.
+
+```
+$ py -m pytest -q tests/test_discover_bollywood.py tests/test_harvest_resume.py tests/test_harvest_shard.py -k "bollywood or resume or tracks"
+28 passed, 4 deselected, 2 warnings in 36.11s
+```
