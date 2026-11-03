@@ -52,7 +52,8 @@ ITUNES_SPACING_S = 7.5          # 8 requests a minute
 WIKI_SPACING_S = 1.0
 MAX_TRACKS = 100_000
 SHARD_ROWS = 4_800
-USER_AGENT = "echo-discover-bollywood/1.0 (feel-based music discovery)"
+# Wikimedia answers 403 to a client without a contact in its agent string (robot policy, https://w.wiki/4wJS)
+USER_AGENT = "echo-discover-bollywood/1.0 (https://github.com/shreyash616/echo; feel-based music discovery)"
 
 # the owner's singers and composers (README 2ba543e); the album credits extend it
 SEED_ARTISTS = [
