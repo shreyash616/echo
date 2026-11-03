@@ -1474,3 +1474,33 @@ $ py -m pytest -q tests/test_discover_bollywood.py tests/test_harvest_resume.py 
 
 The two warnings are timm's FutureWarning and torch's `meshgrid` UserWarning. Both come from loading CLAP in the
 tracks shard test, as before.
+
+### Store retry before the a-run restart (README 0ff8df2)
+
+The a-run ended at 01:34:51 IST after one HF 499. It came on the GET of the a00038 claim in `finish()` → `claims()` →
+`read_json`, after the HEAD had answered 200.
+
+**Change.** `DatasetStore._retry` (`harvest_v3.py:177`) wraps `_download`, `put`, `list` and `delete`.
+- 5 attempts (`STORE_ATTEMPTS`), `10 * 2 ** attempt` s apart (`STORE_RETRY_S`).
+- The reason comes from `store_transient` (`:149`): an `HfHubHTTPError` with status 429, 499 or 5xx, or a connection
+  or timeout error. The check walks the exception's cause chain, because `hf_hub_download` with `force_download=True`
+  wraps a failed HEAD in `ValueError("Force download failed ...")`.
+- Each retry logs one warning to `harvest_v3.store` with the operation, path, status and wait. It reaches the run's
+  output through root's handler.
+- `EntryNotFoundError` still reads as None at once. Anything else still raises at once.
+
+**Tests** (`tests/test_harvest_resume.py`, an `HfApi` stand-in whose first two calls raise and third answers):
+- `test_store_retries_transient_errors`: `list` after a 499 and a 503, waits 10 and 20, two log lines; `put` and `delete`
+  after a 429 and a wrapped connect error.
+- `test_store_download_retry_and_missing_file`: `read_json` after a wrapped connect error and a 502; a
+  `RemoteEntryNotFoundError` reads as None after one call.
+- `test_store_gives_up_and_other_errors_raise`: five 500s raise after waits 10, 20, 40, 80; a 403, a 404 and a
+  `RuntimeError` raise after one call.
+
+The real store from the worktree: a missing claim reads as None. Claims left: `Shreyash-PC.a00038.json` and
+`Shreyash-PC.a00039.json`.
+
+```
+$ py -m pytest -q tests/test_discover_bollywood.py tests/test_harvest_resume.py tests/test_harvest_shard.py -k "bollywood or resume or tracks"
+27 passed, 4 deselected, 2 warnings in 35.53s
+```

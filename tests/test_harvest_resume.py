@@ -10,6 +10,9 @@ Asserts:
   restart takes the lower one first, then the other; the overlapped A deduplicates against the running shard's songs;
 - an own claim on a shard outside the spec being run (README 871d37d) is left in place, the spec's lowest unfinished
   shard is taken, and the claim's own spec resumes it;
+- the dataset store (README 0ff8df2) retries a 429, 499 or 5xx and a connection error, also one wrapped by
+  hf_hub_download, 10 * 2 ** attempt seconds apart and 5 tries in all, logging each with the path; a missing file reads
+  as None at once; a 403, a 404 or any other error raises at once;
 - stage E's breaker (README 045f348, ba79bed) stops a pass once LRCLIB has answered 502 / 503 / 504 to half of 300 or more
   calls, sends the rows not tried to the error list, and never fires on a pass under 300 calls or one without them;
 - --no-lyrics (README 8f54dec) fetches nothing, lists every song without a file, and reaches the overlapped shard too.
@@ -111,6 +114,103 @@ def test_own_claim_from_another_spec_is_left(store):
     assert hv.next_shard(store, b_ids, "box") == "b00000"                       # its own b-claim still resumes first
     assert store.read_json(hv.claim_path("box", "a00002"))["shard"] == "a00002"  # the a-claim stays in place
     assert hv.next_shard(store, SHARDS, "box") == "a00002"                      # and the a-spec resumes it
+
+
+def _hub_error(code):
+    import httpx2
+    from huggingface_hub.errors import HfHubHTTPError
+    req = httpx2.Request("GET", "https://huggingface.co/datasets/x/resolve/main/f")
+    return HfHubHTTPError(f"HTTP {code}", response=httpx2.Response(code, request=req))
+
+
+def _connect_error():
+    import httpx2
+    try:
+        try:
+            raise httpx2.ConnectError("connection reset")
+        except httpx2.ConnectError as e:
+            raise ValueError("Force download failed due to the above error.") from e
+    except ValueError as v:
+        return v
+
+
+class StandInApi:
+    """HfApi for put, list and delete: the first len(errors) calls raise, the next answers."""
+
+    def __init__(self, errors):
+        self.errors, self.calls = list(errors), []
+
+    def _call(self, name, answer):
+        self.calls.append(name)
+        if self.errors:
+            raise self.errors.pop(0)
+        return answer
+
+    def upload_file(self, **kw):
+        return self._call("upload_file", "commit")
+
+    def list_repo_files(self, repo, repo_type):
+        return self._call("list_repo_files", ["catalog/v3/claims/box.a00001.json", "catalog/v3/MANIFEST.json"])
+
+    def delete_file(self, path, **kw):
+        return self._call("delete_file", None)
+
+
+def _dataset_store(errors, monkeypatch, waits):
+    monkeypatch.setattr(hv.time, "sleep", waits.append)
+    ds = object.__new__(hv.DatasetStore)
+    ds.repo, ds.api = "x/y", StandInApi(errors)
+    return ds
+
+
+def test_store_retries_transient_errors(tmp_path, monkeypatch, caplog):
+    waits = []
+    ds = _dataset_store([_hub_error(499), _hub_error(503)], monkeypatch, waits)
+    with caplog.at_level("WARNING", logger="harvest_v3.store"):
+        assert ds.list("catalog/v3/claims") == ["catalog/v3/claims/box.a00001.json"]
+    assert ds.api.calls == ["list_repo_files"] * 3 and waits == [10, 20]
+    assert [r.getMessage() for r in caplog.records] == [
+        "store list catalog/v3/claims: HTTP 499, try 2 of 5 in 10 s",
+        "store list catalog/v3/claims: HTTP 503, try 3 of 5 in 20 s"]
+    for op, call in (("upload_file", lambda d: d.put(tmp_path / "f", "catalog/v3/f")),
+                     ("delete_file", lambda d: d.delete("catalog/v3/claims/box.a00001.json"))):
+        waits.clear()
+        d = _dataset_store([_hub_error(429), _connect_error()], monkeypatch, waits)
+        call(d)
+        assert d.api.calls == [op] * 3 and waits == [10, 20]
+
+
+def test_store_download_retry_and_missing_file(tmp_path, monkeypatch):
+    import huggingface_hub
+    from huggingface_hub.errors import RemoteEntryNotFoundError
+    waits, answers = [], [_connect_error(), _hub_error(502), "ok"]
+    (tmp_path / "MANIFEST.json").write_text('{"shards": {}}', encoding="utf-8")
+
+    def download(repo, path, **kw):
+        a = answers.pop(0)
+        if isinstance(a, Exception):
+            raise a
+        return str(tmp_path / "MANIFEST.json")
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", download)
+    ds = _dataset_store([], monkeypatch, waits)
+    assert ds.read_json("catalog/v3/MANIFEST.json") == {"shards": {}} and waits == [10, 20]
+    missing = RemoteEntryNotFoundError("404", response=_hub_error(404).response)
+    answers[:] = [missing, "never asked"]
+    assert ds.read_json("catalog/v3/claims/gone.json") is None and answers == ["never asked"]  # at once
+
+
+def test_store_gives_up_and_other_errors_raise(monkeypatch):
+    waits = []
+    ds = _dataset_store([_hub_error(500)] * 5, monkeypatch, waits)
+    with pytest.raises(Exception, match="HTTP 500"):
+        ds.list("catalog/v3/claims")
+    assert len(ds.api.calls) == 5 and waits == [10, 20, 40, 80]
+    for err in (_hub_error(403), _hub_error(404), RuntimeError("bug")):
+        waits.clear()
+        ds = _dataset_store([err], monkeypatch, waits)
+        with pytest.raises(type(err)):
+            ds.delete("catalog/v3/claims/box.a00001.json")
+        assert len(ds.api.calls) == 1 and waits == []
 
 
 def test_nothing_left(store):

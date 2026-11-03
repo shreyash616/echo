@@ -106,6 +106,8 @@ SPEC = "discovery/shards.json"
 # stage A's song fields, in resolve's order; a tracks row carries these plus its discovery fields
 SONG_FIELDS = ("id", "itunes_id", "deezer_id", "key", "title", "artist", "album", "albumArtUrl", "previewUrl",
                "durationMs", "genre", "year", "decade")
+STORE_ATTEMPTS = 5              # a dataset call answered 429 / 499 / 5xx or cut off is tried this often (README 0ff8df2)
+STORE_RETRY_S = 10              # ... 10 * 2 ** attempt seconds apart
 STALE_CLAIM_S = 6 * 3600
 MAX_CLAIMS = 2                  # the running shard and the next shard's stage A
 USER_AGENT = "echo-harvest-v3/1.0 (feel-based music discovery)"
@@ -144,17 +146,53 @@ class LocalStore:
             p.unlink()
 
 
+def store_transient(e: BaseException) -> str | None:
+    """Why a dataset call is worth another try, or None: a 429, 499 or 5xx from the Hub, or a connection or timeout
+    error, anywhere in the exception's chain (hf_hub_download wraps a failed HEAD in a ValueError)."""
+    from huggingface_hub.errors import HfHubHTTPError
+    seen = set()
+    while e is not None and id(e) not in seen:
+        seen.add(id(e))
+        if isinstance(e, HfHubHTTPError) and e.response is not None:
+            code = e.response.status_code
+            if code in (429, 499) or code >= 500:
+                return f"HTTP {code}"
+        # httpx's and httpx2's TransportError (connect, read, protocol, timeout), requests' and the builtin ones
+        if isinstance(e, (ConnectionError, TimeoutError)) or {c.__name__ for c in type(e).__mro__} & {
+                "TransportError", "ConnectionError", "Timeout"}:
+            return type(e).__name__
+        e = e.__cause__ or e.__context__
+    return None
+
+
 class DatasetStore:
+    """The dataset on the Hub. Each call is retried on store_transient errors, STORE_ATTEMPTS in all; a missing
+    file still reads as None at once, and any other error still raises."""
+
     def __init__(self, repo: str = REPO):
         from huggingface_hub import HfApi
         self.repo = repo
         self.api = HfApi(token=os.environ.get("HF_TOKEN") or None)
 
+    def _retry(self, op: str, path: str, call):
+        log = logging.getLogger("harvest_v3.store")
+        for attempt in range(STORE_ATTEMPTS):
+            try:
+                return call()
+            except Exception as e:
+                why = store_transient(e)
+                if why is None or attempt == STORE_ATTEMPTS - 1:
+                    raise
+                wait = STORE_RETRY_S * 2 ** attempt
+                log.warning("store %s %s: %s, try %d of %d in %d s", op, path, why, attempt + 2, STORE_ATTEMPTS, wait)
+                time.sleep(wait)
+
     def _download(self, path: str, dest_dir: Path) -> Path | None:
         from huggingface_hub import hf_hub_download
         from huggingface_hub.utils import EntryNotFoundError
         try:
-            return Path(hf_hub_download(self.repo, path, repo_type="dataset", local_dir=str(dest_dir), force_download=True))
+            return self._retry("download", path, lambda: Path(hf_hub_download(
+                self.repo, path, repo_type="dataset", local_dir=str(dest_dir), force_download=True)))
         except EntryNotFoundError:
             return None
 
@@ -167,8 +205,9 @@ class DatasetStore:
         return p.read_text(encoding="utf-8") if p else None
 
     def put(self, local: Path, path: str) -> None:
-        self.api.upload_file(path_or_fileobj=str(local), path_in_repo=path, repo_id=self.repo, repo_type="dataset",
-                             commit_message=f"harvest_v3: {path}")
+        self._retry("put", path, lambda: self.api.upload_file(
+            path_or_fileobj=str(local), path_in_repo=path, repo_id=self.repo, repo_type="dataset",
+            commit_message=f"harvest_v3: {path}"))
 
     def fetch(self, path: str, dest_dir: Path) -> Path:
         p = self._download(path, dest_dir)
@@ -177,10 +216,12 @@ class DatasetStore:
         return p
 
     def list(self, prefix: str) -> list[str]:
-        return sorted(f for f in self.api.list_repo_files(self.repo, repo_type="dataset") if f.startswith(prefix + "/"))
+        files = self._retry("list", prefix, lambda: self.api.list_repo_files(self.repo, repo_type="dataset"))
+        return sorted(f for f in files if f.startswith(prefix + "/"))
 
     def delete(self, path: str) -> None:
-        self.api.delete_file(path, repo_id=self.repo, repo_type="dataset", commit_message=f"harvest_v3: release {path}")
+        self._retry("delete", path, lambda: self.api.delete_file(
+            path, repo_id=self.repo, repo_type="dataset", commit_message=f"harvest_v3: release {path}"))
 
 
 # ---- helpers -------------------------------------------------------------------------------------
