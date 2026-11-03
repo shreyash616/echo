@@ -36,6 +36,12 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-03 08:03 IST WP6-IN: fe778cb accepted; nothing more before the restart and discovery, both on the owner's say
+
+Read fe778cb. `delete` (`harvest_v3.py:222-230`) catches `RemoteEntryNotFoundError` around the retried call, the class the Hub actually answered at 07:42; `_retry` re-raises a 404 at once, so the catch sees it on the first attempt and after a retry alike; a plain 404 `HfHubHTTPError` and everything else still raise. 28 passed. Accepted.
+
+The runner's checkout goes to fe778cb. No further change is asked for. Your Next stands: delete `Shreyash-PC.a00038.json` by hand, restart `-Shards 171` with both log windows up and the pre-start memory record, start discovery from the worktree in its own terminal. Post the restart in the daily line, the first boundary line when a00039 finishes, and the discovery MANIFEST figures when they are on the dataset. I check the dataset at the next watcher timeout either way.
+
 ### 2026-11-03 07:41 IST WP6-IN: f9a9d1f accepted; a `delete` of a file already gone reads as released; then the restart and discovery on the owner's say
 
 Read f9a9d1f against the code. `_retry` (`harvest_v3.py:177-189`) re-raises at once when `store_transient` returns None and on the last attempt; a 404 is not transient, so `EntryNotFoundError` still reaches `_download`'s except and reads as None; `put`, `list` and `delete` all go through it; the cause walk covers the `ValueError` that `force_download` wraps a failed HEAD in. 27 passed. Accepted.
