@@ -1232,6 +1232,38 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-04 16:40 IST WP6-IN: discovery is on the dataset with 47,797 rows, under the 50,000 gate before any drop; the fixture re-run and the switch wait for your call
+
+Discovery finished at 16:39 IST: "uploaded and read back discovery/bollywood/tracks.jsonl, discovery/bollywood/shards.json,
+discovery/bollywood/MANIFEST.json, SHA256s match". Figures from `discovery/bollywood/MANIFEST.json` on the dataset:
+
+| field | value |
+|---|---|
+| rows | 47,797 (film 23,572, artist 24,225); cap 100,000 not reached |
+| shards.json | 10 shards, `b00000` to `b00009`, 4,800 rows each, `"source": "tracks"` |
+| films | 5,791 listed (plan estimate about 8,000), 3,458 matched, 2,333 unmatched; 4,006 albums accepted |
+| artists | 5,567 names searched, 50 of them seeds |
+| by decade | 1930s 69, 1940s 758, 1950s 1,795, 1960s 2,065, **1970s 4,096, 1980s 5,657, 1990s 6,476, 2000s 5,957, 2010s 8,819, 2020s 12,104**, unknown 1 |
+| film_rows_by_genre | Bollywood 22,561, Soundtrack 519, Tamil 123, Telugu 115, Regional Indian 84, Indian Pop 40, Indian 33, Malayalam 15, Kannada 13, Bengali 11 |
+| requests | itunes 200: 15,080, 404: 3, ConnectError: 1, ReadTimeout: 1, cached: 281; wikipedia 200: 57 |
+| keys_at_start | 233,052 |
+
+**Against the gate, before the b-run:**
+- **50,000 b-songs: cannot be met.** 47,797 is the ceiling before any drop, 2,203 short.
+- **Every decade from the 1970s to the 2020s at 2,500 or more: met before drops.** The lowest is the 1970s, at 4,096.
+  The 4,687 rows before 1970 are artist-search songs by credited singers, from compilations and reissues.
+- **`hi` at 90%: projected, not measured.** Artist rows are Bollywood-genre only, and 22,561 of the 23,572 film rows are
+  Bollywood, so 46,786 of 47,797 (97.9%) are Bollywood-genre for `language_from_meta`'s map. The b-run measures it.
+
+**BLOCKED** on the count. No retuning from me. Nothing is changed; the a-run is going on and is at a00083.
+- If the gate stands, discovery needs more rows. Where it left them: the 2,333 unmatched films, the non-Bollywood genres
+  dropped from artist searches, the 200-song limit on each artist search, and the names credited on songs the artist
+  searches found, which were not searched (`discover_bollywood.py:276-288`).
+- If you accept 47,797, I go on as ordered: the fixture re-run (CLAP `8c738a57`, both test files), then the switch at the
+  next boundary, without `--no-lyrics`, for `--shards 10`.
+
+Noticed: the plan's 8,000 films came out at 5,791 listed.
+
 ### 2026-11-04 06:07 IST WP6: two consecutive clear boundaries by the new test, every call a 200 or a 404; the flag stays on until you say
 
 As asked in the 2026-10-31 23:00 entry: the first time two consecutive boundary probes are under 10% unanswered by 200 or
