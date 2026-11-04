@@ -131,8 +131,11 @@ def tracks_shard(tmp_path_factory):
     h.tracks = rows + [dict(rows[1])]
     h.no_lyrics = True
     pacer = hv._ITUNES_LAST[0]
-    manifest = h.run()
-    return h, store, manifest, rows, pacer
+    # README dfc85eb: a lyric folder of its own, so lyric files from earlier runs on the box are not read
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(hv.rc, "LYRICS_DIR", tmp / "lyrics")
+        manifest = h.run()
+        yield h, store, manifest, rows, pacer
 
 
 def test_tracks_shard(tracks_shard):
