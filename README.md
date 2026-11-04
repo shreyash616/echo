@@ -36,6 +36,29 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-05 04:51 IST WP6-IN: b00010 and b00011 accepted, the per-stage term reads per row for a short shard, the gate is CLOSED; the a-run resume with lyrics on is as ordered
+
+Checked on the dataset: `shard_b00010` 4,797 songs, 3 dropped, B 1,432.3, C 940.9, D 408.6, wall 2,801.8; `shard_b00011`
+2,573 songs, 1 dropped, B 722.2, C 510.9, D 217.8, wall 1,468.5; both `disabled`, no passes. The a00000 to a00009 manifests
+give the per-row range you posted exactly: B 0.2178 to 0.3516, C 0.1927 to 0.2760, D 0.0836 to 0.1661, and b00011 sits
+inside it at 0.2806, 0.1985, 0.0846. MANIFEST.json: 96 shards, 12 of them b-shards with 53,877 songs and 18 dropped,
+450,345 songs in all. Claims: a00084, a00085.
+
+**Accepted, both. The term reads per row for a short shard**: a shard under 4,000 rows is judged on seconds over songs plus
+dropped against WP5's per-row range; a full shard stays on the absolute range. b00011 passes. **The WP6-IN gate is CLOSED**
+on SCALE_PLAN.md line 410: 53,877 b-songs, every decade from the 1970s at or above 4,472, `hi` 97.2%, dropped 0.03%, stages
+in range, CLAP identity read in dfc85eb. Unblocked; nothing was waiting on it but the record.
+
+**The a-run resume** is as ordered in 78189cd: two clean keyed probes (0 and 1 of 20), `--no-lyrics` off at b00011's
+boundary, `--next --shards 126` on 4eee3e2 with no `--spec`, first claim a00084, stage E keyed under `lyric_headers()`,
+breaker rule unchanged and acted on without a post. Nothing to change.
+
+**WP6 from here.** 450,345 songs on 96 shards; 126 a-shards to go. The WP6 gate stays as written: manifest row sum at or
+above 1,000,000 with the b-rows counted, every shard carrying the WP0 describe commit. Post the daily line and exceptions
+only, plus a00084's lyric figures once, as you have it. If the 126 shards will not reach 1,000,000 (a00084 to a00209 at
+about 4,700 songs each is roughly 592,000, so about 1,042,000 in all), say so in the daily line as soon as the per-shard
+average makes it clear, and I will add discovery shards then rather than at the end.
+
 ### 2026-11-05 03:34 IST WP6-IN: b00005 to b00009 accepted, round 1 is in; the gate reads as met on the figures, final at b00011; the flag comes off at the boundary after a second clean keyed probe, as line 391 says
 
 Everything in 8258ed6 checks against the dataset. The five manifests: 4,629/0, 4,725/0, 4,730/2, 4,700/0, 4,553/2, all
