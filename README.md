@@ -1362,6 +1362,50 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-04 23:09 IST WP6-IN: b00003 ended lrclib_503 too, the second in a row; the runner was stopped after finish() and restarted at 23:07:56 with --no-lyrics on the same spec
+
+As ordered in b5b35a2. Figures from `catalog/v3/shard_b00003.manifest.json` on the dataset:
+
+| field | b00003 |
+|---|---|
+| songs, dropped | 4,480, 0 |
+| `stopped_by` | **`lrclib_503`** |
+| passes | 1: 4,429 rows, 9 fetched, 36 none, 9 error, 4,375 not tried |
+| error share | **97.9%** (`error_after_retry` 4,384) |
+| 502/503/504 share | 241 of 400 calls, 60.2% |
+| seconds_per_stage | A 0.0, E 102.7, B 1,456.1, C 871.5, D 379.1, F 16.6 |
+| E_wait_after_D, wall | 0.0, 2,727.2 |
+
+Pass 1 status: get 200 11, get 404 80, get 503 146, search 200 68, search 503 95. The breaker tripped at 22:23:14, 400 calls
+into pass 1 (241 of them 502/503/504, past the 300-call floor), 102.7 s into E. 4,375 rows were never tried, and 4,384
+went to `shard_b00003.lyrics_error.txt` on the dataset, for WP6b. B, C and D are inside WP5's range. With E done early, the
+wall is back inside it too.
+
+**The flag (line 391, as amended in b5b35a2).** b00002 and b00003 both ended `lrclib_503`, so:
+- 23:07:37: b00004 stage B started after b00003's `finish()` returned (F read back at 23:06:59, done at 23:07:03).
+- 23:07:38: the harvester was stopped by its PID, 24696, which had no child left. 0 previews were on disk.
+- 23:07:56: the runner restarted on 4eee3e2 with `--next --shards 6 --spec discovery/bollywood/shards.json --no-lyrics`,
+  log `wp6in_b2.out`.
+
+`next_shard` took the b00004 claim again from stage A: 4,579 songs from 4,800 rows. `E: --no-lyrics: nothing fetched,
+4547 of 4579 songs without a file to the error list`. b00005 is staged with 4,629 songs.
+
+The flag now stays on through b00004 to b00009, round 2's shards and the a-run's resume. The boundary loop is re-armed on
+the new log. Its clear count now reads the **keyed** probe's `unserved`, not the anonymous one's: line 391's lift is the
+keyed probe clean at two consecutive boundaries, so that is what the count reads. Both probes still run, keyed first, and
+both counts go in the line. With `--no-lyrics` the error list is the whole shard, so both make their full 20 calls. On a
+keyed clear at two consecutive boundaries the loop stops and I post. The flag comes off only at the boundary after that.
+
+**Boundary line after b00003** (23:08:25): RAM in use 12.4 GB, available 18.7 GB; commit 20.4 of 49.1 GB, available 28.7 GB;
+free disk 138.6 GB; pool nonpaged 1.51 GB, paged 1.43 GB; harvester private 6.01 GB (-0.07 GB since b00002);
+probe `{'get 200': 1, 'get 404': 12, 'get 503': 7}`; probe_keyed `{'get 200': 1, 'get 404': 8, 'get 503': 11}`. The keyed
+probe is unserved at 0.55, so the count is 0.
+
+**Timeline.** Without lyrics a b-shard is about 2,700 s, so b00009 lands around 03:40 IST on 11-05. Round 2 discovery is
+due around 00:45, so round 2's shards can run from b00010 at the boundary after b00009, as ordered.
+
+READY FOR REVIEW
+
 ### 2026-11-04 22:22 IST WP6-IN: b00002 in, the breaker tripped in pass 2 (stopped_by lrclib_503, 14.8% in error); the first of two, so lyrics stay on into b00003
 
 As ordered in 61c323a. Figures from `catalog/v3/shard_b00002.manifest.json` on the dataset:
