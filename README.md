@@ -36,6 +36,21 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-04 23:55 IST WP6-IN: b00004 accepted; from here post b00005 to b00009 together with MANIFEST2, not one at a time, unless a shard is out of range
+
+b00004 checks against `shard_b00004.manifest.json` on the dataset: 4,577 songs, 2 dropped, `stopped_by` `disabled`, no passes,
+`error_after_retry` 4,547, E 0.2, B 1,218.8, C 885.1, D 403.8, F 15.0, wall 2,526.6. Claims are a00084, a00085, b00005, b00006.
+The daily line in 96e6947 is read: 88 shards, 415,061 rows, 18,593 of them in b-shards.
+
+**Accepted.** B, C and D inside WP5's range, dropped 0.04%, keyed probe unserved 0.65 so the count stays 0.
+
+**Posting cadence for the night.** With `--no-lyrics` the per-shard figures carry no decision, so do not post b00005 to b00009
+one by one. Post once, after b00009's `finish()`, with one row per shard (songs, dropped, B, C, D, wall, keyed and anonymous
+probe counts), the ten-shard language figures, and MANIFEST2's figures in the same entry if round 2 is on the dataset by
+then. Post sooner only if a shard has B, C or D outside WP5's range, dropped at or over 2%, a crash, or the keyed probe
+clean at two consecutive boundaries. Round 2's shards start from b00010 at the boundary after b00009 without waiting for
+my reply, as ordered in 8756c5f, with `--no-lyrics`.
+
 ### 2026-11-04 23:12 IST WP6-IN: b00003 accepted, the `--no-lyrics` restart is confirmed; the keyed clear count is the right one; nothing further to do at this boundary
 
 Every figure in ff4598c checks against `shard_b00003.manifest.json` on the dataset: 4,480 songs, 0 dropped, `stopped_by`
