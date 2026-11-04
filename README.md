@@ -1336,6 +1336,46 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-04 22:22 IST WP6-IN: b00002 in, the breaker tripped in pass 2 (stopped_by lrclib_503, 14.8% in error); the first of two, so lyrics stay on into b00003
+
+As ordered in 61c323a. Figures from `catalog/v3/shard_b00002.manifest.json` on the dataset:
+
+| field | b00002 |
+|---|---|
+| songs, dropped | 4,645, 0 |
+| `stopped_by` | **`lrclib_503`** |
+| passes | 2: 4,643 rows, 1,575 fetched, 2,265 none, 803 error; 803 rows, 22 fetched, 94 none, 9 error, 678 not tried |
+| error share | **14.8%** (`error_after_retry` 687) |
+| 502/503/504 share | 9,321 of 23,102 calls, 40.3% (b00001: 24.8%, b00000: 18.0%) |
+| seconds_per_stage | A 0.0, B 1,326.2, C 905.4, D 388.9, E 5,806.7, F 17.1 |
+| E_wait_after_D, wall | 3,186.1, 5,849.0 |
+
+**How it tripped.** Pass 1 ran to its end: 8,896 of 22,259 calls answered 502/503/504 (40.0%), under the 50% line.
+Status: get 200 1,394, get 400 1, get 404 6,612, get 502 9, get 503 5,633, search 200 4,828, **search 500 528**, search 502 2,
+search 503 3,252. Pass 2 over its 803 rows reached 425 of 843 calls (50.4%) past the 300-call floor, so the passes stopped
+(`LYRIC_503_BREAKER` 0.5, `LYRIC_BREAKER_MIN_CALLS` 300). 678 rows were never tried, and 687 went to the error list.
+
+The 528 `search 500` are new on the b-run. They are not in the 502/503/504 count, so they did not feed the breaker.
+
+**Against the term as amended in 61c323a:** B, C and D are inside WP5's range. E and the wall read: `stopped_by`
+`lrclib_503`, error share 14.8%, 502/503/504 share 40.3%. Dropped 0.
+
+**The breaker rule (line 391).** This is the first `lrclib_503` stop, so it is not two consecutive, and b00003 started stage
+B at 22:21:32 with lyrics on, as the run stands. If b00003 also ends `lrclib_503`, at the boundary after it:
+- I stop the runner after `finish()`, as at the switch;
+- I restart it with `--no-lyrics` on the same spec;
+- I post BLOCKED with both shards' figures.
+
+If b00003 ends any other way, the count is back to zero and nothing changes. The 687 rows are in
+`shard_b00002.lyrics_error.txt` on the dataset, for WP6b.
+
+**Boundary line after b00002** (22:22:17): RAM in use 13.5 GB, available 17.6 GB; commit 25.7 of 49.1 GB, available 23.4 GB;
+free disk 139.5 GB; pool nonpaged 1.5 GB, paged 1.4 GB; harvester private 6.08 GB (+0.18 GB since b00001);
+probe `{'get 400': 1, 'get 404': 15, 'get 503': 4}`; probe_keyed `{'get 400': 1, 'get 404': 9, 'get 503': 10}`. With 687 error
+rows, both probes made their full 20 calls this time. The keyed one drew 503 on 10 of 20, the anonymous one on 4.
+
+READY FOR REVIEW
+
 ### 2026-11-04 20:44 IST WP6-IN: b00001 in, stopped_by error_share, 11 errors; the wall at 5,545.9 s is above WP5's range, so the amended per-stage term fails; BLOCKED
 
 As ordered in 5f11387. Figures from `catalog/v3/shard_b00001.manifest.json` on the dataset:
