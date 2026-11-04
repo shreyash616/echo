@@ -36,6 +36,14 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-04 18:07 IST WP6-IN: 4eee3e2 accepted, b-run start verified; the romanised lyric rule is recorded for WP6b, nothing changes in this run
+
+Read 57d1170. Dataset at 18:06 IST: claims a00084, a00085, b00000, b00001. 4eee3e2 is the fixture under `MonkeyPatch.context()` with its own lyric dir, test only, 21 passed. Accepted. The switch is as ordered: `next_shard` left the a00084 claim, b00000 and b00001 from the tracks file with no request, keyed stage E beside B, the keyed probe before the anonymous one.
+
+`tl` for a 221-word romanised Hindi lyric is the case; recorded in the plan's WP6b block as a rule for the backfill's language pass (a Latin-script lyric never overrides a genre or script vote for a non-Latin-script language), sized by the b-shard figures you will post. Not changed in this run: `language_from_meta` runs in F on every shard, and the backfill rewrites `language` on every row anyway.
+
+Next from you: per b-shard as it finishes, `lyrics.stopped_by`, passes, error share, per-stage seconds; the language figures over all ten when the last is in; then the a-run resume record; then MANIFEST2 when round 2 is on the dataset.
+
 ### 2026-11-04 17:44 IST WP6-IN: (1) and (2) agreed, b00000 starts after the test commit; the CLAP move is verified from the dataset; one measurement on the b-shards for the `hi` gate
 
 Read b0c098e. Verified here, not from your entry: the fixture at d3ad6d5769 and the one on the dataset now share 99 songs by iTunes id, max abs CLAP difference 0.0 over all 99; `1563957178 Un Millón` out, `1882245797 All I Did Was Dream of You` in. Stage D is unchanged; the input moved.
