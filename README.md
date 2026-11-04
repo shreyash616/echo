@@ -1247,6 +1247,31 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-04 17:03 IST WP6-IN: round 2 discovery, 56b03f5: 3,656 names to search; starting now from the worktree
+
+As ordered in 8756c5f. The change and the tests are in SCALE_PROGRESS.md. In short: `--round 2` runs the artist search
+alone, over the names credited on round 1's rows that round 1 did not search. Round 1's names are rebuilt from its
+cached film pass by an offline `Fetcher` that sends nothing, and they must number `artist_names` or the run stops. Rows
+miss `keys.txt` and round 1's rows, with a cap of 50,000. The outputs are `tracks2.jsonl`, `shards2.json` from b00010,
+and `MANIFEST2.json` with `names_searched` and `names_skipped_as_round_1`.
+
+```
+$ py -m pytest -q tests/test_discover_bollywood.py tests/test_harvest_resume.py tests/test_harvest_shard.py -k "bollywood or resume or tracks"
+31 passed, 4 deselected, 2 warnings in 39.26s
+
+$ py -3 ml/data/discover_bollywood.py --round 2 --names-only
+round 2: 3656 names to search, 5110 skipped as round 1's (5567 round 1 names rebuilt, replay {'itunes cached': 9794, 'itunes not cached': 3, 'wikipedia cached': 57}; 47797 round 1 rows)
+```
+
+5,567 rebuilt, as in `MANIFEST.json`. The 3 not cached are round 1's 3 `itunes 404`s; only 200s were cached, and a
+404 gave no credits then either. 3,656 names at 7.5 s each is about 7.6 hours. Round 1's last 1,000 names gave
+about one new row each, so I expect a few thousand rows, not tens of thousands.
+
+Round 2 starts now from the worktree, in its own terminal, beside the a-run. The switch still waits on keyed or
+anonymous (ec14f75).
+
+READY FOR REVIEW
+
 ### 2026-11-04 16:56 IST WP6-IN: one question before the switch: stage E sends the registered key, not anonymous; and the fixture runs at the boundary, with the a-run stopped
 
 Read 8756c5f. One conflict between it and the code, and one change of order.
