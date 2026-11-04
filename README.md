@@ -1274,6 +1274,46 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-04 17:50 IST WP6-IN: b00000 started at 17:48 with lyrics on, after test commit 4eee3e2; the two Aashiqui 2 lyric files are romanised and one came out `tl`
+
+As ordered in dfc85eb.
+
+**Measurement first, before the test change, on the runner's checkout** (`pytest -k "test_tracks_shard and not fields"`
+with the tmp dir kept):
+- `it_1073359663` (palak muchhal: chahun main ya naa): `language` **`tl`**, `has_lyrics` true. Its lyric file is
+  romanised Hindi: 221 words, 0 Devanagari characters ("Tu Hi Yeh Mujhko Bata De Chaahoon Main ...").
+- `it_1073359419` (mithoon: tum hi ho): the test puts its key in `global_keys`, so it is not in the shard and gets no
+  `language`. Its file is romanised too: 81 words, 0 Devanagari ("Hum tere bin ab reh nahi sakte ...").
+- The two without a file, `it_1073359420` and `it_1073359664`, got `hi`.
+
+So the case you named happens: a romanised Hindi lyric of over 60 words is taken as Tagalog. The figures over the ten
+b-shards follow when they are in: the `language` distribution, the rows with a lyric file, and among those the rows not
+`hi`, with the top five codes.
+
+**Test commit 4eee3e2 (test only).** The `tracks_shard` fixture runs the harvester under
+`pytest.MonkeyPatch.context()` with `hv.rc.LYRICS_DIR` set to its tmp dir, and yields inside it. Runner's checkout pulled
+to 4eee3e2 (`harvest_v3.py` unchanged since c0fcf8d):
+
+```
+$ py -3 -m pytest -q tests/test_harvest_shard.py tests/test_harvest_resume.py
+21 passed, 1 warning in 62.12s
+```
+
+**Switch.** At 17:48:27 the runner started on 4eee3e2 with
+`--next --shards 10 --spec discovery/bollywood/shards.json`, no `--no-lyrics`, log `wp6in_b.out`. Stage A read from the
+tracks file and sent no iTunes request:
+- b00000: 4,737 songs from 4,800 rows (63 already catalogued or repeated);
+- b00001: 4,739 from 4,800 (61), under b00000's B.
+
+`next_shard` took b00000, not the a00084 claim. b00000's stage E (keyed) is running beside B. Both log windows are on
+the new log. The boundary loop now takes b-shards, runs the keyed probe to its end before the anonymous one, and puts
+`probe_keyed {...}` in the line; with lyrics on, a clear no longer stops it.
+
+When the last b-shard is in, the a-run resumes with 126 left, without `--no-lyrics`. The b00000 and first a-shard lyric
+figures (`stopped_by`, passes, error share, per-stage seconds) come as each finishes.
+
+READY FOR REVIEW
+
 ### 2026-11-04 17:37 IST WP6-IN: the switch is stopped at the fixture; keyed probe clean, CLAP sha 29966858 because one fixture song changed on iTunes, and two tracks tests read the runner's lyric files; runner stopped
 
 As ordered in f337228. The a-run is stopped and the b-run has not started.
