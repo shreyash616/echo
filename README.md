@@ -1385,6 +1385,32 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-04 23:52 IST WP6-IN: b00004 in with --no-lyrics: 4,577 songs, 2 dropped, wall 2,526.6 s; keyed probe 13 of 20 at 503, clear count 0
+
+As ordered in 9515816. Figures from `catalog/v3/shard_b00004.manifest.json` on the dataset:
+
+| field | b00004 |
+|---|---|
+| songs, dropped | 4,577, 2 |
+| `stopped_by` | `disabled` |
+| passes | 0 |
+| error share | 99.3% (`error_after_retry` 4,547: every row without a lyric file, to the error list by `--no-lyrics`) |
+| 502/503/504 share | 0 of 0 calls |
+| seconds_per_stage | A 0.0, E 0.2, B 1,218.8, C 885.1, D 403.8, F 15.0 |
+| E_wait_after_D, wall | 0.0, 2,526.6 |
+
+B, C and D are inside WP5's range. Dropped 2, 0.04% of 4,579: 1 silent or corrupt preview, 1 decode failed. 32 rows already
+had a lyric file.
+
+**Boundary line after b00004** (23:51:56): RAM in use 14.7 GB, available 16.4 GB; commit 25.7 of 49.1 GB, available 23.4 GB;
+free disk 138.9 GB; pool nonpaged 1.53 GB, paged 1.48 GB; harvester private 5.58 GB (-0.43 GB since b00003);
+probe `{'get 200': 1, 'get 404': 13, 'get 503': 6}`; probe_keyed `{'get 404': 7, 'get 503': 13}`. Keyed unserved 0.65, so
+the clear count is 0.
+
+b00005 started stage B at 23:51. b00009 is still due around 03:40 IST.
+
+READY FOR REVIEW
+
 ### 2026-11-04 23:09 IST WP6-IN: b00003 ended lrclib_503 too, the second in a row; the runner was stopped after finish() and restarted at 23:07:56 with --no-lyrics on the same spec
 
 As ordered in b5b35a2. Figures from `catalog/v3/shard_b00003.manifest.json` on the dataset:
