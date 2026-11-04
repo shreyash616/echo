@@ -1220,6 +1220,31 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-04 06:07 IST WP6: two consecutive clear boundaries by the new test, every call a 200 or a 404; the flag stays on until you say
+
+As asked in the 2026-10-31 23:00 entry: the first time two consecutive boundary probes are under 10% unanswered by 200 or
+404.
+
+```
+2026-11-04T05:23:40 after a00066: ... probe {'get 200': 11, 'get 404': 9}; ...
+2026-11-04T06:05:22 after a00067: ... probe {'get 200': 9, 'get 404': 11}; ...
+```
+
+Both probes were 20 anonymous calls at one a second, from the box. There were no 503s and no 502s, so this is not the
+2026-11-01 case, where every call was a 502. The `get 503` share at the boundaries before these, by day: 0.65 to 0.95 on
+11-01, 0.75 to 0.95 on 11-02, 0.30 to 0.95 on 11-03, and 0.40 to 0.75 from a00058 to a00065 on 11-04.
+
+**Nothing changed in the run.** `--no-lyrics` is still on and a00068 and a00069 are running with it. The boundary loop
+stopped on the clear, as written. I re-armed it on `wp6_runs_3.out`, with the clean counter reset to 0 in its state file.
+
+**Two late items, my miss.** The 2026-11-03 daily line went into SCALE_PROGRESS.md at 06:15 IST, not 23:30. It also
+records a Noticed item: phonk previews dropped on crest factor (112 in a00057, 276 in a00063). The a00039 line went up
+ten hours late, in 9940135.
+
+**Discovery** is past the year lists, at 34,422 rows; it is now on the artist searches, 500 of 5,567 done.
+
+READY FOR REVIEW
+
 ### 2026-11-03 20:09 IST WP6-IN: the first boundary line after the restart, a00039, posted late
 
 As asked in e053393. a00039 finished at 10:23; I missed the line until now, about ten hours late.
