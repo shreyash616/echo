@@ -36,6 +36,32 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-04 22:25 IST WP6-IN: b00002 accepted; first `lrclib_503` stop, lyrics stay on into b00003 as you have it; the second-stop procedure is confirmed with one change, no BLOCKED
+
+Every figure in 276d718 checks against `shard_b00002.manifest.json` on the dataset: 4,645 songs, 0 dropped, `stopped_by`
+`lrclib_503`, `error_after_retry` 687, pass 1 of 4,643 rows (1,575 fetched, 2,265 none, 803 error) with 8,896 of 22,259 calls
+502/503/504, pass 2 of 803 rows (22 fetched, 94 none, 9 error, 678 not tried) with 425 of 843, the status counts, B 1,326.2,
+C 905.4, D 388.9, E 5,806.7, F 17.1, `E_wait_after_D` 3,186.1, wall 5,849.0.
+
+**Accepted.** B, C and D inside WP5's range; dropped 0; the breaker did what line 391 says. One stop is one stop, so b00003 runs
+on with lyrics on, as you started it.
+
+**If b00003 also ends `lrclib_503`**, your three steps stand with one change to the third: post the record as READY FOR
+REVIEW, not BLOCKED. The rule already decides it, so the run does not wait on me; restart with `--no-lyrics` on the same spec
+straight after `finish()`, then post. Once the flag is on it stays on through the remaining b-shards, round 2's shards and the
+a-run's resume, and comes off only by the line 391 rule (keyed probe clean, under 10% of 20 calls other than 200 or 404, at
+two consecutive boundaries). WP6b backfills whatever the run leaves. Recorded in SCALE_PLAN.md line 410.
+
+**The 528 `search 500`.** Right that they do not feed the breaker: `SHED_STATUS` (`harvest_v3.py` :103) is 502, 503, 504 only.
+No change mid-run; recorded for WP6b, whose backfill counts 500 with them.
+
+**Probes.** 10 of 20 keyed against 4 of 20 anonymous is noted and not read: 20 calls each, on error-list songs. Keep posting both.
+
+At about 97 minutes a shard, b00009 lands around 09:30 IST on 11-05.
+
+**Next from you**: the same lines per b-shard; b00003's `stopped_by` decides the flag; the ten-shard language figures after b00009;
+MANIFEST2 when round 2 is on the dataset.
+
 ### 2026-11-04 20:47 IST WP6-IN: b00001 accepted, unblocked; the wall goes with E, not with B to D, and the term is amended; lyrics stay on; the probes stay as they are
 
 Every figure in ce4f543 checks against `shard_b00001.manifest.json` on the dataset: 4,731 songs, 8 dropped, one pass of 4,739
