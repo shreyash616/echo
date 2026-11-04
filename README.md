@@ -1430,6 +1430,56 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-05 04:49 IST WP6-IN: b00010 and b00011 in, 53,877 b-songs in all; b00011's B, C and D are under WP5's range, as a 2,574-row shard; keyed probe clean twice, so the a-run resumed at 04:43:06 with lyrics on; BLOCKED on the gate's close only
+
+As ordered in 78189cd. Figures from each `shard_<id>.manifest.json` on the dataset, and the probes from `wp6_boundaries.txt`:
+
+| shard | rows | songs | dropped | B | C | D | wall | probe (anonymous) | probe_keyed |
+|---|---|---|---|---|---|---|---|---|---|
+| b00010 | 4,800 | 4,797 | 3 | 1,432.3 | 940.9 | 408.6 | 2,801.8 | 200 1, 404 19 | **200 1, 404 18, 503 1** |
+| b00011 | 2,574 | 2,573 | 1 | **722.2** | **510.9** | **217.8** | 1,468.5 | 404 19, 503 1 | 404 20 |
+
+Both are `stopped_by` `disabled` with no passes. The 4 dropped are all silent or corrupt previews. The runner ended
+`=== exit 0 after 4332 s` at 04:42:42.
+
+**b00011 is out of range as the term reads.** B 722.2 is under 1,058, C 510.9 under 846, and D 217.8 under 365. It is the
+tail of `shards2.json`, rows 4,800 to 7,374, so it has 2,574 rows against about 4,700 on every WP5 shard. Per row it is
+inside WP5's range on all three. Per row means seconds over songs plus dropped, from the a00000 to a00009 manifests:
+
+| stage | WP5 per row | b00010 | b00011 |
+|---|---|---|---|
+| B | 0.2178 to 0.3516 | 0.2984 | 0.2806 |
+| C | 0.1927 to 0.2760 | 0.1960 | 0.1985 |
+| D | 0.0836 to 0.1661 | 0.0851 | 0.0846 |
+
+So the shard is short, not fast. I have changed nothing. Whether the term reads per row for a short shard is yours, so the
+gate's close waits on it. The a-run does not wait: it is WP6, ordered in 78189cd.
+
+**WP6-IN totals, b00000 to b00011:** 53,877 songs from 55,171 tracks rows, 18 dropped (0.03%). Round 1 has 46,507, round 2
+7,370.
+
+**The flag.** The keyed probe after b00009 was 0 of 20 unserved, and after b00010 1 of 20 (0.05). That is two consecutive
+boundaries clean, and the loop stopped with PROBE CLEAR at 04:18:40. As confirmed in 78189cd, `--no-lyrics` came off at
+b00011's boundary. b00011 itself ran with the flag, as it was started. The keyed probe after b00011 was 404 on all 20.
+
+**The a-run resume record.**
+- Started 04:43:06 on 4eee3e2 with `--next --shards 126 --runner Shreyash-PC`, no `--spec` and **no `--no-lyrics`**, log
+  `wp6_runs_4.out`.
+- The first claim taken is **a00084**: 250 artists, 138.3 GB free. Stage A on iTunes started at 04:43:19. Stage E runs keyed
+  beside B to D, under `lyric_headers()`, unchanged.
+- The breaker rule is as amended in 78189cd: `lrclib_503` on two consecutive shards, and `--no-lyrics` goes back on at the
+  next boundary, without a post before the restart.
+- The boundary loop is on the new log with `-LyricsOn`, so a clear does not stop it, and its count is back at 0. The
+  sampler and both log windows are on it too.
+
+**Boundary line after b00011** (04:43:26): RAM in use 11.9 GB, available 19.2 GB; commit 18.8 of 49.1 GB, available 30.3 GB;
+free disk 138.3 GB; pool nonpaged 1.55 GB, paged 1.48 GB; harvester private 5.88 GB; process objects 358, live 298.
+
+From here: the daily line, and exceptions only, as ordered: a stage out of range, dropped at or over 2%, a crash, a flag
+change. The first a-shard's lyric figures (`stopped_by`, passes, error share, 502/503/504 share) come with a00084.
+
+**BLOCKED.** This holds the gate's close only, on how the term reads for b00011.
+
 ### 2026-11-05 03:32 IST WP6-IN: b00005 to b00009 in, all in range; round 1 done at 46,507 songs, 97.2% hi; MANIFEST2 7,374 rows; b00010 started 03:30; keyed probe clean once
 
 As ordered in 1d5f264, one post after b00009's `finish()`. Figures from each `shard_<id>.manifest.json` on the dataset, and
