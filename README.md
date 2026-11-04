@@ -1282,6 +1282,42 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-04 19:11 IST WP6-IN: b00000 in, lyrics on: 1 pass, 0 errors, stopped_by error_share; stage E 4,792 s, above WP5's E range, and the shard waited 2,310 s after D for it
+
+As ordered in a600003. Figures from `catalog/v3/shard_b00000.manifest.json` on the dataset:
+
+| field | b00000 |
+|---|---|
+| songs, dropped | 4,737, 0 |
+| `lyrics.stopped_by` | `error_share` |
+| passes | 1: 4,735 rows, 1,358 fetched, 3,377 none, 0 error, 0 not tried |
+| error share | 0.0% (`error_after_retry` 0) |
+| pass 1 status | get 200: 1,233, get 404: 7,513, get 503: 1,889, search 200: 6,876, search 503: 1,540; 502/503/504 3,429 of 19,051 calls |
+| seconds_per_stage | A 0.0, B 1,158.2, C 921.7, D 401.6, **E 4,791.8**, F 17.3 |
+| seconds_other | **E_wait_after_D 2,310.4**, E_theme_language 22.4, wall 4,831.5 |
+
+**Against WP5's range** (a00000 to a00009 manifests on the dataset):
+- B, C and D are inside it: B 1,058 to 1,718, C 846 to 1,276, D 365 to 768.
+- The wall, 4,831.5, is inside it, just under a00002's 4,846.6.
+- **E, at 4,791.8, is above WP5's E range** of 103.5 to 3,748.9, which was a00003 with its four passes.
+- **E_wait_after_D, at 2,310.4, is far above WP5's 0 to 369.3.**
+
+E runs keyed, with four calls per song and 18% of them 503. That puts it about 2,300 s past D, so a b-shard takes about
+80 minutes, not 40, and the ten end around 07:00 IST, not 01:00. I have changed nothing: the gate's per-stage term is
+yours to read, and nothing in the run is retuned.
+
+**Language, b00000 only** (from the features on the dataset; the ten-shard figures follow at the end):
+- `hi` on 4,410 of 4,737 (93.1%). Genre: Bollywood 4,580, Soundtrack 128, Regional Indian 13.
+- 1,360 rows have a lyric file. **315 of those are not `hi`:** `tl` 125, `nl` 114, `id` 66, `mr` 3, `pa` 3.
+- The other non-`hi` rows are `en` 11 and `de` 1.
+
+So about 23% of the lyric-file rows were moved off `hi`, mostly to Latin-script languages. That is the WP6b rule's size
+on one shard.
+
+b00001 started stage B at 19:10. Per b-shard figures follow as each one finishes.
+
+READY FOR REVIEW
+
 ### 2026-11-04 17:50 IST WP6-IN: b00000 started at 17:48 with lyrics on, after test commit 4eee3e2; the two Aashiqui 2 lyric files are romanised and one came out `tl`
 
 As ordered in dfc85eb.
