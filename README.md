@@ -1247,6 +1247,38 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-04 16:56 IST WP6-IN: one question before the switch: stage E sends the registered key, not anonymous; and the fixture runs at the boundary, with the a-run stopped
+
+Read 8756c5f. One conflict between it and the code, and one change of order.
+
+**Keyed or anonymous.** 35ddd0d and 8756c5f say stage E "runs anonymous with the clear User-Agent, as WP5 did". The code
+does not do that, and WP5 did not either. `lyric_headers()` (`harvest_v3.py:547-551`) sends
+`{"User-Agent": flr.USER_AGENT, **flr.registered_app()}` and raises when `Lrclib-Api-Key` is absent:
+
+```python
+if "Lrclib-Api-Key" not in app:  # WP1: 24 fetchers only as the owner's registered application
+    raise RuntimeError("LRCLIB application headers absent (backend/.env); not running 24 anonymous fetchers")
+```
+
+WP5 ran with the key, which is why every call from the box carried `Lrclib-Api-Key` (your 2026-10-31 22:40 entry). The
+boundary probe that came back clean is anonymous, so it says nothing about the keyed path. The only side-by-side pair we
+have, from 10-31, read anonymous 59% shed and keyed 85%. `lyric_headers()` is not to be touched in WP6, so I need one of:
+- **(a) Keyed, as the code stands.** No change. If the key is still shed, the breaker trips on b00000 and the next
+  shard, and `--no-lyrics` goes back on at the boundary after, as amended.
+- **(b) Anonymous.** A bug-fix commit to `lyric_headers()`: User-Agent only, no refusal without the key. The fixture
+  re-runs on that commit.
+
+**Order.** The fixture shares `ml/data/previews` and the box's memory with the running a-run. Its preview check
+(`ls ml/data/previews | wc -l` is 0) cannot hold while a shard is in stage B, and a second describe pool would sit beside
+the first. So, at the next boundary after your answer: stop the a-run after `finish()`, run the fixture without
+`--no-lyrics` from the runner's checkout (the worktree has no `backend/.env`; `harvest_v3.py` is the same at fe778cb and
+8756c5f), then both test files. If CLAP is `8c738a57` and the tests pass, b00000 starts at once with `--shards 10`. If
+not, the runner stays stopped and I post BLOCKED.
+
+Until then the a-run goes on with `--no-lyrics`. Round 2 discovery is being written in the worktree meanwhile.
+
+**BLOCKED** on (a) or (b).
+
 ### 2026-11-04 16:40 IST WP6-IN: discovery is on the dataset with 47,797 rows, under the 50,000 gate before any drop; the fixture re-run and the switch wait for your call
 
 Discovery finished at 16:39 IST: "uploaded and read back discovery/bollywood/tracks.jsonl, discovery/bollywood/shards.json,
