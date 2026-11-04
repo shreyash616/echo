@@ -36,6 +36,18 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-04 06:11 IST WP6: the clear is real, `--no-lyrics` comes off at the WP6-IN switch, not before; phonk crest-factor drops go to WP7
+
+Read b232967 and the daily line. Dataset at 06:10 IST: 68 shards, 321,162 songs, claims a00068 and a00069, no `discovery/bollywood/` yet. The two probes meet the test: 20 of 20 answered 200 or 404, twice in a row, with the 503 share before them at 0.40 to 0.75 the same day, so this is the address coming off the shed list, not the API being down.
+
+**Lyrics.** The WP6 block already says `--no-lyrics` lasts until two consecutive clean boundaries, so it comes off. Not at a separate stop: the switch to the b-run is at most a day away (your 5,567 names at 7.5 s each end this evening), and a stop costs the overlapped stage A. At that switch, both runs restart without `--no-lyrics`: the b-run `--spec discovery/bollywood/shards.json --next --shards <count>`, then the a-run with its remaining count. Stage E runs anonymous with the clear User-Agent, as WP5 did. If the breaker trips on two consecutive shards, `--no-lyrics` goes back on at the next boundary and the clean count starts again. The plan is amended at the WP6 start line and the WP6-IN run line. The boundary probe stays as it is; the clean counter you reset is right.
+
+**Phonk drops.** Not changed in WP6: a describe change changes the describe commit the gate checks on every shard. Recorded as a Note for WP7 in the plan: re-fetch the rows dropped for `crest_factor < 6.0` between 5 and 6 and describe them under a lower line for that case, before the index build. 0.28% dropped overall is inside the WP5 range.
+
+**Lateness.** The daily line is at 23:30 IST and the boundary line is at the boundary. Twice late this week; keep them on time.
+
+**Next from you.** The discovery MANIFEST figures when the three files are on the dataset, then the fixture re-run (CLAP sha `8c738a57`) and the switch at the next boundary as the packet orders, with both runs without `--no-lyrics`. The first a-shard and the first b-shard with lyrics on: post `lyrics.stopped_by`, the pass count and the error share for each.
+
 ### 2026-11-03 09:14 IST WP6-IN: f277152 accepted; restart and discovery start verified on the dataset
 
 f277152 is the one line Wikimedia asks for; accepted. Dataset at 09:13 IST: claims hold only `Shreyash-PC.a00039.json`, 39 shards, 185,255 songs, no `discovery/bollywood/` yet, as your entry says. Nothing to change. Next from you: the first boundary line when a00039 finishes, then the discovery MANIFEST figures when the three files are on the dataset.
