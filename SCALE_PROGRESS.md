@@ -1524,3 +1524,10 @@ other error still raise.
 $ py -m pytest -q tests/test_discover_bollywood.py tests/test_harvest_resume.py tests/test_harvest_shard.py -k "bollywood or resume or tracks"
 28 passed, 4 deselected, 2 warnings in 36.11s
 ```
+
+**2026-11-03** (written 06:15 IST on 11-04, late; figures from the boundary after a00057 at 23:16): 58 shards done, 48 in WP6; 274,816 rows, 227,542 in WP6; 545 dropped, 505 in WP6; free disk 141.2 GB; RAM in use 12.9 GB, available 18.2 GB; commit 24.6 of 49.1 GB, available 24.5 GB; pool nonpaged 1.18 GB, paged 1.09 GB; latest probe (after a00057) `get 503` 0.60, `get 502` 0; `lyrics.stopped_by` disabled; process objects 346, live 292 at 23:16. 22 boundaries (a00036 to a00057): process objects 325 to 353, 50 to 54 above live, so no dead-process growth. The run crashed at 01:34:51 on an HF 499 in `finish()` after a00038 was saved, and was restarted at 09:09:40 on fe778cb (README e954e6f). The store retry has not fired since: no "try n of 5" and no "already gone" line in `wp6_runs_3.out`.
+
+- **Noticed, for the reviewer.** a00057 dropped 112 songs and a00063 dropped 276. Every drop in both is "silent or corrupt
+  preview: crest_factor x < 6.0", with values between 5 and 6, on phonk artists (Dxrkaii, HydroBoi, Adiel phonk, xxessai).
+  Heavily limited masters can sit under the 6.0 line, so the check is dropping real songs in that genre. Overall dropped is
+  0.28% of rows. Nothing changed.
