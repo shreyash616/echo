@@ -36,6 +36,21 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-04 16:52 IST WP6-IN: 47,797 accepted for round 1, GO for the fixture re-run and the switch; round 2 discovery over the credited names fills the gap as b00010 onward
+
+Read 8135297 and the MANIFEST on the dataset: rows 47,797 (film 23,572, artist 24,225), 10 shards b00000 to b00009, every decade 1970s to 2020s above 2,500 (lowest the 1970s at 4,096), 46,786 of 47,797 rows Bollywood genre, 15,080 iTunes 200s with no 403 beside the a-run. Films matched per decade run 500 to 750 of 800 to 1,200 listed, so the unmatched 2,333 are mostly films with no album on iTunes India, not misses.
+
+**The gate is amended, not waived.** 50,000 is met across two discovery rounds. Round 1 goes now: the b-shards send no iTunes request, the decade and genre terms are met with room, and holding 47,797 rows for 2,203 more costs a day of catalogue for nothing. Plan line amended.
+
+**GO, in this order.**
+1. Fixture re-run as the packet orders: CLAP sha `8c738a57`, both test files pass. Post the result.
+2. At the next boundary after that: stop the a-run after `finish()`, run `--spec discovery/bollywood/shards.json --next --shards 10` without `--no-lyrics`, then resume the a-run with its remaining count, also without `--no-lyrics` (README 35ddd0d). Post the switch record with the boundary line, and for b00000 and the first a-shard after it: `lyrics.stopped_by`, the pass count, the error share, and the per-stage seconds.
+3. The b-shards' `language` share is measured from their manifests; post `hi` over all ten when the last is in.
+
+**Round 2 discovery, written while round 1 harvests.** `discover_bollywood.py` gains `--round 2`: no film pass; the name list is every name from `split_credit` over the `artist` field of `discovery/bollywood/tracks.jsonl`, in order of first appearance, minus the names round 1 searched (recover those from the cache: the 5,567 round 1 names are the seeds plus the credits of round 1's accepted albums and their songs, which the cached album and lookup answers reproduce without a request; if that is awkward, write the searched names to `discovery/bollywood/names.json` from round 1's cache first); each searched `entity=song limit=200`, Bollywood genre only, dedup against `keys.txt` read fresh and against round 1's rows; cap 50,000; output `discovery/bollywood/tracks2.jsonl`, `shards2.json` with ids from `b00010` and `"tracks": "discovery/bollywood/tracks2.jsonl"`, `MANIFEST2.json` with the same fields plus `names_searched` and `names_skipped_as_round_1`. Pacing, cache, pause file and the exhaustion stop as in round 1. Test on the saved fixtures: a round 2 name list from a small tracks file skips a round 1 name and keeps a new one; shard ids start at b00010. Post the count of names to search before starting it; start when the tests pass, from the worktree, beside the harvest. Its shards run at a boundary after round 1's ten, same procedure, `--spec discovery/bollywood/shards2.json`.
+
+The 5,791 films against the plan's 8,000 is fine; the plan's number was my estimate.
+
 ### 2026-11-04 06:11 IST WP6: the clear is real, `--no-lyrics` comes off at the WP6-IN switch, not before; phonk crest-factor drops go to WP7
 
 Read b232967 and the daily line. Dataset at 06:10 IST: 68 shards, 321,162 songs, claims a00068 and a00069, no `discovery/bollywood/` yet. The two probes meet the test: 20 of 20 answered 200 or 404, twice in a row, with the 503 share before them at 0.40 to 0.75 the same day, so this is the address coming off the shed list, not the API being down.
