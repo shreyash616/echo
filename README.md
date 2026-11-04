@@ -1311,6 +1311,51 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-04 20:44 IST WP6-IN: b00001 in, stopped_by error_share, 11 errors; the wall at 5,545.9 s is above WP5's range, so the amended per-stage term fails; BLOCKED
+
+As ordered in 5f11387. Figures from `catalog/v3/shard_b00001.manifest.json` on the dataset:
+
+| field | b00001 |
+|---|---|
+| songs, dropped | 4,731, 8 |
+| `stopped_by` | `error_share` |
+| passes | 1: 4,739 rows, 1,027 fetched, 3,701 none, 11 error |
+| error share | 0.2% (`error_after_retry` 11) |
+| 502/503/504 share | 5,424 of 21,892 calls, 24.8% (b00000: 3,429 of 19,051, 18.0%) |
+| seconds_per_stage | A 0.0, B 1,371.0, C 932.8, D 391.7, E 5,513.3, F 16.0 |
+| E_wait_after_D, wall | **2,817.8, 5,545.9** |
+
+Pass 1 status: get 200 858, get 400 4, get 404 8,064, get 503 3,000, search 200 7,542, search 502 1, search 503 2,423.
+The 11 errors are all `HTTPStatusError`. Dropped: 7 for crest factor under 6.0 (4.35 to 5.97) and 1 preview `ReadTimeout`,
+0.17% of 4,739.
+
+**Against the amended term (SCALE_PLAN.md line 410):**
+- B 1,371.0, C 932.8 and D 391.7 are inside WP5's range.
+- **The wall, 5,545.9, is above WP5's range of 2,475 to 4,847, by 699 s.** That fails the term as written.
+- E, read on the three it is now read on: `stopped_by` `error_share`, error share 0.2%, 502/503/504 share 24.8%. The
+  breaker did not trip.
+
+The wall is B to D, then `E_wait_after_D`, then F: 2,695.5 + 2,817.8 + 16.0 = 5,529.3, with 16.6 s outside the stages.
+So the wall follows E whenever E runs past D. It went over because the 503 share rose from 18.0% to 24.8% and E took
+721.5 s longer. b00000's wall, 4,831.5, was 15.1 s under the top (a00002's 4,846.6).
+
+**I have changed nothing.** b00002 started stage B at 20:43:23, on the same flags, since nothing in the run is stopped on my
+say. If the wall stays as the term reads, the choice is yours: read the wall as E is now read for lyric-on b-shards, or
+put `--no-lyrics` back on at a boundary you name. I stop after `finish()` at the boundary you say. At about 92 minutes a
+shard, b00009 lands around 09:00 IST on 11-05, not 07:10.
+
+**Boundary line after b00001** (20:43:53): RAM in use 13.9 GB, available 17.2 GB; commit 25.7 of 49.1 GB, available 23.4 GB;
+free disk 139.9 GB; pool nonpaged 1.48 GB, paged 1.39 GB; harvester private 5.9 GB (+0.28 GB since b00000);
+probe `{'get 400': 4, 'get 404': 6, 'get 503': 1}`; probe_keyed `{'get 400': 4, 'get 404': 5, 'get 503': 2}`.
+
+Noticed: both boundary probes sample 20 songs from the shard's `lyrics_error.txt`. With lyrics on, that list has only the
+rows E gave up on: 0 for b00000, so both probes made no call there (`probe {}`, `probe_keyed {}` in the b00000 line), and
+11 for b00001, so each made 11 calls, not 20. The same 4 got 400 in both, which looks like those songs' parameters, not
+the box. These probes are not comparable to the a-run's. I have not changed them. The clear count no longer stops
+anything with lyrics on, and the breaker reads `stopped_by`.
+
+**BLOCKED.**
+
 ### 2026-11-04 19:11 IST WP6-IN: b00000 in, lyrics on: 1 pass, 0 errors, stopped_by error_share; stage E 4,792 s, above WP5's E range, and the shard waited 2,310 s after D for it
 
 As ordered in a600003. Figures from `catalog/v3/shard_b00000.manifest.json` on the dataset:
