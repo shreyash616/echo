@@ -1400,6 +1400,69 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-05 03:32 IST WP6-IN: b00005 to b00009 in, all in range; round 1 done at 46,507 songs, 97.2% hi; MANIFEST2 7,374 rows; b00010 started 03:30; keyed probe clean once
+
+As ordered in 1d5f264, one post after b00009's `finish()`. Figures from each `shard_<id>.manifest.json` on the dataset, and
+the probes from `wp6_boundaries.txt`:
+
+| shard | songs | dropped | B | C | D | wall | probe (anonymous) | probe_keyed |
+|---|---|---|---|---|---|---|---|---|
+| b00005 | 4,629 | 0 | 1,281.4 | 920.6 | 388.8 | 2,612.1 | 200 4, 404 13, 503 3 | 200 1, 404 10, 503 9 |
+| b00006 | 4,725 | 0 | 1,399.6 | 910.2 | 387.7 | 2,716.2 | 404 15, 503 5 | 404 14, 503 6 |
+| b00007 | 4,730 | 2 | 1,288.1 | 908.6 | 392.5 | 2,610.5 | 200 1, 404 15, 503 4 | 200 1, 404 15, 503 4 |
+| b00008 | 4,700 | 0 | 1,179.3 | 904.2 | 391.2 | 2,494.8 | 200 1, 404 19 | 200 1, 404 17, 503 2 |
+| b00009 | 4,553 | 2 | 1,245.1 | 878.3 | 379.0 | 2,522.3 | 200 1, 404 17, 503 2 | **200 1, 404 19** |
+
+All five are `stopped_by` `disabled` with no passes. B, C and D are inside WP5's range on every shard, and dropped is under
+0.05% on each. No crash: the runner ended `=== exit 0 after 15725 s` at 03:30:00, its six shards done.
+
+**The keyed clear count.** b00008's keyed probe was unserved 2 of 20, 0.10. That is not under 0.10, so the count stayed at 0.
+b00009's was 0 of 20, so **the count is 1**. The state file carries it into the round 2 run. If the keyed probe after b00010
+is clean too, the loop stops with PROBE CLEAR, and I post before anything changes. As I read line 391, the flag would then
+come off at the next boundary, b00011's, which is the a-run's start. That is yours to confirm when it comes.
+
+**Round 1 over b00000 to b00009** (46,507 songs from 47,797 tracks rows; 14 dropped, 0.03%):
+- Every shard by its own manifest: 4,737, 4,731, 4,645, 4,480, 4,577, 4,629, 4,725, 4,730, 4,700, 4,553.
+
+**Language, ten shards** (from the features on the dataset):
+- `hi` on **45,211 of 46,507, 97.2%**. Per shard: 93.1, 95.9, 90.0, 97.7, 95.5, 99.9, 100.0, 100.0, 100.0, 100.0. b00002 is the
+  lowest at 4,182 of 4,645 (90.03%).
+- Distribution: `hi` 45,211, `tl` 374, `nl` 258, `id` 232, `ta` 121, `te` 116, `en` 93, null 37, `pa` 31, `mr` 11, others below.
+- Genre: Bollywood 45,521, Soundtrack 502, Tamil 121, Telugu 112, Regional Indian 84, Indian Pop 40.
+- **4,120 rows have a lyric file. 941 of them are not `hi`:** `tl` 374, `nl` 258, `id` 232, `pa` 23, `mr` 11. `de` is 6, all with
+  a lyric file.
+- 355 non-`hi` rows have no lyric file, so their language is the genre map's own answer. `ta` 121 and `te` 116 sit beside
+  the Tamil 121 and Telugu 112 genre rows. **37 rows have `language` null and no lyric file.**
+
+So 22.8% of the lyric-file rows (941 of 4,120) were moved off `hi`, near b00000's 23%. From b00005 on, `hi` is at or above
+99.9%, since no new lyric file came in with `--no-lyrics`. The WP6b rule as recorded covers the 941.
+
+**MANIFEST2** (`discovery/bollywood/MANIFEST2.json` on the dataset, uploaded and read back at 00:42:04, SHA256s match):
+- rows **7,374**, all `discovery_source` `artist`; `names_searched` 3,656; `names_skipped_as_round_1` 5,110; `round1_rows`
+  47,797; `keys_at_start` 445,590; `max_tracks` 50,000 (not reached).
+- `shards2.json`: b00010 rows 0 to 4,800 and b00011 rows 4,800 to 7,374, both `"source": "tracks"`.
+- By decade: 1930s 268, 1940s 1,756, 1950s 979, 1960s 348, 1970s 376, 1980s 195, 1990s 218, 2000s 276, 2010s 516, 2020s 2,442.
+
+**Gate, both rounds** (MANIFEST.json plus MANIFEST2.json):
+- **Rows:** 55,171 ≥ 50,000. As songs on shards: 46,507 in round 1, plus b00010's 4,800 and b00011's 2,574 from stage A (0
+  already catalogued), so 53,881 once both are in.
+- **Per decade, every one from the 1970s to the 2020s ≥ 2,500:** 1970s 4,472, 1980s 5,852, 1990s 6,694, 2000s 6,233,
+  2010s 9,335, 2020s 14,546. Before 1970: 1930s 337, 1940s 2,514, 1950s 2,774, 1960s 2,413, unknown 1.
+- **`hi` ≥ 90%:** 97.2% on round 1.
+- **Dropped under 2%:** 0.03% on round 1.
+
+**Round 2's shards.** They started at 03:30:30 on 4eee3e2, as ordered in 8756c5f and 1d5f264:
+`--next --shards 2 --spec discovery/bollywood/shards2.json --no-lyrics`, log `wp6in_b3.out`. Stage A gave b00010 4,800 songs
+from 4,800 rows and b00011 2,574 from 2,574. The boundary loop, the sampler, the range watch and both log windows are on the
+new log. b00011 lands around 05:00 IST. The a-run's 126 then start with `--no-lyrics`, unless the keyed clear comes first,
+and I post the resume record.
+
+**Boundary line after b00009** (03:30:45): RAM in use 11.8 GB, available 19.3 GB; commit 18.9 of 49.1 GB, available 30.2 GB;
+free disk 138.3 GB; pool nonpaged 1.54 GB, paged 1.47 GB; harvester private 6.55 GB (+0.13 GB since b00008);
+process objects 361, live 301.
+
+READY FOR REVIEW
+
 ### 2026-11-04 23:52 IST WP6-IN: b00004 in with --no-lyrics: 4,577 songs, 2 dropped, wall 2,526.6 s; keyed probe 13 of 20 at 503, clear count 0
 
 As ordered in 9515816. Figures from `catalog/v3/shard_b00004.manifest.json` on the dataset:
