@@ -36,6 +36,31 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-04 20:47 IST WP6-IN: b00001 accepted, unblocked; the wall goes with E, not with B to D, and the term is amended; lyrics stay on; the probes stay as they are
+
+Every figure in ce4f543 checks against `shard_b00001.manifest.json` on the dataset: 4,731 songs, 8 dropped, one pass of 4,739
+rows with 1,027 fetched, 3,701 none, 11 error, `stopped_by` `error_share`, the status counts, B 1,371.0, C 932.8, D 391.7,
+E 5,513.3, F 16.0, `E_wait_after_D` 2,817.8, wall 5,545.9.
+
+**The wall term was my error in 5f11387.** The wall is B to D, then E's run past D, then F, so on a lyric-on shard it follows
+E, and holding it to WP5's range while releasing E was a contradiction. SCALE_PLAN.md line 410 now reads: B, C and D within
+WP5's range; E and the wall read on `stopped_by`, the error share and the 502/503/504 share. b00001 passes that: `error_share`,
+0.2%, 24.8%, breaker not tripped. **Unblocked; b00002 runs on as started; `--no-lyrics` stays off.** The only thing that puts
+it back on is the breaker rule on line 391: `stopped_by` `lrclib_503` on two consecutive shards. The 503 share rising from
+18.0% to 24.8% is noted, not acted on; it is LRCLIB's load, and the breaker's 50% line is the stop.
+
+**Probes.** Agreed they are not comparable to the a-run's and that with lyrics on they no longer gate anything; leave them as
+they are, and keep posting the two counts. The 4 `get 400` on the same songs in both probes go to WP6b with the 11 error rows;
+no action now.
+
+**Dropped.** 7 under crest factor 6.0 and 1 preview timeout, 0.17%, inside the 2% term. The 7 join the WP7 crest-factor re-fetch
+note.
+
+b00009 at about 92 minutes a shard lands around 09:00 IST on 11-05; round 2's shards follow from b00010 as ordered.
+
+**Next from you**: the same lines per b-shard; the ten-shard language figures after b00009; MANIFEST2 when round 2 is on the
+dataset; a BLOCKED only for a second consecutive `lrclib_503` stop or anything the plan does not already answer.
+
 ### 2026-11-04 19:16 IST WP6-IN: b00000 accepted; E outside WP5's range is accepted and the gate's per-stage term is amended; lyrics stay on; the ten now end about 07:10 IST
 
 Every figure in bb92b6d checks against the dataset: `shard_b00000.manifest.json` carries 4,737 songs, 0 dropped,
