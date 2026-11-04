@@ -1260,6 +1260,64 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-04 17:37 IST WP6-IN: the switch is stopped at the fixture; keyed probe clean, CLAP sha 29966858 because one fixture song changed on iTunes, and two tracks tests read the runner's lyric files; runner stopped
+
+As ordered in f337228. The a-run is stopped and the b-run has not started.
+
+**Stop.** a00083 finished at 17:27:17 ("4773 songs, 14 dropped, 4786 previews deleted"). Its harvester, pid 24544, was
+stopped at 17:27:40, after `a00084 | stage B start`. No child processes were left and no previews.
+`wp6_runs_3.out` ends `=== exit -1 after 116282 s`. The claims for a00084 (stage A done) and a00085 stay. a00039 to
+a00083 is 45 of `-Shards 171`, so the a-run has 126 left.
+
+```
+2026-11-04T17:28:07 after a00083: RAM in use 12.3 GB, available 18.8 GB; commit 19.5 of 49.1 GB, available 29.6 GB; free disk 140.7 GB; pool nonpaged 1.33 GB, paged 1.17 GB; harvester WS  GB; harvester private  GB; top5 Memory Compression 1.0, python 1.0, claude 0.6, MsMpEng 0.4, PhoneExperienceHost 0.3; stopped_by disabled; probe {'get 200': 3, 'get 404': 14, 'get 503': 3}; process objects 361, live 303, GvFPS handles not running
+```
+
+**Probes, both on a00083's error list.**
+- **Keyed: clean.** 17:28:03 to 17:28:24, headers `['Lrclib-Api-Key', 'Lrclib-App-Id', 'User-Agent']` (names only),
+  `probe_keyed={'get 200': 2, 'get 404': 17, 'get 503': 1}`, unserved 0.05.
+- **Anonymous: not clean.** The boundary loop's probe, above, got 3 of 20 unserved (0.15). It ran from 17:28:07, at the
+  same time as the keyed one, so the address saw two calls a second, not one. I read that as my overlap, not a shed.
+
+**Fixture, lyrics on, from the runner's checkout at f337228** (`harvest_v3.py` unchanged since c0fcf8d): exit 0, 100
+songs, 0 dropped, 0 previews left. Stage E ran keyed, 1 pass, `{'get 200': 19, 'get 404': 5, 'get 503': 2, 'search 200': 4}`,
+0 still in error, `stopped_by "error_share"`.
+
+**1. CLAP sha `29966858`, not `8c738a57`.** I compared the dataset's fixture at revision d3ad6d5769 (2026-10-31 17:11)
+with this one:
+- same 5 artists and the same Deezer ids;
+- 99 of 100 songs in both, and all 99 have bit-identical CLAP vectors (max abs difference 0.0);
+- one song changed in iTunes' answer for The Marías: out `1563957178 Un Millón (CINEMA, 2021)`, in
+  `1882245797 beabadoobee - All I Did Was Dream of You (feat. The Marías)`, a 2026 single.
+
+Stage D gives the same vectors for the same audio. The sha moved because the fixture's input moved: stage A resolves
+the fixture's artists on iTunes live.
+
+**2. Two tracks tests fail on the runner's checkout:** `test_tracks_shard` and `test_tracks_shard_fields_match_catalogue`.
+They passed in the worktree (31 passed, 56b03f5). `rc.LYRICS_DIR` is the relative `ml/data/lyrics`. The runner's checkout
+has 30,919 lyric files there and the worktree has none. Two of the test's four Aashiqui 2 songs have files from earlier
+runs: `it_1073359419` (10-28) and `it_1073359663` (10-29). With a file, the row gains `theme_vec` and takes `language`
+from the lyrics rather than the genre map:
+
+```
+$ py -3 -m pytest -q tests/test_harvest_shard.py tests/test_harvest_resume.py
+FAILED tests/test_harvest_shard.py::test_tracks_shard - assert False   (all(r["language"] == "hi" ...))
+FAILED tests/test_harvest_shard.py::test_tracks_shard_fields_match_catalogue
+  AssertionError: ('palak muchhal:chahun main ya naa', [], ['theme_vec'])
+2 failed, 19 passed, 1 warning in 62.14s
+```
+
+That is my test (c69e6a2) not isolating the lyric folder. The harvester did what it should with a file that exists.
+
+**BLOCKED.** I have not changed a check. If you agree:
+- **(1)** The CLAP check becomes "the songs common to the last fixture have identical vectors", or 8c738a57 is replaced by
+  29966858 as the new reference.
+- **(2)** A test-only commit: the `tracks_shard` fixture points `rc.LYRICS_DIR` at its tmp dir, so it sees no lyric
+  files. Then both test files are re-run on the runner's checkout.
+
+Then b00000 `--shards 10` starts at once, without `--no-lyrics`. The runner stays stopped until you say; if you would
+rather the a-run go on meanwhile, I resume it on `--no-lyrics` with 126 left.
+
 ### 2026-11-04 17:03 IST WP6-IN: round 2 discovery, 56b03f5: 3,656 names to search; starting now from the worktree
 
 As ordered in 8756c5f. The change and the tests are in SCALE_PROGRESS.md. In short: `--round 2` runs the artist search
