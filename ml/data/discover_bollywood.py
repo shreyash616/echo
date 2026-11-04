@@ -19,6 +19,14 @@ Output to the store: discovery/bollywood/tracks.jsonl, discovery/bollywood/shard
 most SHARD_ROWS rows, "source": "tracks", read by harvest_v3 --spec) and discovery/bollywood/MANIFEST.json (rows by
 decade and source, films matched and unmatched a year, requests by status), each read back and hashed.
 
+  python ml/data/discover_bollywood.py --round 2 [--names-only]
+
+Round 2 (README 8756c5f): no film pass. Step 3 over every name credited in the artist field of round 1's rows, in
+order of first appearance, without the names round 1 searched; those are rebuilt from round 1's cached film pass,
+offline, and must number MANIFEST.json's artist_names. Rows also miss round 1's; at most ROUND2_MAX_TRACKS. Output
+tracks2.jsonl, shards2.json (ids after round 1's last shard, so b00010 on) and MANIFEST2.json, which adds
+names_searched and names_skipped_as_round_1. --names-only logs the name counts and sends no request.
+
 Pacing: iTunes India (country=IN) at 8 requests a minute, since WP6's stage A spends 20 a minute from the same
 address; 403 / 429 back off exponentially; nothing is sent while ml/data/bollywood_work/PAUSE exists. Every
 answer is cached under ml/data/bollywood_work/cache, so a rerun after a crash repeats no request.
@@ -51,6 +59,7 @@ ITUNES = "https://itunes.apple.com"
 ITUNES_SPACING_S = 7.5          # 8 requests a minute
 WIKI_SPACING_S = 1.0
 MAX_TRACKS = 100_000
+ROUND2_MAX_TRACKS = 50_000      # README 8756c5f
 SHARD_ROWS = 4_800
 # Wikimedia answers 403 to a client without a contact in its agent string (robot policy, https://w.wiki/4wJS)
 USER_AGENT = "echo-discover-bollywood/1.0 (https://github.com/shreyash616/echo; feel-based music discovery)"
@@ -170,12 +179,15 @@ class Exhausted(Exception):
 
 
 class Fetcher:
-    """GET with a per-host pacer, backoff on 403 / 429, the pause file, and a response cache on disk."""
+    """GET with a per-host pacer, backoff on 403 / 429, the pause file, and a response cache on disk. An offline
+    Fetcher answers from the cache only: an answer not there reads as None, as a non-200 did when it was asked
+    (only 200s are cached), and is counted as "<host> not cached"."""
 
-    def __init__(self, cache: Path, client: httpx.Client | None = None):
+    def __init__(self, cache: Path, client: httpx.Client | None = None, offline: bool = False):
         self.cache = cache
         self.cache.mkdir(parents=True, exist_ok=True)
         self.client = client or httpx.Client(headers={"User-Agent": USER_AGENT}, timeout=30.0)
+        self.offline = offline
         self.last: dict[str, float] = {}
         self.counts: Counter = Counter()
 
@@ -186,6 +198,9 @@ class Fetcher:
         if hit.exists():
             self.counts[f"{host} cached"] += 1
             return json.loads(hit.read_text(encoding="utf-8"))
+        if self.offline:
+            self.counts[f"{host} not cached"] += 1
+            return None
         for attempt in range(8):
             while PAUSE.exists():
                 time.sleep(30)
@@ -238,21 +253,35 @@ class Fetcher:
         return (d or {}).get("results") or []
 
 
-def discover(fetch: Fetcher, seen_keys: set[str], seen_ids: set[str], years: range,
-             seeds: list[str] = SEED_ARTISTS, max_tracks: int = MAX_TRACKS) -> tuple[list[dict], dict]:
-    rows: list[dict] = []
-    seed_norm = {_name_key(s) for s in seeds}
-    credits: list[str] = []
-    films_by_year: dict[str, dict] = {}
-    albums_accepted = 0
-
+def _keeper(rows: list[dict], seen_keys: set[str], seen_ids: set[str], max_tracks: int):
     def keep(row: dict | None) -> None:
         if row is None or len(rows) >= max_tracks or row["key"] in seen_keys or row["itunes_id"] in seen_ids:
             return
         seen_keys.add(row["key"])
         seen_ids.add(row["itunes_id"])
         rows.append(row)
+    return keep
 
+
+def name_list(credits: list[str]) -> list[str]:
+    """The names in order of first appearance, one per _name_key."""
+    names, done = [], set()
+    for n in credits:
+        k = _name_key(n)
+        if k and k not in done:
+            done.add(k)
+            names.append(n)
+    return names
+
+
+def film_pass(fetch: Fetcher, years: range, seeds: list[str], keep, rows: list[dict], max_tracks: int,
+              log_years: bool = True) -> tuple[list[str], dict, int]:
+    """Steps 1 and 2: each year's films, their accepted albums and the albums' songs. Returns the names credited on
+    the albums and songs in order, the films a year, and the albums accepted."""
+    seed_norm = {_name_key(s) for s in seeds}
+    credits: list[str] = []
+    films_by_year: dict[str, dict] = {}
+    albums_accepted = 0
     for year in years:
         text = fetch.wiki(year)
         films = parse_films(text, year) if text else []
@@ -271,14 +300,13 @@ def discover(fetch: Fetcher, seen_keys: set[str], seen_ids: set[str], years: ran
                         credits += split_credit(it.get("artistName", ""))
                         keep(track_row(it, "film", title, year))
         films_by_year[str(year)] = {"listed": len(films), "matched": matched, "page": text is not None}
-        log.info("%d: %d films, %d with a soundtrack, %d rows so far", year, len(films), matched, len(rows))
+        if log_years:
+            log.info("%d: %d films, %d with a soundtrack, %d rows so far", year, len(films), matched, len(rows))
+    return credits, films_by_year, albums_accepted
 
-    names, done = [], set()
-    for n in seeds + credits:
-        k = _name_key(n)
-        if k and k not in done:
-            done.add(k)
-            names.append(n)
+
+def search_names(fetch: Fetcher, names: list[str], keep, rows: list[dict], max_tracks: int) -> int:
+    """Step 3: each name searched once, Bollywood-genre songs kept. Returns the names searched."""
     searched = 0
     for name in names:
         if len(rows) >= max_tracks:
@@ -289,35 +317,79 @@ def discover(fetch: Fetcher, seen_keys: set[str], seen_ids: set[str], years: ran
         searched += 1
         if searched % 50 == 0 or searched == len(names):
             log.info("artists: %d of %d searched, %d rows so far", searched, len(names), len(rows))
+    return searched
 
+
+def _manifest(fetch: Fetcher, rows: list[dict], max_tracks: int, films_by_year: dict, albums_accepted: int,
+              searched: int, names: int, seeds: int) -> dict:
     decades = Counter(f"{((r['film_year'] or r['year']) // 10) * 10}s" if (r["film_year"] or r["year"]) else "unknown"
                       for r in rows)
     listed = sum(v["listed"] for v in films_by_year.values())
     matched = sum(v["matched"] for v in films_by_year.values())
-    manifest = {
+    return {
         "rows": len(rows), "max_tracks": max_tracks, "by_source": dict(Counter(r["discovery_source"] for r in rows)),
         "by_decade": dict(sorted(decades.items())),
         "films": {"listed": listed, "matched": matched, "unmatched": listed - matched, "by_year": films_by_year},
         "albums_accepted": albums_accepted, "artists_searched": searched,
-        "artist_names": len(names), "seeds": len(seeds),
+        "artist_names": names, "seeds": seeds,
         "film_rows_by_genre": dict(Counter(r["genre"] for r in rows if r["discovery_source"] == "film").most_common(10)),
         "requests": dict(sorted(fetch.counts.items())),
     }
+
+
+def discover(fetch: Fetcher, seen_keys: set[str], seen_ids: set[str], years: range,
+             seeds: list[str] = SEED_ARTISTS, max_tracks: int = MAX_TRACKS) -> tuple[list[dict], dict]:
+    rows: list[dict] = []
+    keep = _keeper(rows, seen_keys, seen_ids, max_tracks)
+    credits, films_by_year, albums_accepted = film_pass(fetch, years, seeds, keep, rows, max_tracks)
+    names = name_list(seeds + credits)
+    searched = search_names(fetch, names, keep, rows, max_tracks)
+    return rows, _manifest(fetch, rows, max_tracks, films_by_year, albums_accepted, searched, len(names), len(seeds))
+
+
+def round1_names(fetch: Fetcher, years: range, seeds: list[str] = SEED_ARTISTS) -> list[str]:
+    """The names round 1 searched, rebuilt from its cached film pass: the seeds, then the credits of its accepted
+    albums and their songs. The Fetcher should be offline, so nothing is sent."""
+    credits, _, _ = film_pass(fetch, years, seeds, lambda row: None, [], MAX_TRACKS, log_years=False)
+    return name_list(seeds + credits)
+
+
+def round2_names(round1_rows: list[dict], searched: list[str]) -> tuple[list[str], int]:
+    """README 8756c5f: every name split_credit finds in the artist field of round 1's rows, in order of first
+    appearance, without the names round 1 searched. Returns the names and how many were skipped as round 1's."""
+    done = {_name_key(n) for n in searched}
+    names = name_list([p for r in round1_rows for p in split_credit(r.get("artist", ""))])
+    keep = [n for n in names if _name_key(n) not in done]
+    return keep, len(names) - len(keep)
+
+
+def discover_round2(fetch: Fetcher, seen_keys: set[str], seen_ids: set[str], round1_rows: list[dict],
+                    searched: list[str], max_tracks: int = ROUND2_MAX_TRACKS) -> tuple[list[dict], dict]:
+    """Step 3 alone over round2_names; rows miss keys.txt and round 1's rows."""
+    for r in round1_rows:
+        seen_keys.add(r["key"])
+        seen_ids.add(r["itunes_id"])
+    names, skipped = round2_names(round1_rows, searched)
+    rows: list[dict] = []
+    done = search_names(fetch, names, _keeper(rows, seen_keys, seen_ids, max_tracks), rows, max_tracks)
+    manifest = _manifest(fetch, rows, max_tracks, {}, 0, done, len(names), 0)
+    manifest.update({"names_searched": done, "names_skipped_as_round_1": skipped})
     return rows, manifest
 
 
-def shard_spec(rows: list[dict]) -> dict:
-    shards = [{"shard": f"b{i // SHARD_ROWS:05d}", "start": i, "end": min(i + SHARD_ROWS, len(rows)), "source": "tracks"}
-              for i in range(0, len(rows), SHARD_ROWS)]
-    return {"tracks": f"{OUT}/tracks.jsonl", "shard_size": SHARD_ROWS, "shards": shards}
+def shard_spec(rows: list[dict], first: int = 0, tracks: str = f"{OUT}/tracks.jsonl") -> dict:
+    shards = [{"shard": f"b{first + i // SHARD_ROWS:05d}", "start": i, "end": min(i + SHARD_ROWS, len(rows)),
+               "source": "tracks"} for i in range(0, len(rows), SHARD_ROWS)]
+    return {"tracks": tracks, "shard_size": SHARD_ROWS, "shards": shards}
 
 
-def write(store, rows: list[dict], manifest: dict) -> None:
+def write(store, rows: list[dict], manifest: dict, suffix: str = "", first_shard: int = 0) -> None:
+    """tracks<suffix>.jsonl, shards<suffix>.json and MANIFEST<suffix>.json to the store, each read back and hashed."""
     from harvest_v3 import sha256
     WORK.mkdir(parents=True, exist_ok=True)
-    files = {"tracks.jsonl": "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
-             "shards.json": json.dumps(shard_spec(rows), indent=1),
-             "MANIFEST.json": json.dumps(manifest, indent=1, ensure_ascii=False)}
+    files = {f"tracks{suffix}.jsonl": "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+             f"shards{suffix}.json": json.dumps(shard_spec(rows, first_shard, f"{OUT}/tracks{suffix}.jsonl"), indent=1),
+             f"MANIFEST{suffix}.json": json.dumps(manifest, indent=1, ensure_ascii=False)}
     for name, text in files.items():
         (WORK / name).write_text(text, encoding="utf-8")
     for name in files:
@@ -336,12 +408,18 @@ def main() -> None:
     ap.add_argument("--store", default="dataset", help="'dataset', or a local directory")
     ap.add_argument("--from-year", type=int, default=1970)
     ap.add_argument("--to-year", type=int, default=datetime.now().year)
+    ap.add_argument("--round", type=int, choices=(1, 2), default=1)
+    ap.add_argument("--names-only", action="store_true", help="round 2: log the name counts, send no request")
     args = ap.parse_args()
     WORK.mkdir(parents=True, exist_ok=True)
+    logname = "discover.log" if args.round == 1 else "discover2.log"
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s",
-                        handlers=[logging.FileHandler(WORK / "discover.log", encoding="utf-8"), logging.StreamHandler(sys.stdout)])
+                        handlers=[logging.FileHandler(WORK / logname, encoding="utf-8"), logging.StreamHandler(sys.stdout)])
     from harvest_v3 import DatasetStore, LocalStore, global_seen
     store = DatasetStore() if args.store == "dataset" else LocalStore(Path(args.store))
+    if args.round == 2:
+        main_round2(store, args.names_only)
+        return
     keys, ids = global_seen(store)
     log.info("start: years %d to %d, %d keys in %s", args.from_year, args.to_year, len(keys), KEYS)
     rows, manifest = discover(Fetcher(WORK / "cache"), keys, ids, range(args.from_year, args.to_year + 1))
@@ -350,6 +428,36 @@ def main() -> None:
     write(store, rows, manifest)
     log.info("done: %d rows, by decade %s, films %d of %d matched", manifest["rows"], manifest["by_decade"],
              manifest["films"]["matched"], manifest["films"]["listed"])
+
+
+def main_round2(store, names_only: bool) -> None:
+    from harvest_v3 import global_seen
+    got = WORK / "_round1"
+    got.mkdir(parents=True, exist_ok=True)
+    m1 = json.loads(store.fetch(f"{OUT}/MANIFEST.json", got).read_text(encoding="utf-8"))
+    spec1 = json.loads(store.fetch(f"{OUT}/shards.json", got).read_text(encoding="utf-8"))
+    rows1 = [json.loads(l) for l in store.fetch(f"{OUT}/tracks.jsonl", got).read_text(encoding="utf-8").splitlines() if l]
+    if len(rows1) != m1["rows"]:
+        raise SystemExit(f"stopped: tracks.jsonl has {len(rows1)} rows, MANIFEST.json says {m1['rows']}")
+    y0, y1 = m1["years"]
+    replay = Fetcher(WORK / "cache", offline=True)
+    searched = round1_names(replay, range(y0, y1 + 1))
+    if len(searched) != m1["artist_names"]:
+        raise SystemExit(f"stopped: {len(searched)} round 1 names rebuilt from the cache, MANIFEST.json says "
+                         f"{m1['artist_names']}; replay {dict(replay.counts)}")
+    names, skipped = round2_names(rows1, searched)
+    log.info("round 2: %d names to search, %d skipped as round 1's (%d round 1 names rebuilt, replay %s; %d round 1 rows)",
+             len(names), skipped, len(searched), dict(sorted(replay.counts.items())), len(rows1))
+    if names_only:
+        return
+    keys, ids = global_seen(store)
+    log.info("start: round 2, %d keys in %s, shards from b%05d", len(keys), KEYS, len(spec1["shards"]))
+    rows, manifest = discover_round2(Fetcher(WORK / "cache"), keys, ids, rows1, searched)
+    manifest.update({"round": 2, "round1_rows": len(rows1), "keys_at_start": len(keys),
+                     "date": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+    write(store, rows, manifest, suffix="2", first_shard=len(spec1["shards"]))
+    log.info("done: round 2, %d rows, by decade %s, %d names searched", manifest["rows"], manifest["by_decade"],
+             manifest["names_searched"])
 
 
 if __name__ == "__main__":

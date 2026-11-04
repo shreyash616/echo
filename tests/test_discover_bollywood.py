@@ -14,6 +14,10 @@ README 871d37d:
 - an iTunes request that fails eight times stops the run, with the status counts, instead of reading as a miss;
   Wikipedia's reads as a missing page;
 - the MANIFEST counts film-path rows by genre.
+README 8756c5f, round 2:
+- its names are the round 1 rows' credits in first-appearance order, without round 1's names;
+- round 1's names are rebuilt from the cached film pass, and an offline Fetcher sends nothing;
+- its rows miss round 1's, and shards2.json starts at b00010 over tracks2.jsonl.
 """
 from __future__ import annotations
 
@@ -218,3 +222,48 @@ def test_shard_spec_sizes():
     spec = db.shard_spec(rows)
     assert [(s["start"], s["end"]) for s in spec["shards"]] == [(0, db.SHARD_ROWS), (db.SHARD_ROWS, 2 * db.SHARD_ROWS),
                                                                   (2 * db.SHARD_ROWS, 2 * db.SHARD_ROWS + 7)]
+
+
+def test_round2_names_skip_round1():
+    rows1 = [{"artist": "Arijit Singh, Shreya Ghoshal"}, {"artist": "New Singer & Arijit Singh"},
+             {"artist": "A. R. Rahman"}, {"artist": "Another Voice, New Singer"}]
+    names, skipped = db.round2_names(rows1, ["Arijit Singh", "Shreya Ghoshal", "A.R. Rahman"])
+    assert names == ["New Singer", "Another Voice"]  # first appearance order, one per name
+    assert skipped == 3  # spaced initials still match round 1's name
+
+
+def test_round1_names_rebuilt_from_the_cache(tmp_path, monkeypatch):
+    import httpx
+    monkeypatch.setattr(db, "WORK", tmp_path / "work")
+    fetch = FakeFetcher()
+    _, m = db.discover(fetch, set(), set(), range(1975, 1977), seeds=["Kishore Kumar"])
+    terms = [c[2]["term"] for c in fetch.calls if c[1] == "search" and c[2].get("entity") == "song"]
+    replay = FakeFetcher()
+    assert db.round1_names(replay, range(1975, 1977), ["Kishore Kumar"]) == terms and len(terms) == m["artist_names"]
+    assert not any(c[2].get("entity") == "song" and c[1] == "search" for c in replay.calls)  # no artist search
+    def refuse(req):
+        raise AssertionError("an offline Fetcher sent a request")
+    off = db.Fetcher(tmp_path / "cache", httpx.Client(transport=httpx.MockTransport(refuse)), offline=True)
+    assert off.itunes("search", {"term": "Sholay", "entity": "album"}) == [] and off.counts == {"itunes not cached": 1}
+
+
+def test_round2_end_to_end(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "WORK", tmp_path / "work")
+    store = hv.LocalStore(tmp_path / "dataset")
+    kishore = [it for it in load("itunes_artist_kishore.json")["results"] if it.get("primaryGenreName") == "Bollywood"]
+    already = next(r for r in (db.track_row(it, "artist") for it in kishore) if r)  # a round 1 row
+    rows1 = [{**already, "artist": "Kishore Kumar & Lata Mangeshkar"}]
+    fetch = FakeFetcher()
+    rows, m = db.discover_round2(fetch, set(), set(), rows1, ["Lata Mangeshkar"])
+    assert [c[2]["term"] for c in fetch.calls] == ["Kishore Kumar"]
+    assert rows and already["key"] not in {r["key"] for r in rows} and already["itunes_id"] not in {r["itunes_id"] for r in rows}
+    assert all(r["genre"] == "Bollywood" and r["discovery_source"] == "artist" for r in rows)
+    assert m["names_searched"] == m["artist_names"] == 1 and m["names_skipped_as_round_1"] == 1
+    assert m["rows"] == len(rows) and m["max_tracks"] == db.ROUND2_MAX_TRACKS
+    db.write(store, rows, m, suffix="2", first_shard=10)
+    spec = json.loads((store.root / "discovery/bollywood/shards2.json").read_text(encoding="utf-8"))
+    assert spec["tracks"] == "discovery/bollywood/tracks2.jsonl" and spec["shards"][0]["shard"] == "b00010"
+    stored = [json.loads(l) for l in (store.root / "discovery/bollywood/tracks2.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert stored == rows
+    assert json.loads((store.root / "discovery/bollywood/MANIFEST2.json").read_text(encoding="utf-8"))["names_searched"] == 1
+    assert not (store.root / "discovery/bollywood/tracks.jsonl").exists()  # round 1's files are left alone

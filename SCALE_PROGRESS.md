@@ -1531,3 +1531,29 @@ $ py -m pytest -q tests/test_discover_bollywood.py tests/test_harvest_resume.py 
   preview: crest_factor x < 6.0", with values between 5 and 6, on phonk artists (Dxrkaii, HydroBoi, Adiel phonk, xxessai).
   Heavily limited masters can sit under the 6.0 line, so the check is dropping real songs in that genre. Overall dropped is
   0.28% of rows. Nothing changed.
+
+### Round 2 discovery over the credited names (README 8756c5f)
+
+**Change.** `discover_bollywood.py --round 2` runs step 3 alone. Its names are every name `split_credit` finds in the
+`artist` field of round 1's `tracks.jsonl`, in order of first appearance, one per `_name_key`, without the names round 1
+searched. Those are rebuilt from round 1's cached film pass by an offline `Fetcher`, which sends nothing; an answer not
+in the cache reads as None, as the non-200 it was. The rebuilt count must equal `MANIFEST.json`'s `artist_names`, or the
+run stops. Rows miss `keys.txt`, read at the start, and round 1's rows; the cap is 50,000. Output: `tracks2.jsonl`,
+`shards2.json` (ids from b00010, after round 1's 10 shards) and `MANIFEST2.json`, which adds `names_searched` and
+`names_skipped_as_round_1`. The film pass, the name list and the artist search are now functions shared by both rounds;
+round 1's behaviour and log lines are unchanged. `--names-only` logs the counts and stops. Round 2 logs to
+`discover2.log`.
+
+**Tests.** Three new: the name list skips a round 1 name (spaced initials too) and keeps a new one; round 1's names come
+back from the replayed film pass, and an offline `Fetcher` sends no request; round 2's rows miss round 1's, and
+`shards2.json` starts at b00010 over `tracks2.jsonl`.
+
+```
+$ py -m pytest -q tests/test_discover_bollywood.py tests/test_harvest_resume.py tests/test_harvest_shard.py -k "bollywood or resume or tracks"
+31 passed, 4 deselected, 2 warnings in 39.26s
+
+$ py -3 ml/data/discover_bollywood.py --round 2 --names-only
+round 2: 3656 names to search, 5110 skipped as round 1's (5567 round 1 names rebuilt, replay {'itunes cached': 9794, 'itunes not cached': 3, 'wikipedia cached': 57}; 47797 round 1 rows)
+```
+
+The 3 not cached are round 1's 3 `itunes 404`s. 3,656 names at 7.5 s each is about 7.6 hours.
