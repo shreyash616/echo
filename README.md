@@ -36,6 +36,35 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-04 19:16 IST WP6-IN: b00000 accepted; E outside WP5's range is accepted and the gate's per-stage term is amended; lyrics stay on; the ten now end about 07:10 IST
+
+Every figure in bb92b6d checks against the dataset: `shard_b00000.manifest.json` carries 4,737 songs, 0 dropped,
+`stopped_by` `error_share` (the normal finish: rows in error at or under 2%, `harvest_v3.py` :633-634), one pass of 4,735 rows
+with 1,358 fetched, 3,377 none, 0 error, and the status counts, per-stage and other seconds as you posted them. The features file
+gives `hi` on 4,410 of 4,737 (93.1%), 1,360 rows with a lyric file, 315 of them off `hi` (`tl` 125, `nl` 114, `id` 66, `mr` 3,
+`pa` 3, `de` 1; the `de` row has a lyric file, so it belongs with these, not with the `en` 11), and one row with `language` null
+and no lyric file. Claims on the dataset: a00084, a00085, b00001, b00002.
+
+**Decision on E.** Accepted. B, C, D and the wall are inside WP5's range; E at 4,791.8 s is 19,051 calls with LRCLIB
+answering 503 to 3,429 of them, retried on a 1 s sleep. Those calls are spent either now or in WP6b, and now is cheaper,
+since the first 2,481 s of each E run under B to D. `--no-lyrics` stays off on the b-run. The gate's per-stage term in
+SCALE_PLAN.md line 410 now reads: B, C, D and the wall within WP5's range; E read on `stopped_by`, the error share and
+the 502/503/504 share, not on WP5's E range. The breaker rule on line 391 stands: a `lrclib_503` stop on two consecutive
+shards puts `--no-lyrics` back on at the next boundary.
+
+**Timeline as it now stands.** About 80 minutes a b-shard, so b00009 lands around 07:10 IST on 11-05. Round 2 discovery
+ends around 01:00 IST; post MANIFEST2 then. Round 2's shards run from b00010 with `--spec discovery/bollywood/shards2.json`
+at the boundary after b00009, before the a-run resumes, as ordered in 8756c5f. Nothing is retuned mid-run.
+
+**Language.** 93.1% `hi` clears the 90% term on this shard with the lyric misreads included. The 315 rows are the WP6b
+rule's size here; `nl` joining `tl` and `id` is the same romanised-Hindi misread, since `nl` is in `LATIN_LYRIC_LANGS`
+(`features.py` :732), and the rule as recorded already covers every Latin-script code. The null-language row goes to WP6b
+with the rest; no action now.
+
+**Next from you**: per b-shard as it finishes, the same five lines (songs and dropped, `stopped_by`, passes, error share,
+502/503/504 share, seconds per stage and `E_wait_after_D`); the ten-shard language figures when b00009 is in; MANIFEST2 when
+round 2 is on the dataset; a BLOCKED if the breaker trips on two consecutive shards.
+
 ### 2026-11-04 18:07 IST WP6-IN: 4eee3e2 accepted, b-run start verified; the romanised lyric rule is recorded for WP6b, nothing changes in this run
 
 Read 57d1170. Dataset at 18:06 IST: claims a00084, a00085, b00000, b00001. 4eee3e2 is the fixture under `MonkeyPatch.context()` with its own lyric dir, test only, 21 passed. Accepted. The switch is as ordered: `next_shard` left the a00084 claim, b00000 and b00001 from the tracks file with no request, keyed stage E beside B, the keyed probe before the anonymous one.
