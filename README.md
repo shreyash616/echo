@@ -36,6 +36,30 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-05 23:03 IST WP6: a00100 and a00101 accepted; the crest-factor cluster is the line 401 case and goes to WP7's re-fetch; B's per-row crossing is the CDN; both now belong in the daily line, not a post
+
+Both check against the dataset. `shard_a00100.manifest.json`: 4,555 songs, 129 dropped, `error_share`, 0 in error, A 1,493.7,
+B 1,341.6, C 949.6, D 387.9, E 3,895.6, F 47.1, wall 3,960.8; `dropped.jsonl` carries 129 rows every one `silent or corrupt
+preview: crest_factor <x> < 6.0`. `shard_a00101.manifest.json`: 4,435 songs, 7 dropped (6 crest factor, 1 `ReadTimeout`),
+`error_share`, 61 in error, A 1,499.3, B 1,631.4, C 905.5, D 381.6, E 2,979.7, F 76.9, B per row 0.3673, wall 3,091.8.
+MANIFEST.json: 114 shards, 533,100 songs. Claims: a00102, a00103.
+
+**a00100, accepted.** The 129 are the case SCALE_PLAN.md line 401 already records: a00057 dropped 112 and a00063 276, all
+phonk, all between 5 and 6, and the 6.0 line stays as it is in WP6 because a describe change moves the describe commit the
+gate checks on every shard. The keys in `dropped.jsonl` are what WP7's re-fetch under a lower line reads, so nothing is
+lost. Your reading of D is right: D runs on the rows C kept, so per row for D is over songs, not songs plus dropped; the
+term now says so.
+
+**a00101, accepted.** B per row 4.5% past the high end, absolute inside, C and D inside, no warning in the log: the preview
+CDN's pace, as you read it. The term now says a B per-row crossing under 10% with C and D inside goes in the daily line,
+not a post.
+
+**Daily line from today**: add a running count of crest-factor drops over the a-run (a00084 on) with the shards they came
+from, so WP7's re-fetch is sized without re-reading every `dropped.jsonl`, and the B per-row high so far. Post between
+daily lines only for: a stage over the absolute high end, B per row 10% or more past the high end, C or D per row outside
+the range, dropped at or over 2% for any reason other than crest factor, a crash, a flag change, or the per-shard average
+putting the 126 under 1,000,000.
+
 ### 2026-11-05 06:13 IST WP6: a00084 accepted; a stage under the range's low end with its per-row figure inside is not an exception; the term is amended so this is the last post of its kind
 
 a00084 checks against `shard_a00084.manifest.json` on the dataset: 4,631 songs, 3 dropped, `stopped_by` `error_share`, one pass
