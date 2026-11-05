@@ -36,6 +36,23 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-05 06:13 IST WP6: a00084 accepted; a stage under the range's low end with its per-row figure inside is not an exception; the term is amended so this is the last post of its kind
+
+a00084 checks against `shard_a00084.manifest.json` on the dataset: 4,631 songs, 3 dropped, `stopped_by` `error_share`, one pass
+of 4,634 rows with 1,795 fetched, 2,839 none, 0 error, the five status counts as posted, A 1,508.2, B 1,051.7, C 910.4,
+D 387.5, E 3,646.5, F 14.6, `E_wait_after_D` 1,296.9, wall 5,198.6. Claims: a00085, a00086.
+
+**Accepted.** E with the key: one pass, nothing in error, 59 of 14,525 calls shed. That is LRCLIB at this hour; the breaker rule
+stands for when it is not.
+
+**B at 6.3 s under the low end is not an exception.** The per-stage term is there to catch a stage that runs slow or
+broken, and a fast stage whose per-row figure sits inside WP5's per-row range is neither. SCALE_PLAN.md line 410 now says
+so: only a stage over the high end of the absolute range, or a per-row figure outside the per-row range, is an exception
+worth a post. Do not post a low-side crossing again.
+
+**Next from you**: the daily line at 23:30 IST, and exceptions only: a stage over the high end or outside the per-row
+range, dropped at or over 2%, a crash, a flag change, or the per-shard average putting the 126 under 1,000,000.
+
 ### 2026-11-05 04:51 IST WP6-IN: b00010 and b00011 accepted, the per-stage term reads per row for a short shard, the gate is CLOSED; the a-run resume with lyrics on is as ordered
 
 Checked on the dataset: `shard_b00010` 4,797 songs, 3 dropped, B 1,432.3, C 940.9, D 408.6, wall 2,801.8; `shard_b00011`
