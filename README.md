@@ -1470,6 +1470,48 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-05 21:22 IST WP6: a00100 dropped 129 of 4,684 (2.75%), every one at stage C on crest factor under 6.0; D per row 0.0828 under the per-row floor as a result; run goes on
+
+An exception, as ordered in bff86ef: dropped at or over 2%. Figures from `shard_a00100.manifest.json` and
+`shard_a00100.dropped.jsonl`, both uploaded and read back (SHA256s match):
+
+| field | a00100 |
+|---|---|
+| songs, dropped | 4,555, **129** (2.75% of 4,684) |
+| `stopped_by`, passes | `error_share`, 1: 4,645 rows, 1,015 fetched, 3,630 none, 0 error |
+| 502/503/504 share | 0 of 15,515 calls |
+| seconds_per_stage | A 1,493.7, B 1,341.6, C 949.6, D 387.9, E 3,895.6, F 47.1 |
+| E_wait_after_D, wall | 1,216.5, 3,960.8 |
+
+**The 129.** Stage B fetched all 4,684 previews (`B: 4684 previews, 0 dropped`). Every drop is at stage C, all with the same
+reason: `silent or corrupt preview: crest_factor < 6.0`. The crest factors run from 3.22 to 6.00, and 41 of the 129 are at
+5.5 or above. They come from 70 artists, with at most 5 per artist. The top names (`509 $icario`, `Playaphonk`,
+`RHODAMINE`, `EVVORTEX`, `Feerix`, `PHOROMANE`) read as phonk and other heavily limited electronic music. So these look
+like loud, compressed masters, not broken files. I have not listened to them, so that is a reading, not a finding.
+
+The same rule dropped songs on the earlier a-shards too, all of them crest factor and nothing else:
+
+| shard | dropped | crest factor range | at 5.5 or above | artists |
+|---|---|---|---|---|
+| a00086 | 30 | 3.69 to 5.90 | 14 | 20 |
+| a00089 | 43 | 4.74 to 5.98 | 25 | 30 |
+| a00100 | 129 | 3.22 to 6.00 | 41 | 70 |
+
+**D per row.** 387.9 over 4,684 is 0.0828, under the 0.0836 floor. CLAP ran on the 4,555 songs left after C
+(`CLAP done: 4555 songs, 13665 windows`), and over those it is 0.0852. So D's figure is the 129 drops showing up again, not a
+second fault. B per row is 0.2864 and C 0.2027, both inside.
+
+**I have changed nothing.** The 6.0 threshold is untouched, and the run goes on. a00101 started B at 21:21:26 and a00102
+started A. Whether this is a genre the threshold catches by design, or one it should not drop, is yours. If it should not,
+the 129 can be re-described in WP6b from their keys in `dropped.jsonl`.
+
+**Boundary line after a00100** (21:21:31): RAM in use 14 GB, available 17.1 GB; commit 25.9 of 49.1 GB, available 23.2 GB;
+free disk 136.9 GB; pool nonpaged 1.76 GB, paged 1.64 GB; harvester private 6.64 GB; process objects 358, live 296.
+
+The daily line follows at 23:30 IST.
+
+READY FOR REVIEW
+
 ### 2026-11-05 06:12 IST WP6: a00084 in with lyrics on: 4,631 songs, 3 dropped; E one pass, 0 in error, 502/503/504 0.4% of calls; B 1,051.7 is 6.3 s under WP5's range on a full shard
 
 As ordered in e7836d7: a00084's lyric figures, once. Figures from `catalog/v3/shard_a00084.manifest.json` on the dataset:
