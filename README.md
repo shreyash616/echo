@@ -1470,6 +1470,57 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-05 22:14 IST WP6: a00101's B per row 0.3673 is over WP5's per-row high end of 0.3516; absolute B 1,631.4 is inside; run goes on
+
+An exception, as amended in bff86ef: a per-row figure outside the per-row range. Figures from `shard_a00101.manifest.json`:
+
+| field | a00101 |
+|---|---|
+| songs, dropped | 4,435, 7 (0.16% of 4,442) |
+| `stopped_by`, passes | `error_share`, 1: 4,440 rows, 2,097 fetched, 2,282 none, 61 error |
+| error share, 502/503/504 share | 1.4% (`error_after_retry` 61), 0 of 11,795 calls |
+| seconds_per_stage | A 1,499.3, B **1,631.4**, C 905.5, D 381.6, E 2,979.7, F 76.9 |
+| per row (over 4,442) | B **0.3673** (range 0.2178 to 0.3516), C 0.2039, D 0.0859 |
+| E_wait_after_D, wall | 61.2, 3,091.8 |
+
+B is over on the per-row term only. 1,631.4 is under the absolute high end of 1,718, and C and D are inside both ranges. Stage B
+ran from 21:21:26 to 21:48:37 and logged `B: 4441 previews, 1 dropped`, with no warning or error lines. The preview
+downloads are not logged per request, so the log gives no cause. a00102's stage A ran beside it from 21:21:26 to 21:46:22,
+as on every a-shard after the first.
+
+B per row on every a-shard so far, by manifest (times in UTC as the manifest gives them):
+
+| shard | rows | B | per row | done |
+|---|---|---|---|---|
+| a00084 | 4,634 | 1,051.7 | 0.2270 | 00:39 |
+| a00085 | 4,845 | 1,155.6 | 0.2385 | 01:45 |
+| a00086 | 4,776 | 1,405.5 | 0.2943 | 02:38 |
+| a00087 | 4,756 | 1,473.0 | 0.3097 | 03:36 |
+| a00088 | 4,631 | 1,112.0 | 0.2401 | 04:34 |
+| a00089 | 4,437 | 1,508.8 | 0.3400 | 05:39 |
+| a00090 | 4,379 | 1,018.7 | 0.2326 | 06:34 |
+| a00091 | 4,610 | 1,555.5 | 0.3374 | 07:28 |
+| a00092 | 4,816 | 1,630.9 | 0.3386 | 08:29 |
+| a00093 | 4,901 | 1,553.5 | 0.3170 | 09:21 |
+| a00094 | 4,421 | 1,154.8 | 0.2612 | 10:20 |
+| a00095 | 4,239 | 1,052.1 | 0.2482 | 11:17 |
+| a00096 | 4,787 | 1,141.9 | 0.2385 | 12:18 |
+| a00097 | 4,574 | 1,157.0 | 0.2530 | 13:08 |
+| a00098 | 4,586 | 1,191.8 | 0.2599 | 13:52 |
+| a00099 | 4,487 | 1,174.8 | 0.2618 | 14:42 |
+| a00100 | 4,684 | 1,341.6 | 0.2864 | 15:50 |
+| a00101 | 4,442 | 1,631.4 | **0.3673** | 16:41 |
+
+B has swung between 0.2270 and 0.3400 all day without a trend, and a00101 is 4.5% past the high end on a shard 8% shorter
+than a00092, which took the same seconds. I read it as the preview CDN's pace on a short shard, not a fault. That is a
+reading: the log does not show it.
+
+**I have changed nothing.** The run goes on: a00102 started B at 22:13:33, and a00103 started A.
+
+The daily line follows at 23:30 IST.
+
+READY FOR REVIEW
+
 ### 2026-11-05 21:22 IST WP6: a00100 dropped 129 of 4,684 (2.75%), every one at stage C on crest factor under 6.0; D per row 0.0828 under the per-row floor as a result; run goes on
 
 An exception, as ordered in bff86ef: dropped at or over 2%. Figures from `shard_a00100.manifest.json` and
