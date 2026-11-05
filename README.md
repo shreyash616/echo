@@ -1453,6 +1453,40 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-05 06:12 IST WP6: a00084 in with lyrics on: 4,631 songs, 3 dropped; E one pass, 0 in error, 502/503/504 0.4% of calls; B 1,051.7 is 6.3 s under WP5's range on a full shard
+
+As ordered in e7836d7: a00084's lyric figures, once. Figures from `catalog/v3/shard_a00084.manifest.json` on the dataset:
+
+| field | a00084 |
+|---|---|
+| songs, dropped | 4,631, 3 |
+| `stopped_by` | `error_share` (as on b00000) |
+| passes | 1: 4,634 rows, 1,795 fetched (38.7%), 2,839 none, 0 error |
+| error share | 0.0% (`error_after_retry` 0) |
+| 502/503/504 share | 59 of 14,525 calls, 0.4% (`get 503` 37, `search 503` 22) |
+| seconds_per_stage | A 1,508.2, B **1,051.7**, C 910.4, D 387.5, E 3,646.5, F 14.6 |
+| E_wait_after_D, wall | 1,296.9, 5,198.6 |
+
+Status counts from the log: `get 200` 1,508, `get 404` 6,981, `get 503` 37, `search 200` 5,977, `search 503` 22. The breaker
+did not trip. The runner logged `shard a00084 done in 3695 s` at 06:10:14, and a00085's stages E and B started at 06:10:39.
+
+**The exception.** B 1,051.7 is under 1,058, the low end of WP5's absolute range. a00084 has 4,634 rows, so as e7836d7 reads
+it, the absolute range applies. Per row (seconds over songs plus dropped) it is inside WP5's range on all three:
+B 0.2270 (range 0.2178 to 0.3516), C 0.1965 (0.1927 to 0.2760), D 0.0836 (0.0836 to 0.1661, at the floor). C and D are
+inside the absolute range. I have changed nothing, and the run goes on. WP6's own gate on line 397 has no per-stage term,
+so nothing waits on this. How a fast full shard reads is yours.
+
+The wall includes stage A's 1,508.2 s on iTunes. As the first claim of the run, A had no earlier shard to overlap with.
+From a00085 on, A runs beside the shard before it.
+
+**Boundary line after a00084** (06:10:45): RAM in use 14 GB, available 17.1 GB; commit 24.2 of 49.1 GB, available 24.9 GB;
+free disk 138.3 GB; pool nonpaged 1.56 GB, paged 1.48 GB; harvester private 5.61 GB (-0.27 GB since b00011);
+process objects 357, live 296. Both probes are empty (`{}`), since the shard's lyric error list has 0 songs to sample.
+
+From here: the daily line at 23:30 IST, and exceptions only.
+
+READY FOR REVIEW
+
 ### 2026-11-05 04:49 IST WP6-IN: b00010 and b00011 in, 53,877 b-songs in all; b00011's B, C and D are under WP5's range, as a 2,574-row shard; keyed probe clean twice, so the a-run resumed at 04:43:06 with lyrics on; BLOCKED on the gate's close only
 
 As ordered in 78189cd. Figures from each `shard_<id>.manifest.json` on the dataset, and the probes from `wp6_boundaries.txt`:
