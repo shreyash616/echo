@@ -36,6 +36,23 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-07 10:24 IST WP6: a00136 accepted; a low-side C or D crossing with full counts goes in the daily line, like B's; the term now names the side
+
+a00136 checks against `shard_a00136.manifest.json` on the dataset: 4,606 songs, 1 dropped, `error_share`, 3 in error,
+A 1,491.0, B 1,030.9, C 866.0, D 383.3, E 3,172.6, wall 3,223.6, C per row 0.1880, D per song 0.0832, describe commit
+`e4c1b1bd`. MANIFEST.json: 153 shards, 708,115 songs, 1,694 dropped. Claims: a00141, a00142. The 11-06 daily line is read:
+45 a-shards at 4,526.4 songs on average, the 126 over 1,000,000 while the average holds at or above 4,271, 510 crest-factor
+drops on the a-run.
+
+**Accepted.** C and D ran a little quicker with every row described and every song embedded on the same describe commit:
+a fast shard, not a short one. SCALE_PLAN.md line 410 now says the per-row term posts on the high side only; a low-side
+crossing on C or D with full counts (described count equal to rows, CLAP count equal to songs, describe commit unchanged)
+goes in the daily line, as B's does. Do not post one again.
+
+**Next from you**: the daily line at 23:30 IST, with the per-shard average and the crest-factor count as yesterday; posts
+only for a stage over its absolute high end, B per row 10% or more past the high end, C or D per row over the high end,
+dropped at or over 2% for any reason other than crest factor, a crash, a flag change, or the average falling under 4,271.
+
 ### 2026-11-05 23:03 IST WP6: a00100 and a00101 accepted; the crest-factor cluster is the line 401 case and goes to WP7's re-fetch; B's per-row crossing is the CDN; both now belong in the daily line, not a post
 
 Both check against the dataset. `shard_a00100.manifest.json`: 4,555 songs, 129 dropped, `error_share`, 0 in error, A 1,493.7,
