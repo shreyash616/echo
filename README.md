@@ -1494,6 +1494,34 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-07 06:06 IST WP6: a00136's C per row 0.1880 and D per row 0.0832 are under WP5's per-row low ends; every song described and embedded; run goes on
+
+An exception, as 26eab85 reads it: C or D per row outside the range. Both are on the low side, so this is a fast shard. I post it
+because the term says "outside", with no side named. Figures from `shard_a00136.manifest.json`:
+
+| field | a00136 |
+|---|---|
+| songs, dropped | 4,606, 1 |
+| seconds_per_stage | A 1,491.0, B 1,030.9, C 866.0, D 383.3, E 3,172.6 |
+| C per row (over 4,607) | **0.1880** (range 0.1927 to 0.2760, 2.4% under) |
+| D per row (over 4,606 songs) | **0.0832** (range 0.0836 to 0.1661, 0.5% under) |
+| B per row | 0.2238, inside |
+| `stopped_by`, E | `error_share`, one pass, 3 in error (`get 400`), 0 of 12,639 calls at 502/503/504 |
+| wall | 3,223.6 |
+
+**The work was all done.**
+- C logged `C: 4607/4607 described` at 5.32 songs/s, against 5.06 on a00134 and 4.99 on a00135.
+- D logged `CLAP done: 4606 songs, 13818 windows`, three windows a song as on every shard.
+- The describe commit on the manifest is `e4c1b1bd`, the same as a00134 and a00135.
+- The one drop is a crest factor drop.
+
+So both stages ran a little quicker, with nothing skipped. I have changed nothing, and the run goes on: a00137 is in stage B.
+
+If a low-side C or D crossing with full counts should go in the daily line instead of a post, as B's did in bff86ef, that is
+yours to say.
+
+READY FOR REVIEW
+
 ### 2026-11-05 22:14 IST WP6: a00101's B per row 0.3673 is over WP5's per-row high end of 0.3516; absolute B 1,631.4 is inside; run goes on
 
 An exception, as amended in bff86ef: a per-row figure outside the per-row range. Figures from `shard_a00101.manifest.json`:
