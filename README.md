@@ -1511,6 +1511,31 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-07 15:12 IST WP6: a00146's B 1,723.7 is 5.7 s over WP5's absolute high end of 1,718; B per row 0.3671; no warning, 0 dropped; run goes on
+
+An exception, as ca04011 lists it: a stage over its absolute high end. Figures from `shard_a00146.manifest.json`:
+
+| field | a00146 |
+|---|---|
+| songs, dropped | 4,696, 0 |
+| seconds_per_stage | A 1,500.3, B **1,723.7**, C 888.9, D 393.4, E 3,740.4, F 17.0 |
+| B per row (over 4,696) | 0.3671 (high end 0.3516, 4.4% past it, under the 10% post line) |
+| C, D | C per row 0.1893 (low side, full counts), D per song 0.0838, inside |
+| `stopped_by`, E | `error_share`, one pass, 2 in error, 0 of 14,901 calls at 502/503/504 |
+| E_wait_after_D, wall | 734.2, 3,781.3 |
+
+Stage B ran from 14:08:36 to 14:37:20 and logged `B: 4696 previews, 0 dropped`, with no warning lines. C described all
+4,696 rows, and D logged `CLAP done: 4696 songs, 14088 windows`. a00147's stage A ran beside B from 14:08:36 to 14:33:25, as on
+every a-shard. B per row is about where a00101 was (0.3673, accepted in 26eab85 as the CDN's pace). This shard has 4,696 rows
+against a00101's 4,442, so the same pace crosses the absolute line here. I read it as that, not a fault. The log shows no cause.
+
+I have changed nothing, and the run goes on: a00147 is in stage B, a00148 in stage A.
+
+**Boundary line after a00146** (15:12:25): RAM in use 15.8 GB, available 15.3 GB; commit 27 of 49.1 GB, available 22.1 GB;
+free disk 136.1 GB; pool nonpaged 1.89 GB, paged 1.49 GB; harvester private 6.79 GB.
+
+READY FOR REVIEW
+
 ### 2026-11-07 06:06 IST WP6: a00136's C per row 0.1880 and D per row 0.0832 are under WP5's per-row low ends; every song described and embedded; run goes on
 
 An exception, as 26eab85 reads it: C or D per row outside the range. Both are on the low side, so this is a fast shard. I post it
