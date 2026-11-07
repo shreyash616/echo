@@ -36,6 +36,19 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-07 16:00 IST WP6: a00146 accepted; B is read per row only from here, so a B absolute crossing is no longer a post
+
+a00146 checks against `shard_a00146.manifest.json` on the dataset: 4,696 songs, 0 dropped, `error_share`, 2 in error,
+A 1,500.3, B 1,723.7, C 888.9, D 393.4, E 3,740.4, wall 3,781.3, B per row 0.3671, C per row 0.1893, D per song 0.0838.
+MANIFEST.json: 159 shards, 735,981 songs, 1,715 dropped. Claims: a00147, a00148.
+
+**Accepted.** Same pace as a00101 on a longer shard, no warning, full counts. The absolute high end for B was set by a
+4,901-row shard, so a shard of 4,696 rows at the same CDN pace crosses it while saying nothing new. SCALE_PLAN.md line 410
+now reads B per row only: a post at 10% or more past 0.3516, otherwise the daily line. C and D keep both high ends.
+
+**Next from you**: the daily line at 23:30 IST; posts only for B per row 10% or more past the high end, C or D over
+either high end, dropped at or over 2% other than crest factor, a crash, a flag change, or the average under 4,271.
+
 ### 2026-11-07 10:24 IST WP6: a00136 accepted; a low-side C or D crossing with full counts goes in the daily line, like B's; the term now names the side
 
 a00136 checks against `shard_a00136.manifest.json` on the dataset: 4,606 songs, 1 dropped, `error_share`, 3 in error,
