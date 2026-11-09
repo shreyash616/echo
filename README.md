@@ -1524,6 +1524,49 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-10 04:54 IST WP6: run done, 1,021,984 songs on 222 shards, every manifest on describe commit e4c1b1bd; gate met
+
+The a-run (`--next --shards 126`, commit 4eee3e2, lyrics on) logged `=== exit 0 after 432367 s` and `=== WP6 RUNS DONE 2026-11-10T04:49:13`. It started 2026-11-05 04:43:06 and ran a00084 to a00209, all 126 shards. Nothing was restarted, and no flag changed.
+
+**Gate (SCALE_PLAN line 397): manifest row sum at least 1,000,000; every shard manifest carries the WP0 describe commit.**
+
+The WP5 manifest command, run on the box at 04:51 IST:
+
+```
+py -3 -c "from huggingface_hub import hf_hub_download as d; import json; m=json.load(open(d('shreyash616/echo-ml-artifacts','catalog/v3/MANIFEST.json',repo_type='dataset'))); s=list(m['shards'].values()); print(len(s), m['songs'], sum(x['songs'] for x in s), sum(x['dropped'] for x in s))"
+222 1021984 1021984 2727
+```
+
+(The only other output was huggingface_hub's Windows symlink warning.)
+
+Every per-shard manifest on the dataset, read one by one (`catalog/v3/shard_*.manifest.json`):
+
+```
+a: 210 shards, a00000 to a00209, missing []
+b: 12 shards, b00000 to b00011, missing []
+all: 222 shards, 1,021,984 rows, 2,727 dropped
+wp6: 212 shards, 974,710 rows, 2,687 dropped
+a-run: 126 shards, 571,639 rows, 1,710 dropped
+b: 12 shards, 53,877 rows, 18 dropped
+describe_commit e4c1b1bd2b4dd35a21560de82d280a587461ce99: 222 shards
+```
+
+| check | required | result |
+|---|---|---|
+| manifest row sum | at least 1,000,000 | **1,021,984** (MANIFEST.json and the 222 shard manifests agree) |
+| describe commit | every shard manifest | **222 of 222** on `e4c1b1bd2b4dd35a21560de82d280a587461ce99` |
+| dropped | (reported) | 2,727, 0.27% of 1,024,711 |
+
+**After the run:** `ml/data/previews` is empty, `catalog/v3/claims/` has no files, no harvester process is left, and free disk is 135.2 GB. The last boundary (after a00209, 04:49:15): RAM in use 17.5 GB, available 14.2 GB; commit 29.9 of 49.1 GB, available 19.2 GB; pool nonpaged 2.09 GB, paged 1.28 GB; harvester private 6.81 GB; probes empty; process objects 398, live 323.
+
+**The a-run in figures:** 571,639 songs, 4,536.8 a shard, about 4,760 an hour over 120.1 hours. `lyrics.stopped_by` was `error_share` on all 126 shards, so the breaker never tripped. Of its 1,710 drops, 1,666 are crest factor (the line 401 case, keys in each `dropped.jsonl` for WP7). The rest are 23 at B (HTTP 403 or ReadTimeout on the preview) and 21 at C (`decode failed: ffmpeg returned no audio`), with none of a shard's drops reaching 2% except crest factor on a00100 (2.75%, posted), a00123 (2.37%), a00162 (2.58%) and a00171 (7.48%), the last three in the daily lines. B per row stayed at or under a00101's 0.3673.
+
+**Since the 11-09 daily line** (a00204 to a00209): 26,160 songs, 77 dropped (74 crest factor: a00206 6, a00207 53, a00208 2, a00209 13; and 3 at C on a00206, `decode failed`). C per row ran on the low side with full counts on all six (a00204 0.1822, a00205 0.1827, a00206 0.1824, a00207 0.1828, a00208 0.1826, a00209 0.1836). B per row 0.2222 to 0.2809. Probes were empty at all six boundaries, and process objects stayed at 394 to 399.
+
+**Still open, not part of this gate:** WP6b's lyric backfill over the shard error lists, and WP7's re-describe of the crest-factor drops. Both land before WP7's index build. I have started nothing. The box is idle until you say what runs next. With the run done, I'll stop the daily lines unless you want an 11-10 line too.
+
+READY FOR REVIEW
+
 ### 2026-11-07 15:12 IST WP6: a00146's B 1,723.7 is 5.7 s over WP5's absolute high end of 1,718; B per row 0.3671; no warning, 0 dropped; run goes on
 
 An exception, as ca04011 lists it: a stage over its absolute high end. Figures from `shard_a00146.manifest.json`:
