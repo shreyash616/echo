@@ -1604,6 +1604,47 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-10 12:18 IST WP7 step 1: box archived to archive/box-2026-11-10/, three zstd tarballs, every SHA256 read back from the dataset matches
+
+The box's own files are on the dataset as three tarballs, made with Windows' `tar.exe` (bsdtar 3.8.9, libzstd 1.5.7). Each was
+uploaded with `HfApi.upload_file`, downloaded back with `hf_hub_download(..., force_download=True)` into a fresh temporary
+folder, and hashed again. Output of the upload script, verbatim:
+
+```
+archive/box-2026-11-10/harvester_logs.tar.zst	9,598,331 bytes	local e6814c08562d8f9dca4aa065a097e658dca6ad2dfadce4c58b05af7734f5d748	read back e6814c08562d8f9dca4aa065a097e658dca6ad2dfadce4c58b05af7734f5d748	MATCH
+archive/box-2026-11-10/bollywood_discovery.tar.zst	205,639,621 bytes	local 217f4fa88818b172c56c84dc4a84ae2bd906eff663b7d6287fa76a3630dfd787	read back 217f4fa88818b172c56c84dc4a84ae2bd906eff663b7d6287fa76a3630dfd787	MATCH
+archive/box-2026-11-10/lyrics.tar.zst	130,158,963 bytes	local b60ccf6ee407e1054fe277139224fe936b977423753ee9ba22b166699fdf423d	read back b60ccf6ee407e1054fe277139224fe936b977423753ee9ba22b166699fdf423d	MATCH
+ALL MATCH
+```
+
+| tarball | holds | entries (`tar -tf`) against the folder |
+|---|---|---|
+| `lyrics.tar.zst` | `ml/data/lyrics/` (`rc.LYRICS_DIR`, `redescribe_catalog.py` :57), newest file 04:47 today | 278,448 files, 278,448 on disk; 416.4 MB raw |
+| `harvester_logs.tar.zst` | `ml/data/harvest_v3_work/`'s logs: the 19 run logs (`wp5_runs*.out`, `wp6_runs*.out`, `wp6in_b*.out`, `fixture*.run.out`, `wp6_fixture.out`); 448 per-shard `describe` and `clap` logs (a00000 to a00209, b00000 to b00011, the smoke and fixture shards) and the two `current.*.log`; `wp5_boundaries.*`, `wp6_boundaries.txt`, both boundary state files, `wp5_ram.csv`, `wp6_ram.csv`; `pytest_wp4.txt` to `pytest_wp5f.txt`; `fixture2.manifest.txt` | 486 files, 486 listed |
+| `bollywood_discovery.tar.zst` | `ml/data/bollywood_work/` from the WP6-IN worktree: `discover.log`, `discover2.log`, both MANIFESTs, both shard specs, `tracks.jsonl`, `tracks2.jsonl`, round 1's `_round1/` copy, and the response `cache/` (18,793 files, only 200s), without `_readback/` (14 read-back copies of files already on the dataset) | 18,809 files, 18,823 on disk less the 14 |
+
+**Not archived, and why:**
+- Shard folders, `keys.txt`, `MANIFEST.json`, the claim files, `_store/` and `_readback/` are copies of files already on the dataset. Each was read back by SHA256 when it was uploaded.
+- `rammap_hold_a00025.rmp` (431 MB) is a RAMMap snapshot from the 10-31 hold, not a log. It goes up if you want it.
+- `ml/data/itunes_cache.jsonl` dates from 10-27, from the v2 harvester, before WP0.
+- The Deezer discovery for the a-shards ran on the Space, so the box holds no log of it.
+- `SCALE_PROGRESS.md` has no lines kept outside git.
+
+**No key in any of it.** `backend/.env` is in none of the three, and no file name in any listing matches env, key, token, secret or
+credential. I also grepped the logs for key-like strings, printing file names only. The only hits were the
+`X-Amz-Security-Token` query parameter on HF's presigned upload URLs in seven fixture logs and two WP5 logs. Those are
+upload URLs with `X-Amz-Expires=900`, so 15 minutes, all from 10-31 to 11-04. The discovery cache's two hits on "bearer" are
+the song "Torchbearer".
+
+Nothing else has started.
+
+**Next, step 2 (build), box time:** code and tests first, a few hours: `--shards catalog/v3` in `build_index_v3.py`, the
+language fix, and `test_columnar_loader.py` on three v3 shards. Then the full build: about 1.9 GB of shards to download and
+1,021,984 rows through the v2 derive code. I expect that to take under an hour, and I'll time it on three shards and give a
+firmer figure in the step 2 post.
+
+READY FOR REVIEW
+
 ### 2026-11-10 04:54 IST WP6: run done, 1,021,984 songs on 222 shards, every manifest on describe commit e4c1b1bd; gate met
 
 The a-run (`--next --shards 126`, commit 4eee3e2, lyrics on) logged `=== exit 0 after 432367 s` and `=== WP6 RUNS DONE 2026-11-10T04:49:13`. It started 2026-11-05 04:43:06 and ran a00084 to a00209, all 126 shards. Nothing was restarted, and no flag changed.
