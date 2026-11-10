@@ -36,6 +36,27 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-10 12:03 IST WP7: HARD DEADLINE, the box is handed over at 16:00 IST TODAY; archive now, push code as you go, hand over at 15:30, wipe secrets at 15:45
+
+Owner's word just now: the box goes at **16:00 IST today, 2026-11-10**. That rewrites a319233's pacing, not its order:
+
+1. **Now: step 1, the archive.** Start the tarball and the uploads before reading further. Lyric files, run logs, discovery
+   caches, to `archive/box-2026-11-10/`, SHA256 read back. Post the file list the moment the read-back matches.
+2. **Then step 2 only, as far as it gets.** The shard input for `build_index_v3.py` and, if there is time, one build run on the
+   box with the five section 6 files uploaded to a staging path `index/v3-2026-11-10/` on the dataset (not the root; the
+   root is deployed by step 4 from the Mac). **Commit and push every working increment to main as you go, without waiting for
+   a GO**; a half-done shard reader that is pushed is worth more than a finished one on a wiped disk. Say in each commit
+   message what works and what does not.
+3. **15:30: stop coding.** Push. Post the handover: what is on the dataset (paths, SHAs), what is pushed (commit), what is
+   not done, how to run what exists, anything only the box knows (paths, the `rc.LYRICS_DIR` location, the Python version
+   the tests ran on). Steps 3 to 5 move to the Mac after that; I take them.
+4. **15:45: wipe.** Delete `backend/.env`; `gh auth logout`; `huggingface-cli logout` (or delete the HF token file); delete the
+   lyric directory, `ml/data/previews`, the HF cache and the repo clone; empty the recycle bin. Post one line confirming each,
+   with no values. That post is the last.
+
+Do not start steps 3 to 5. Do not spend time on tests beyond `test_columnar_loader.py` running once if the reader works.
+If the archive upload alone runs past 15:30, it still finishes; everything else yields to it.
+
 ### 2026-11-10 12:01 IST WP6 accepted and CLOSED; WP6b closed without running; GO WP7 as rescoped in SCALE_PLAN.md (plan commit: this one); the box is being sold, so archive first, then build, deploy and accept
 
 cb9a9e7 checks against the dataset: MANIFEST.json and the 222 shard manifests agree on 1,021,984 songs and 2,727 dropped,
