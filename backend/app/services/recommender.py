@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import gc
 import hashlib
 import json
 import logging
@@ -315,9 +316,7 @@ class MusicRecommender:
         self._dim: int = 512
 
         # Side index for dynamic cold seeds
-        self._side_index: faiss.IndexFlatIP | None = None
         self._extra_records: dict[str, dict] = {}
-        self._extra_records_path: Path = Path("ml/data/extra_records.jsonl")
         self._describe_locks: dict[str, asyncio.Lock] = {}
 
         # Feel matrix & index (S1)
@@ -402,26 +401,7 @@ class MusicRecommender:
             self._anchor_matrix = np.stack([self._anchors[k] for k in self._anchor_keys], axis=0)
             logger.info("Loaded %d anchor embeddings from %s", len(self._anchor_keys), anchors_path)
 
-        # 6. Side index
-        self._side_index = faiss.IndexFlatIP(self._dim)
-
-        # Load persistent extra records if present
-        if self._extra_records_path.exists():
-            try:
-                with open(self._extra_records_path, "r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        rec = json.loads(line)
-                        rid = str(rec.get("id", ""))
-                        if rid:
-                            self._extra_records[rid] = rec
-                            cvec = np.array([rec.get("clap_vector") or [0.0] * self._dim], dtype=np.float32)
-                            self._side_index.add(cvec)
-                logger.info("Loaded %d persistent extra records from %s", len(self._extra_records), self._extra_records_path)
-            except Exception as exc:
-                logger.warning("Error loading extra records: %s", exc)
+        # 6. (removed) the side index of on-the-fly records; recommendations come from the catalogue only
 
         # 7. CLAP model on CPU
         embedder_type = os.environ.get("EMBEDDER", "laion").lower()
@@ -505,6 +485,9 @@ class MusicRecommender:
                 )
             logger.info("Catalogue vectors passed mandatory assertions: mean_cos=%.4f, all norms > 0", mean_cat_cos)
 
+        # The loaded artifacts never die; freezing them keeps generation-2 collections off the request path (P9)
+        gc.collect()
+        gc.freeze()
         self._loaded = True
 
     def _load_columnar(self, directory: Path) -> None:
@@ -1120,31 +1103,18 @@ class MusicRecommender:
                 except Exception as exc:
                     logger.warning("Failed to describe cold seed preview: %s", exc)
 
-            # Store in extra_records and side_index
+            # Keep the described seed in memory so it resolves again; it is never a candidate
             if seed_id:
                 self._extra_records[seed_id] = seed_record
             if seed_key:
                 self._extra_records[seed_key] = seed_record
 
-            if self._side_index is not None and seed_record.get("clap_vector"):
-                cvec = np.array([seed_record["clap_vector"]], dtype=np.float32)
-                self._side_index.add(cvec)
-
-            # Persist to ml/data/extra_records.jsonl (Section 12.5)
-            try:
-                self._extra_records_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(self._extra_records_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(seed_record) + "\n")
-            except Exception as exc:
-                logger.warning("Could not persist extra record: %s", exc)
-
         seed_clap = self.get_clap_vector(seed_record)
         seed_clap_2d = seed_clap.reshape(1, -1)
 
-        # 2. Retrieve candidates: Union of CLAP (500) and Feel (600) + Side Index (S1)
+        # 2. Retrieve candidates: union of CLAP (500) and Feel (600), catalogue rows only
         clap_indices: set[int] = set()
         feel_indices: set[int] = set()
-        side_indices: set[int] = set()
 
         if self._index is not None and self._index.ntotal > 0:
             k_search = min(settings.candidates_clap, self._index.ntotal)
@@ -1161,13 +1131,6 @@ class MusicRecommender:
                 if idx >= 0:
                     feel_indices.add(int(idx))
 
-        if self._side_index is not None and self._side_index.ntotal > 0:
-            k_side = min(100, self._side_index.ntotal)
-            _, I_side = self._side_index.search(seed_clap_2d, k_side)
-            for s_idx in I_side[0]:
-                if s_idx >= 0:
-                    side_indices.add(int(s_idx))
-
         union_indices = clap_indices | feel_indices
         candidates_raw: list[dict] = []
         for idx in union_indices:
@@ -1176,13 +1139,6 @@ class MusicRecommender:
                 is_c = idx in clap_indices
                 is_f = idx in feel_indices
                 cand["pool_source"] = "both" if (is_c and is_f) else ("clap" if is_c else "feel")
-                candidates_raw.append(cand)
-
-        extra_list = list(self._extra_records.values())
-        for s_idx in side_indices:
-            if s_idx < len(extra_list):
-                cand = dict(extra_list[s_idx])
-                cand["pool_source"] = "clap"
                 candidates_raw.append(cand)
 
         # Filter out the seed and copies of it (_is_seed_copy)

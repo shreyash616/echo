@@ -624,19 +624,9 @@ async def _resolve_and_describe_track(track_id: str, key: str | None = None) -> 
         record["key"] = norm_key
         record["id"] = str(track.get("id", track_id))
 
-        # 4. Save to in-memory cache and persistent ml/data/extra_records.jsonl
+        # 4. Keep the described track in memory so it resolves again; it is never a candidate and nothing is persisted
         recommender._extra_records[str(track_id)] = record
         recommender._extra_records[norm_key] = record
-        if record.get("clap_vector") and recommender._side_index is not None:
-            cvec = np.array([record["clap_vector"]], dtype=np.float32)
-            recommender._side_index.add(cvec)
-
-        try:
-            recommender._extra_records_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(recommender._extra_records_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record) + "\n")
-        except Exception as exc:
-            logger.warning("Could not persist extra record: %s", exc)
 
         promise.set_result(record)
         return record
