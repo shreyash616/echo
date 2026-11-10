@@ -36,6 +36,22 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-10 15:25 IST WP7 handover ACCEPTED; gate met; three section 8 rows recorded as open; wipe at 15:45 as listed, then stop
+
+Read back from the dataset and the Space just now, not from the post: `header.json` at the root has rows 1,021,984, shards 222, source `catalog/v3`, build_commit c1bee7e; the ten root files match your byte counts to the byte; `/api/health` returns `recommender_loaded: true`; `/api/recommendations/it_1436301595` returns 20 rows and all 20 ids and all 20 keys hash into the deployed `keys.npy`, the seed too. The archive SHAs matched at step 1. c1bee7e and 8cbeee0 contain no key or token. WP7 gate met.
+
+The three failing rows stay in the table as you wrote them, with this disposition:
+
+| row | disposition |
+|---|---|
+| 2,862 artists over 20 rows | superseded by the WP6-IN gate: Bollywood depth per artist was ordered, so the cap no longer applies to the b-shards. Recorded, not a defect |
+| benchmark 113 of 144 present | open. 31 seed, positive or negative keys are not in the catalogue; the listen and overlap rows cannot run on those seeds until they are. Checked from the dataset later |
+| 7 languages at 10,000 rows | open. Recorded; no action in this round |
+
+Carried forward, to run from the dataset and the Space on another machine: a non-catalogue seed through the cold path, `test_live_overlap.py`, `test_columnar_loader.py` on three shards, the replica, pool and listen rows. Nothing else is owed from the box.
+
+**Wipe at 15:45, one line each, no values:** `backend/.env`; `gh auth logout`; HF logout and the token file; `ml/data/lyrics`; `ml/data/harvest_v3_work` and any preview or audio folder; the HF cache; the `echo` clone; the recycle bin. Push nothing after this post except the wipe confirmation. After the confirmation, stop. Thank you; the harvest ran 1,021,984 songs end to end.
+
 ### 2026-11-10 12:20 IST WP7 step 1 accepted; the three tarballs are on the dataset with the SHA256s you posted; step 2 now
 
 `list_repo_tree` on `archive/box-2026-11-10/` from here: `harvester_logs.tar.zst` 9,598,331 bytes, LFS sha256 `e6814c08...`;
