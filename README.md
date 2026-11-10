@@ -1614,6 +1614,86 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-10 15:21 IST WP7 handover: build of 1,021,984 rows deployed, Space answering from it, `recommender_loaded: true`; acceptance rows below, three fail and are reported
+
+**Step 2, build.** c1bee7e adds `build_index_v3.py --shards catalog/v3`. It reads every shard in MANIFEST.json in order: the
+runner's copy when its SHA256 matches the manifest, otherwise the dataset's. It checks each shard's rows against its CLAP
+rows and the manifest count, writes build_index_v2's two inputs to a scratch folder, and runs v2 unchanged. It keeps v2's
+rebuilt `anchors.json` and `theme_prompts.json` (8cbeee0). The language fix runs at read, as the plan states. The v2 fixture
+path is unchanged. The full run went from 14:50:44 to 14:56:59, 6 min 15 s, with a peak of 17.66 GB across the Python
+processes. `test_columnar_loader.py` was not run, for time.
+
+```
+build_index_v3: 1021984 rows, 66 fields -> ml\inference
+  numeric arrays 52, text columns 17, lookup keys 3065952
+  clap.f16 max abs error against the float32 rows: 1.271e-05
+```
+
+| file | bytes |
+|---|---|
+| clap.f16.npy | 1,046,511,744 |
+| features.npz | 475,235,732 |
+| strings.parquet | 181,713,325 |
+| feel_matrix.npy | 69,495,040 |
+| keys.npy / key_order.npy | 24,527,744 each |
+| header.json | 14,609 |
+
+`header.json`: rows 1,021,984, shards 222, source `catalog/v3`, build_commit c1bee7e. The language fix changed 1,162 rows,
+mostly to hi: tl to hi 399, nl to hi 271, id to hi 245, id to ja 65, and smaller counts to ko, ta, te, pa and ru. hi went
+from 56,955 to 57,888 rows.
+
+**Step 3** was taken from 8e2e109 as is.
+
+**Step 4, deploy.** `py -3 tests/deploy_hf.py` ran from 14:57:21 to 15:03:18. It uploaded the six columnar files plus
+`feel_matrix.npy`, `anchors.json`, `theme_prompts.json` and `rerank_weights.json` to the dataset root, uploaded the backend
+to the Space and restarted it. It skipped the missing v2 files (`music_index.faiss`, `feel_index.faiss`,
+`track_metadata.json`) and found no change in `track_id_map.json` or `catalog_features.jsonl`.
+
+The first startup failed. `startup.sh`'s `feel_matrix.npy` download got 12 attempts of "Response ... is missing the
+'X-Repo-Commit' header" between 15:05 and 15:11, and the Space went to RUNTIME_ERROR. From the box, a HEAD on the same URL
+returned 302 with `X-Repo-Commit: 05cc7d8d`, so I restarted the Space once at 15:12. It came up at 15:17:34 with "Anchor
+matrix passed mandatory assertions: max=0.8032, min=-0.0431" and "Catalogue vectors passed mandatory assertions:
+mean_cos=0.7655, all norms > 0". The API is under `/api`; the root serves the web app.
+
+```
+GET https://shreyash616-echo-backend.hf.space/api/health
+{"status":"ok","recommender_loaded":true}
+```
+
+- **In-catalogue request:** `GET /api/recommendations/it_1436301595` (Dayo Bello, "Sugar Pie") returned 20 results, all 20 ids in the build's `keys.npy`. The slate is wide: Korean, Hindi, German, jazz and Portuguese in the top 7. That's a quality question for the listen sheet; nothing failed.
+- **Catalogue-only check:** `radiohead:creep` turned out to be in the catalogue. Its 20 results were all catalogue ids.
+- **Non-catalogue seed: not shown.** `GET /api/recommendations/cold?key=taylor%20swift:anti-hero` returned 404 `{"detail": "Track cold not found"}` in 1.4 s. The cold path needs a real Deezer or iTunes id, and there was no time to find one.
+
+**Step 5, acceptance rows from the build files** (`strings.parquet`, `features.npz`, `header.json`):
+
+| row | required | result |
+|---|---|---|
+| rows in `header.json`, every row with a CLAP vector | at least 1,000,000 | 1,021,984; CLAP rows 1,021,984 |
+| distinct artists | at least 60,000; no artist above 20 rows | 227,856; **2,862 artists over 20 rows** (largest: lata mangeshkar 1,381, from WP6-IN's depth by design). FAIL as written |
+| benchmark share | all 149 present; under 0.1% of rows | **113 of 144** distinct seed, positive and negative keys present (my count gives 144, not 149); 0.011% of rows. FAIL on presence |
+| language | null at most 10%; none above 70%; at least 10 languages with 10,000 rows | null 9.49%; en 62.05%; **7 languages** at 10,000 or more. FAIL on the last |
+| `language_source = lyrics` (reported) | none | 255,681 rows; 96.22% of the 265,712 rows with lyrics |
+| felt tempo | over 150 at most 10%, under 60 at most 5% | 3.54%, 2.31% |
+| theme | largest non-null share at most 30% | celebration 18.16% of 220,739 |
+| Space health | `recommender_loaded: true`, answers within 10 s | true; requests answered in a few seconds |
+| `test_live_overlap.py` | passes | not run, for time |
+
+**On the dataset:** `archive/box-2026-11-10/` (three tarballs, SHA256s in bfe7d4a); the columnar build at the root;
+`catalog/v3/` unchanged.
+
+**Pushed:** c1bee7e and 8cbeee0 on main.
+
+**Not done:** a non-catalogue seed answered, `test_live_overlap.py`, `test_columnar_loader.py` on three shards, and the
+replica, pool and listen rows.
+
+**Only the box knew:** shards were read from `echo/ml/data/harvest_v3_work/<shard>/` by SHA256, and the dataset is the
+fallback. `rc.LYRICS_DIR` is `ml/data/lyrics` relative to the `echo` checkout (archived). Python 3.13.12 on Windows. The full
+build needs about 18 GB of RAM. To rebuild from any machine: `python ml/inference/build_index_v3.py --shards catalog/v3 --out ml/inference`.
+
+The wipe follows, owner's word ("wipe anything that is not necessary").
+
+READY FOR REVIEW
+
 ### 2026-11-10 12:18 IST WP7 step 1: box archived to archive/box-2026-11-10/, three zstd tarballs, every SHA256 read back from the dataset matches
 
 The box's own files are on the dataset as three tarballs, made with Windows' `tar.exe` (bsdtar 3.8.9, libzstd 1.5.7). Each was
