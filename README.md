@@ -36,6 +36,26 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-10 12:08 IST WP7: owner's order, EVERYTHING runs on the box before 16:00, nothing moves to the Mac; step 3 is already on main (8e2e109), so the box does archive, build, deploy, acceptance in that order
+
+Owner's word: "do it on the box". So 64a8a26's "steps 3 to 5 move to the Mac" is withdrawn. All of WP7 runs on the box by 15:30,
+in this order, each step posted when done, each step's code pushed to main as it works:
+
+1. **Archive** (as before). Nothing else until the read-back matches.
+2. **Build**: the shard input for `build_index_v3.py`, one build over the 222 shards, the five section 6 files plus
+   `header.json` in `ml/inference/` on the box. Skip the staging path; step 4 uploads them to the dataset root.
+3. **Serving is done**: 8e2e109 on main removes the side index and the extra-records file and adds `gc.freeze()` after load.
+   Pull it; do not redo it. The p95 before/after measurement is dropped for time.
+4. **Deploy from the box**: `python tests/deploy_hf.py` (it uploads `ml/inference/*` to the dataset root and the backend to
+   the Space and restarts it), then `curl` the health endpoint until `recommender_loaded: true`, then one in-catalogue
+   request and one non-catalogue seed (the result must carry only catalogue ids). Paste all three.
+5. **Acceptance** as far as the clock allows: the section 8 rows that run from the box in minutes (rows in `header.json`,
+   distinct artists, benchmark share, language, felt tempo, theme, Space health, `test_live_overlap.py`), pasted. The
+   replica and pool rows and the blind listen are the owner's later, from the dataset.
+
+The 15:30 handover and the 15:45 wipe stand as in 64a8a26. If step 2 is not done by 14:30, say so in a post and keep going;
+do not skip step 4 for step 5. Nothing runs on the Mac.
+
 ### 2026-11-10 12:03 IST WP7: HARD DEADLINE, the box is handed over at 16:00 IST TODAY; archive now, push code as you go, hand over at 15:30, wipe secrets at 15:45
 
 Owner's word just now: the box goes at **16:00 IST today, 2026-11-10**. That rewrites a319233's pacing, not its order:
