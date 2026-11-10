@@ -36,6 +36,45 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-10 12:01 IST WP6 accepted and CLOSED; WP6b closed without running; GO WP7 as rescoped in SCALE_PLAN.md (plan commit: this one); the box is being sold, so archive first, then build, deploy and accept
+
+cb9a9e7 checks against the dataset: MANIFEST.json and the 222 shard manifests agree on 1,021,984 songs and 2,727 dropped,
+every manifest on `e4c1b1bd`; `catalog/v3/` holds 1,114 files, 1.92 GB; no claims; no lyric file is on the dataset. **WP6 gate
+met, WP6 CLOSED.** No 11-10 daily line; the daily lines stop here.
+
+**Owner's decision (2026-11-10): the Windows box is being sold.** The catalogue stops at this milestone and ships. So:
+- **WP6b is closed without running.** Its romanised-lyric rule moves into WP7's build (step 2 below).
+- **GO WP7**, rescoped in SCALE_PLAN.md (the WP7 block, `Rescoped 2026-11-10`). Read it in full; the order matters.
+
+**Order on the box, one post per step, READY FOR REVIEW after each:**
+1. **Archive first, before anything else.** The box is the only copy of the lyric files and the run logs. Upload to the dataset
+   under `archive/box-2026-11-10/`: the lyric files directory as one zstd tarball, every harvester log (`wp6_runs_*.out`,
+   `wp6in_b*.out`, `wp6_boundaries.txt`, discovery logs and caches). Post each file's size and its SHA256 read back from the
+   dataset. Never `backend/.env` or any key. Nothing else starts until the read-back matches.
+2. **Build.** `build_index_v3.py` today reads build_index_v2's `catalog_features.jsonl` and checks it against the served
+   `track_metadata.json` (`build_index_v3.py` :110-115); it has no shard input. Add `--shards catalog/v3`: every shard in
+   MANIFEST.json in order, `features.jsonl.gz` plus `clap.f16.npy`, streamed into preallocated arrays, through the same
+   derive, standardise and column code the v2 path uses, header stats over the million rows. The v2 path stays for the
+   fixture. Language fix at build as the plan states: `language_source == "lyrics"` and `language` in `LATIN_LYRIC_LANGS`
+   (`features.py` :732), recompute `language_from_meta(row)` without the lyric, take the vote if it is hi, pa, ta, te, ko,
+   ja, ar or ru; count and distributions in `header.json`. `tests/feel_benchmark_v2.json` never enters the container.
+   `test_columnar_loader.py` on three v3 shards. Post the header counts, the file sizes, the build time and RAM high-water mark.
+3. **Serving.** Remove the side index as the 2026-11-02 amendment says (`recommender.py` :318-320, :406-409;
+   `routes.py` :627-636); `gc.freeze()` after load with p95 and max over 100 calls before and after; the section 6 loader;
+   startup inside the health timeout with the section 7 assertions.
+4. **Deploy.** `tests/deploy_hf.py` to the dataset root and the Space, restart, `recommender_loaded: true`, one in-catalogue
+   request answered. Post the health JSON and the request.
+5. **Acceptance.** Section 8's table with every command pasted; the two lyric rows are reported, not gated (WP6b did not run
+   and a00010 to a00083 ran without lyrics); the blind listen sheet comes to me for the owner.
+
+**Dropped**: the crest-factor re-fetch (2,700 rows, 0.27%; keys stay in `dropped.jsonl`), the second decode per song, the
+requests shard. Do not start them.
+
+**If the box goes before step 5**: steps 2 to 5 run from the dataset alone, so only step 1 is lost if skipped; that is why it
+is first. Say in each post how much box time you expect the next step to take.
+
+GO WP7
+
 ### 2026-11-07 16:00 IST WP6: a00146 accepted; B is read per row only from here, so a B absolute crossing is no longer a post
 
 a00146 checks against `shard_a00146.manifest.json` on the dataset: 4,696 songs, 0 dropped, `error_share`, 2 in error,
