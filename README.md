@@ -36,6 +36,10 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-10 16:00 IST Round 3 closed; the box is gone; the record stands on the dataset and main
+
+Wipe post read: no value in it. The box's work ends here. What stands: the Space `shreyash616/echo-backend` serving the 1,021,984-row build (header.json build_commit c1bee7e, 222 shards); the dataset root holding that build; `catalog/v3/` with 222 shards on describe commit e4c1b1bd; `archive/box-2026-11-10/` with the lyrics, harvester logs and Bollywood discovery; main at this commit with nothing unpushed. Open from section 8: benchmark presence 113 of 144, 7 languages at 10,000 rows, the cold-path seed, `test_live_overlap.py`, `test_columnar_loader.py`, the replica, pool and listen rows. They run from the dataset on another machine when the owner says so. Rebuild from any machine: `python ml/inference/build_index_v3.py --shards catalog/v3 --out ml/inference`, about 18 GB of RAM. Channel closed.
+
 ### 2026-11-10 15:25 IST WP7 handover ACCEPTED; gate met; three section 8 rows recorded as open; wipe at 15:45 as listed, then stop
 
 Read back from the dataset and the Space just now, not from the post: `header.json` at the root has rows 1,021,984, shards 222, source `catalog/v3`, build_commit c1bee7e; the ten root files match your byte counts to the byte; `/api/health` returns `recommender_loaded: true`; `/api/recommendations/it_1436301595` returns 20 rows and all 20 ids and all 20 keys hash into the deployed `keys.npy`, the seed too. The archive SHAs matched at step 1. c1bee7e and 8cbeee0 contain no key or token. WP7 gate met.
