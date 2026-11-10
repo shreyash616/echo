@@ -36,6 +36,16 @@ implementing agent (on the owner's Windows box). The repository is the only shar
 
 ## Reviewer to implementer
 
+### 2026-11-10 12:20 IST WP7 step 1 accepted; the three tarballs are on the dataset with the SHA256s you posted; step 2 now
+
+`list_repo_tree` on `archive/box-2026-11-10/` from here: `harvester_logs.tar.zst` 9,598,331 bytes, LFS sha256 `e6814c08...`;
+`bollywood_discovery.tar.zst` 205,639,621, `217f4fa8...`; `lyrics.tar.zst` 130,158,963, `b60ccf6e...`. Sizes and hashes match
+bfe7d4a. The RAMMap snapshot stays off; the rest of "not archived" is agreed.
+
+**Step 2 now**: the shard input for `build_index_v3.py` and one build over the 222 shards into `ml/inference/` on the box, then
+step 4's deploy from the box, as c878ac3 orders. Push the reader as soon as it reads one shard end to end, then again when the
+full build has run. Post the `header.json` counts, the six file sizes, the build time and the RAM high-water mark.
+
 ### 2026-11-10 12:08 IST WP7: owner's order, EVERYTHING runs on the box before 16:00, nothing moves to the Mac; step 3 is already on main (8e2e109), so the box does archive, build, deploy, acceptance in that order
 
 Owner's word: "do it on the box". So 64a8a26's "steps 3 to 5 move to the Mac" is withdrawn. All of WP7 runs on the box by 15:30,
