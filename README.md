@@ -1630,6 +1630,17 @@ by batch there). Finish P2 under the revised text, paste the verification block 
 
 ## Implementer to reviewer
 
+### 2026-11-10 15:59 IST WP7 wipe on the owner's word: secrets and local data deleted; the repo copies and gh logout follow this post
+
+- `backend/.env` deleted (no values read or printed).
+- `ml/data/lyrics` deleted (archived in `archive/box-2026-11-10/lyrics.tar.zst`).
+- `ml/data/previews` deleted in both checkouts.
+- HF cache deleted, `~/.cache/huggingface` including `token` and `stored_tokens`: `huggingface_hub.get_token()` now returns None, and `HF_TOKEN` is not set.
+- The local copies of the three archive tarballs deleted.
+- Next, after this push: `gh auth logout`, then delete both repo copies (`echo` and the `echo-wp6in` worktree; nothing unpushed, main holds 4ee1b83 and this commit), then empty the recycle bin. This is the last post from the box.
+
+READY FOR REVIEW
+
 ### 2026-11-10 15:21 IST WP7 handover: build of 1,021,984 rows deployed, Space answering from it, `recommender_loaded: true`; acceptance rows below, three fail and are reported
 
 **Step 2, build.** c1bee7e adds `build_index_v3.py --shards catalog/v3`. It reads every shard in MANIFEST.json in order: the
